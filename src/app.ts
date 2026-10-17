@@ -32,7 +32,7 @@ export interface AppOptions { extractor?:OfferExtractor; providers?:ProviderServ
 export function createApp(db: Database,config: Config,options: AppOptions={}) {
   const app=express(), providers=options.providers??new ProviderService();
   const google=new OAuth2Client(config.GOOGLE_CLIENT_ID);
-  app.disable('x-powered-by'); app.set('trust proxy','loopback');
+  app.disable('x-powered-by'); app.set('trust proxy',(config.TRUST_PROXY||'loopback').split(','));
   app.use(helmet(),express.json({limit:'64kb'}),cookieParser());
   app.use('/api',rateLimit({windowMs:60000,limit:300,standardHeaders:'draft-8',legacyHeaders:false,skip:()=>config.NODE_ENV==='test',message:{error:'Muitos acessos. Aguarde um minuto.'}}));
   app.get('/api/health',async(_req,res)=>{await db.query('SELECT 1');res.json({status:'ok'});});

@@ -17,7 +17,8 @@
     "db:config": "docker compose --env-file .env.example config --quiet",
     "test": "npm run build && node --test test/*.test.mjs",
     "worker": "tsx src/worker.ts",
-    "setup:env": "node scripts/setup-env.mjs"
+    "setup:env": "node scripts/setup-env.mjs",
+    "test:coverage": "npm run build && c8 node --test --test-concurrency=2 test/*.test.mjs"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",
@@ -39,6 +40,7 @@
     "@types/pg": "^8.15.5",
     "@types/supertest": "^6.0.3",
     "@types/swagger-ui-express": "^4.1.8",
+    "c8": "12.0.0",
     "esbuild": "0.25.12",
     "supertest": "^7.1.4",
     "tsx": "^4.20.6",

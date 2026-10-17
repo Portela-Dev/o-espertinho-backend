@@ -11,3 +11,7 @@ test-results/
 playwright-report/
 *.pem
 *.key
+
+reports/
+.ci-backend/
+.scannerwork/
