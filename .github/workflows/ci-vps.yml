@@ -23,35 +23,26 @@ defaults:
 
 jobs:
   validate:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: 1. Validar, testar e gerar cobertura
-    runs-on: [self-hosted, Windows, X64, windows-portela-dev]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Obter código
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Preparar Git Bash e Docker no Windows
-        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File {0}
-        run: ./scripts/ci/prepare-windows.ps1
       - name: Preparar Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           cache: npm
-      - name: Conferir Docker com containers Linux
-        run: |
-          test "$(docker info --format '{{.OSType}}')" = linux || { echo "O runner precisa de acesso ao Docker com containers Linux." >&2; exit 1; }
       - name: Instalar dependências
         run: npm ci --no-audit --no-fund
       - name: Validar TypeScript e scripts de deploy
         run: |
           npm run typecheck
           for file in scripts/ci/*.sh; do bash -n "$file"; done
-          mount_path="$(pwd)"
-          if command -v cygpath >/dev/null 2>&1; then mount_path=$(cygpath -m "$mount_path"); fi
-          MSYS_NO_PATHCONV=1 docker run --rm --mount "type=bind,source=$mount_path,target=/src,readonly" --workdir /src koalaman/shellcheck:stable -S warning scripts/ci/*.sh
+          shellcheck -S warning scripts/ci/*.sh
 
       - name: Testar com cobertura real
         run: npm run test:coverage
@@ -127,26 +118,19 @@ jobs:
             -Dsonar.qualitygate.timeout=300
 
   image:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: 3. Compilar e validar imagem Docker
     needs: validate
-    runs-on: [self-hosted, Windows, X64, windows-portela-dev]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Obter código
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Preparar Git Bash e Docker no Windows
-        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File {0}
-        run: ./scripts/ci/prepare-windows.ps1
       - name: Preparar Node.js para o manifesto
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-      - name: Conferir Docker com containers Linux
-        run: |
-          test "$(docker info --format '{{.OSType}}')" = linux || { echo "O runner precisa de acesso ao Docker com containers Linux." >&2; exit 1; }
       - name: Compilar, testar e empacotar
         run: bash scripts/ci/package-image.sh
       - name: Publicar imagem e manifesto com SHA-256
@@ -163,7 +147,7 @@ jobs:
     name: 4. Deploy independente por SSH
     needs: [validate, sonarqube, image]
     if: github.ref == 'refs/heads/develop' && ((github.event_name == 'push' && vars.VPS_AUTO_DEPLOY == 'true') || (github.event_name == 'workflow_dispatch' && inputs.deploy))
-    runs-on: [self-hosted, Windows, X64, windows-portela-dev]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production
     concurrency:
@@ -174,9 +158,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Preparar Git Bash e Docker no Windows
-        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File {0}
-        run: ./scripts/ci/prepare-windows.ps1
       - name: Baixar imagem validada
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:

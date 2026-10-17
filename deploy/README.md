@@ -4,7 +4,7 @@ O workflow `.github/workflows/ci-vps.yml` adapta as etapas do Quest Crush: valid
 
 ## Execuções
 
-- PRs para `develop` ou `main`: validação, testes e construção/smoke test da imagem, sem secrets de deploy; somente PRs com branch de origem no próprio repositório executam no runner próprio. Arquivos grandes de imagem não são publicados em PRs.
+- PRs para `develop` ou `main`: validação, testes e construção/smoke test da imagem, sem secrets de deploy e sem executar código de PR no runner próprio. Arquivos grandes de imagem não são publicados em PRs.
 - Push na `develop`: mesmas verificações e análise no SonarQube. O deploy automático vem desativado.
 - Push na `main`: validação e imagem. Não analisa outra branch no mesmo projeto Community e não implanta.
 - Actions → CI e deploy VPS → Run workflow → branch `develop` → marcar `deploy`: deploy manual, condicionado a todas as validações e ao Quality Gate.
@@ -12,7 +12,7 @@ O workflow `.github/workflows/ci-vps.yml` adapta as etapas do Quest Crush: valid
 
 O botão **Run workflow** da interface exige que este workflow também exista na branch padrão do GitHub (atualmente main). Após aprovar estas PRs na develop, promova o workflow à main pelo fluxo de revisão normal, ou selecione develop como branch padrão nas configurações. Não alteramos a main nem a branch padrão automaticamente. Depois de o workflow ter sido registrado por uma execução, também é possível dispará-lo pela CLI: `gh workflow run ci-vps.yml --repo Portela-Dev/o-espertinho-backend --ref develop -f deploy=true`. Referência: [execuções manuais](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch).
 
-Cada repositório implanta somente seu serviço. Há exclusão mútua no GitHub e na VPS; um deploy em andamento não é cancelado por outro. O CI constrói uma imagem Linux usando Docker no runner Windows e usa a mesma imagem no smoke test e na VPS, sem recompilar remotamente. O pacote contém tag do commit, manifesto e hashes SHA-256. A transferência SSH valida a chave do host, sem `StrictHostKeyChecking=no` nem descoberta automática de host confiável. Não é preciso registry ou PAT do Docker/GitHub Packages.
+Cada repositório implanta somente seu serviço. Há exclusão mútua no GitHub e na VPS; um deploy em andamento não é cancelado por outro. O CI constrói uma imagem Linux no runner ubuntu-latest do GitHub e usa a mesma imagem no smoke test e na VPS, sem recompilar remotamente. O pacote contém tag do commit, manifesto e hashes SHA-256. A transferência SSH valida a chave do host, sem `StrictHostKeyChecking=no` nem descoberta automática de host confiável. Não é preciso registry ou PAT do Docker/GitHub Packages.
 
 ## GitHub: configurações em cada repositório
 
@@ -40,11 +40,9 @@ Configure regras de aprovação e restrição à branch `develop` no environment
 
 Crie o projeto com a chave **o-espertinho-backend** e nome **O Espertinho - Backend**. Use `develop` como branch principal do projeto no SonarQube. A configuração não envia parâmetros de análise de PR ou múltiplas branches, seguindo a restrição da edição Community. O Quality Gate não é ignorado nem tem sua política alterada pelo pipeline.
 
-Todos os jobs usam o runner compartilhado da organização `Portela-Dev`, selecionado pelos labels `[self-hosted, Windows, X64, windows-portela-dev]`. O runner precisa de Git for Windows (Bash, OpenSSH, GPG e dirmngr), Node.js via setup-node e Docker Desktop em modo containers Linux, acessível pela conta que executa o runner. ShellCheck roda em container, e Playwright instala seu Chromium no Windows. Mantenha o runner atualizado para as actions com runtime Node 24.
+Validação, testes, build Docker e deploy por SSH executam em runners hospedados pelo GitHub (`ubuntu-latest`). Apenas o job de SonarQube usa o runner da organização `Portela-Dev`, com os labels `[self-hosted, Windows, X64, windows-portela-dev]`. Esse runner precisa de Git for Windows com GPG e dirmngr, acesso ao servidor SonarQube e versão atualizada para as actions com runtime Node 24. Ele não precisa de Docker. ShellCheck e Playwright/Chromium executam no Linux hospedado pelo GitHub.
 
-O executável `docker.exe` deve estar no `PATH` da conta que executa o runner. Após instalar o Docker ou alterar o `PATH`, reinicie o processo/serviço do runner; um terminal novo e um serviço já iniciado podem ter ambientes diferentes. O workflow não cadastra caminhos específicos da máquina nem altera as variáveis do Windows.
-
-Em **Organization Settings > Actions > Runner groups**, libere estes três repositórios no grupo do runner e habilite o acesso a repositórios públicos. PRs de forks não executam os jobs; branches de colaboradores do próprio repositório são consideradas confiáveis. A análise Sonar só ocorre na develop em push ou execução manual. `SONAR_HOST_URL` deve ser alcançável pela conta do runner; loopback só funciona quando o Sonar está no mesmo computador.
+Em **Organization Settings > Actions > Runner groups**, libere estes três repositórios no grupo do runner e habilite o acesso a repositórios públicos. PRs executam validações nos runners hospedados do GitHub. A análise Sonar no runner próprio só ocorre na develop em push ou execução manual. `SONAR_HOST_URL` deve ser alcançável pela conta do runner; loopback só funciona quando o Sonar está no mesmo computador.
 
 O relatório LCOV vem dos testes reais do mesmo commit, via artefato do job validate, com sourcemaps para o TypeScript. Testes E2E não são contabilizados como cobertura unitária. Especialmente no frontend, a cobertura unitária ainda é inicial e o Quality Gate poderá exigir novos testes; o workflow preserva essa avaliação.
 
