@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Configure POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?Configure POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [database]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  backend:
+    image: ${APP_IMAGE:?Use a imagem validada pelo CI}
+    init: true
+    restart: unless-stopped
+    env_file: ${VPS_ENV_FILE:?Caminho absoluto do .env na VPS}
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      TRUST_PROXY: loopback,uniquelocal
+      PORT: '3000'
+    networks:
+      database: {}
+      internal:
+        aliases: [espertinho-backend]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 150s
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+networks:
+  database:
+    internal: true
+  internal:
+    external: true
+    name: espertinho-internal
+volumes:
+  postgres-data:
+    name: o-espertinho-postgres-data

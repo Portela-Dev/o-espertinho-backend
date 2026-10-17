@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+image="${1:?}"
+name="ci-backend-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
+cleanup(){
+ docker rm -f "$name" >/dev/null 2>&1 || true
+ docker rm -f "$name-db" >/dev/null 2>&1 || true
+ docker network rm "$name-net" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+docker network create "$name-net" >/dev/null
+docker run -d --name "$name-db" --network "$name-net" -e POSTGRES_USER=test -e POSTGRES_PASSWORD=ci-only-password -e POSTGRES_DB=test postgres:17-alpine >/dev/null
+for _attempt in $(seq 1 60); do
+ if docker exec "$name-db" pg_isready -U test -d test >/dev/null 2>&1; then break; fi
+ sleep 1
+done
+settings=(--network "$name-net" -e "DATABASE_URL=postgresql://test:ci-only-password@$name-db:5432/test" -e APP_ORIGIN=https://ci.example.com -e ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= -e RUN_WORKER=false)
+docker run --rm "${settings[@]}" "$image" node dist/migrate.js
+docker run -d --name "$name" "${settings[@]}" "$image" >/dev/null
+for _attempt in $(seq 1 90); do
+ if docker exec "$name" node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))" >/dev/null 2>&1; then
+   echo 'Imagem iniciou e respondeu ao healthcheck.'
+   :
+   exit 0
+ fi
+ if [[ $(docker inspect --format '{{.State.Running}}' "$name") != true ]]; then break; fi
+ sleep 2
+done
+docker logs "$name"
+echo 'A imagem não passou no smoke test.' >&2
+exit 1

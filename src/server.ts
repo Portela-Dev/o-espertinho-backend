@@ -6,7 +6,7 @@ import { startWorker } from './worker-runtime.js';
 const config=loadConfig(),db=createDatabase(config.DATABASE_URL),providers=new ProviderService();
 await db.query('SELECT 1 FROM users LIMIT 1');
 const app=createApp(db,config,{providers});
-const server=app.listen(config.PORT,'127.0.0.1',()=>console.log(`API: http://localhost:${config.PORT}/api`));
+const server=app.listen(config.PORT,config.HOST,()=>console.log(`API: http://${config.HOST}:${config.PORT}/api`));
 const stopWorker=config.RUN_WORKER==='true'?startWorker(db,config,providers):async()=>{};
 let stopping=false;
 for(const signal of ['SIGINT','SIGTERM'] as const) process.on(signal,()=>{if(stopping)return;stopping=true;server.close(async()=>{await stopWorker();await db.end();process.exit(0);});});
