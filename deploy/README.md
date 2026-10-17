@@ -4,11 +4,13 @@ O workflow `.github/workflows/ci-vps.yml` adapta as etapas do Quest Crush: valid
 
 ## Execuções
 
-- PRs para `develop` ou `main`: validação, testes e construção/smoke test da imagem, sem secrets de deploy e sem executar código de PR em runner próprio.
+- PRs para `develop` ou `main`: validação, testes e construção/smoke test da imagem, sem secrets de deploy e sem executar código de PR em runner próprio. Arquivos grandes de imagem não são publicados em PRs.
 - Push na `develop`: mesmas verificações e análise no SonarQube. O deploy automático vem desativado.
 - Push na `main`: validação e imagem. Não analisa outra branch no mesmo projeto Community e não implanta.
 - Actions → CI e deploy VPS → Run workflow → branch `develop` → marcar `deploy`: deploy manual, condicionado a todas as validações e ao Quality Gate.
 - Para habilitar deploy em cada push na `develop`, configure a variable de repositório `VPS_AUTO_DEPLOY=true`. Não é necessário para deploy manual.
+
+O botão **Run workflow** da interface exige que este workflow também exista na branch padrão do GitHub (atualmente main). Após aprovar estas PRs na develop, promova o workflow à main pelo fluxo de revisão normal, ou selecione develop como branch padrão nas configurações. Não alteramos a main nem a branch padrão automaticamente. Depois de o workflow ter sido registrado por uma execução, também é possível dispará-lo pela CLI: `gh workflow run ci-vps.yml --repo arnaldoportela/o-espertinho-backend --ref develop -f deploy=true`. Referência: [execuções manuais](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch).
 
 Cada repositório implanta somente seu serviço. Há exclusão mútua no GitHub e na VPS; um deploy em andamento não é cancelado por outro. O CI constrói a imagem em Linux e usa a mesma imagem no smoke test e na VPS, sem recompilar remotamente. O pacote contém tag do commit, manifesto e hashes SHA-256. A transferência SSH valida a chave do host, sem `StrictHostKeyChecking=no` nem descoberta automática de host confiável. Não é preciso registry ou PAT do Docker/GitHub Packages.
 
