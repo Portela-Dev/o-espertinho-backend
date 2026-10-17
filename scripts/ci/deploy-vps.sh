@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# Git Bash receives Windows paths from the Actions runner.
+if command -v cygpath >/dev/null 2>&1; then
+  RUNNER_TEMP=$(cygpath -u "${RUNNER_TEMP:?}")
+  if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then GITHUB_STEP_SUMMARY=$(cygpath -u "$GITHUB_STEP_SUMMARY"); fi
+fi
 service="backend"
 for key in VPS_HOST VPS_USER VPS_SSH_PRIVATE_KEY VPS_KNOWN_HOSTS; do
   [[ -n ${!key:-} ]] || { echo "Configure $key no environment production." >&2; exit 1; }

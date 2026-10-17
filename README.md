@@ -2,7 +2,7 @@
 
 Node.js + TypeScript + Express, PostgreSQL, migrations SQL versionadas e worker de ofertas.
 
-Este Ã© o repositÃ³rio `o-espertinho-backend`. Projetos relacionados: [frontend](https://github.com/arnaldoportela/o-espertinho-frontend) e [extrator](https://github.com/arnaldoportela/o-espertinho-jobs).
+Este Ã© o repositÃ³rio `o-espertinho-backend`. Projetos relacionados: [frontend](https://github.com/Portela-Dev/o-espertinho-frontend) e [extrator](https://github.com/Portela-Dev/o-espertinho-jobs).
 
 ## Primeiro uso
 

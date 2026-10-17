@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# Git Bash receives Windows paths from the Actions runner.
+if command -v cygpath >/dev/null 2>&1; then
+  RUNNER_TEMP=$(cygpath -u "${RUNNER_TEMP:?}")
+  if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then GITHUB_STEP_SUMMARY=$(cygpath -u "$GITHUB_STEP_SUMMARY"); fi
+fi
 service="backend"
 [[ ${GITHUB_SHA:-} =~ ^[a-f0-9]{40}$ ]] || { echo 'GITHUB_SHA inválido.' >&2; exit 1; }
 image="o-espertinho-${service}:${GITHUB_SHA}"

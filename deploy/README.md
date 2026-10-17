@@ -4,15 +4,15 @@ O workflow `.github/workflows/ci-vps.yml` adapta as etapas do Quest Crush: valid
 
 ## Execuções
 
-- PRs para `develop` ou `main`: validação, testes e construção/smoke test da imagem, sem secrets de deploy e sem executar código de PR em runner próprio. Arquivos grandes de imagem não são publicados em PRs.
+- PRs para `develop` ou `main`: validação, testes e construção/smoke test da imagem, sem secrets de deploy; somente PRs com branch de origem no próprio repositório executam no runner próprio. Arquivos grandes de imagem não são publicados em PRs.
 - Push na `develop`: mesmas verificações e análise no SonarQube. O deploy automático vem desativado.
 - Push na `main`: validação e imagem. Não analisa outra branch no mesmo projeto Community e não implanta.
 - Actions → CI e deploy VPS → Run workflow → branch `develop` → marcar `deploy`: deploy manual, condicionado a todas as validações e ao Quality Gate.
 - Para habilitar deploy em cada push na `develop`, configure a variable de repositório `VPS_AUTO_DEPLOY=true`. Não é necessário para deploy manual.
 
-O botão **Run workflow** da interface exige que este workflow também exista na branch padrão do GitHub (atualmente main). Após aprovar estas PRs na develop, promova o workflow à main pelo fluxo de revisão normal, ou selecione develop como branch padrão nas configurações. Não alteramos a main nem a branch padrão automaticamente. Depois de o workflow ter sido registrado por uma execução, também é possível dispará-lo pela CLI: `gh workflow run ci-vps.yml --repo arnaldoportela/o-espertinho-backend --ref develop -f deploy=true`. Referência: [execuções manuais](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch).
+O botão **Run workflow** da interface exige que este workflow também exista na branch padrão do GitHub (atualmente main). Após aprovar estas PRs na develop, promova o workflow à main pelo fluxo de revisão normal, ou selecione develop como branch padrão nas configurações. Não alteramos a main nem a branch padrão automaticamente. Depois de o workflow ter sido registrado por uma execução, também é possível dispará-lo pela CLI: `gh workflow run ci-vps.yml --repo Portela-Dev/o-espertinho-backend --ref develop -f deploy=true`. Referência: [execuções manuais](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch).
 
-Cada repositório implanta somente seu serviço. Há exclusão mútua no GitHub e na VPS; um deploy em andamento não é cancelado por outro. O CI constrói a imagem em Linux e usa a mesma imagem no smoke test e na VPS, sem recompilar remotamente. O pacote contém tag do commit, manifesto e hashes SHA-256. A transferência SSH valida a chave do host, sem `StrictHostKeyChecking=no` nem descoberta automática de host confiável. Não é preciso registry ou PAT do Docker/GitHub Packages.
+Cada repositório implanta somente seu serviço. Há exclusão mútua no GitHub e na VPS; um deploy em andamento não é cancelado por outro. O CI constrói uma imagem Linux usando Docker no runner Windows e usa a mesma imagem no smoke test e na VPS, sem recompilar remotamente. O pacote contém tag do commit, manifesto e hashes SHA-256. A transferência SSH valida a chave do host, sem `StrictHostKeyChecking=no` nem descoberta automática de host confiável. Não é preciso registry ou PAT do Docker/GitHub Packages.
 
 ## GitHub: configurações em cada repositório
 
@@ -22,7 +22,6 @@ Em Settings → Secrets and variables → Actions:
 |---|---|---|
 | Repository secret | `SONAR_TOKEN` | Token de análise do projeto correspondente, com permissão Execute Analysis |
 | Repository variable | `SONAR_HOST_URL` | URL alcançável a partir do runner de análise; exemplo `http://127.0.0.1:9000` apenas quando SonarQube está no mesmo PC |
-| Repository variable opcional | `SONAR_RUNNER_LABELS` | JSON; padrão `["self-hosted","Windows","X64","android-build"]`, compatível com o modelo Quest Crush |
 | Repository variable opcional | `VPS_AUTO_DEPLOY` | `true` habilita deploy após push validado na develop; ausente/false mantém manual |
 
 Em Settings → Environments, crie **production** e cadastre:
@@ -41,9 +40,9 @@ Configure regras de aprovação e restrição à branch `develop` no environment
 
 Crie o projeto com a chave **o-espertinho-backend** e nome **O Espertinho - Backend**. Use `develop` como branch principal do projeto no SonarQube. A configuração não envia parâmetros de análise de PR ou múltiplas branches, seguindo a restrição da edição Community. O Quality Gate não é ignorado nem tem sua política alterada pelo pipeline.
 
-O runner de análise usa Windows/PowerShell, como o Quest Crush, com Git e utilitários GPG disponíveis. Mantenha o serviço do runner atualizado para suportar as actions fixadas por SHA (runtime Node 24). Ele precisa estar autorizado a **este repositório pessoal**: um runner registrado apenas na organização Quantaverso ou no Quest Crush não aparece automaticamente aqui. Registre um runner de repositório para cada projeto pessoal (podem ser serviços separados no mesmo PC), ou use uma organização com runners compartilhados e ajuste os labels. Não habilite execução de PRs de terceiros nesses runners.
+Todos os jobs usam o runner compartilhado da organização `Portela-Dev`, selecionado pelos labels `[self-hosted, Windows, X64, windows-portela-dev]`. O runner precisa de Git for Windows (Bash, OpenSSH, GPG e dirmngr), Node.js via setup-node e Docker Desktop em modo containers Linux, acessível pela conta que executa o runner. ShellCheck roda em container, e Playwright instala seu Chromium no Windows. Mantenha o runner atualizado para as actions com runtime Node 24.
 
-Se o SonarQube for acessível pela internet, `SONAR_RUNNER_LABELS` também pode ser `"windows-latest"` (string JSON, incluindo aspas) para usar runner hospedado. A URL de loopback não funciona nesse caso.
+Em **Organization Settings > Actions > Runner groups**, libere estes três repositórios no grupo do runner e habilite o acesso a repositórios públicos. PRs de forks não executam os jobs; branches de colaboradores do próprio repositório são consideradas confiáveis. A análise Sonar só ocorre na develop em push ou execução manual. `SONAR_HOST_URL` deve ser alcançável pela conta do runner; loopback só funciona quando o Sonar está no mesmo computador.
 
 O relatório LCOV vem dos testes reais do mesmo commit, via artefato do job validate, com sourcemaps para o TypeScript. Testes E2E não são contabilizados como cobertura unitária. Especialmente no frontend, a cobertura unitária ainda é inicial e o Quality Gate poderá exigir novos testes; o workflow preserva essa avaliação.
 
