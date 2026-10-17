@@ -42,6 +42,8 @@ Crie o projeto com a chave **o-espertinho-backend** e nome **O Espertinho - Back
 
 Todos os jobs usam o runner compartilhado da organização `Portela-Dev`, selecionado pelos labels `[self-hosted, Windows, X64, windows-portela-dev]`. O runner precisa de Git for Windows (Bash, OpenSSH, GPG e dirmngr), Node.js via setup-node e Docker Desktop em modo containers Linux, acessível pela conta que executa o runner. ShellCheck roda em container, e Playwright instala seu Chromium no Windows. Mantenha o runner atualizado para as actions com runtime Node 24.
 
+O executável `docker.exe` deve estar no `PATH` da conta que executa o runner. Após instalar o Docker ou alterar o `PATH`, reinicie o processo/serviço do runner; um terminal novo e um serviço já iniciado podem ter ambientes diferentes. O workflow não cadastra caminhos específicos da máquina nem altera as variáveis do Windows.
+
 Em **Organization Settings > Actions > Runner groups**, libere estes três repositórios no grupo do runner e habilite o acesso a repositórios públicos. PRs de forks não executam os jobs; branches de colaboradores do próprio repositório são consideradas confiáveis. A análise Sonar só ocorre na develop em push ou execução manual. `SONAR_HOST_URL` deve ser alcançável pela conta do runner; loopback só funciona quando o Sonar está no mesmo computador.
 
 O relatório LCOV vem dos testes reais do mesmo commit, via artefato do job validate, com sourcemaps para o TypeScript. Testes E2E não são contabilizados como cobertura unitária. Especialmente no frontend, a cobertura unitária ainda é inicial e o Quality Gate poderá exigir novos testes; o workflow preserva essa avaliação.
