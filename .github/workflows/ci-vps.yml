@@ -32,6 +32,15 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Selecionar Git Bash no Windows
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File {0}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $git = Get-Command git.exe -ErrorAction Stop
+          $gitRoot = Split-Path -Parent (Split-Path -Parent $git.Source)
+          $bash = Join-Path $gitRoot 'bin/bash.exe'
+          if (-not (Test-Path -LiteralPath $bash)) { throw 'Git Bash não encontrado na instalação do Git for Windows.' }
+          [IO.File]::AppendAllText($env:GITHUB_PATH, (Split-Path -Parent $bash) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
       - name: Preparar Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -134,6 +143,15 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Selecionar Git Bash no Windows
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File {0}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $git = Get-Command git.exe -ErrorAction Stop
+          $gitRoot = Split-Path -Parent (Split-Path -Parent $git.Source)
+          $bash = Join-Path $gitRoot 'bin/bash.exe'
+          if (-not (Test-Path -LiteralPath $bash)) { throw 'Git Bash não encontrado na instalação do Git for Windows.' }
+          [IO.File]::AppendAllText($env:GITHUB_PATH, (Split-Path -Parent $bash) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
       - name: Preparar Node.js para o manifesto
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -168,6 +186,15 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Selecionar Git Bash no Windows
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File {0}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $git = Get-Command git.exe -ErrorAction Stop
+          $gitRoot = Split-Path -Parent (Split-Path -Parent $git.Source)
+          $bash = Join-Path $gitRoot 'bin/bash.exe'
+          if (-not (Test-Path -LiteralPath $bash)) { throw 'Git Bash não encontrado na instalação do Git for Windows.' }
+          [IO.File]::AppendAllText($env:GITHUB_PATH, (Split-Path -Parent $bash) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
       - name: Baixar imagem validada
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
