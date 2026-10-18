@@ -78,6 +78,12 @@ export function extensionApiPaths() {
     ],
   ] as const;
   for (const [method, path, summary, properties, auth] of operations) {
+    let security: Record<string, never[]>[] = [];
+    if (auth === "extension") {
+      security = [{ ExtensionBearer: [] }];
+    } else if (auth === "browser") {
+      security = [{ SessionCookie: [], XSRFToken: [] }];
+    }
     paths["/extension/" + path] = {
       [method]: {
         operationId: "extension_" + method + "_" + path.replaceAll("/", "_"),
@@ -85,12 +91,7 @@ export function extensionApiPaths() {
         summary,
         description:
           "Disponível somente fora de produção, com EXTENSION_MOCK_ENABLED=true. Login, sessão e permissão são reais; configuração, fila e conversão são mockadas. Cookies de marketplace não são recebidos pelo backend.",
-        security:
-          auth === "extension"
-            ? [{ ExtensionBearer: [] }]
-            : auth === "browser"
-              ? [{ SessionCookie: [], XSRFToken: [] }]
-              : [],
+        security,
         parameters:
           auth === "browser"
             ? []
