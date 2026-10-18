@@ -67,8 +67,25 @@ Cada versão fica em `/opt/o-espertinho/backend/releases/<sha>-<run>-<attempt>`.
 
 O Compose inicia PostgreSQL em rede privada e conserva os dados no volume `o-espertinho-postgres-data`. Antes de cada migration, o script grava um `pg_dump` em `backups/pre-<release>.dump`, com permissão 600; só depois executa `node dist/migrate.js` e substitui o backend. Um backup local não substitui cópias externas e testes de restauração. Nunca use `docker compose down -v` na operação normal.
 
-Runtime obrigatório: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `DATABASE_URL` (host `postgres`), `APP_ORIGIN` HTTPS e `ENCRYPTION_KEY` (32 bytes aleatórios em base64). Para login: `GOOGLE_CLIENT_ID`. Para extração: `SCRAPER_SERVICE_URL=http://espertinho-extractor:3010` e `EXTRACTION_SERVICE_TOKEN` compartilhado com jobs (ao menos 32 caracteres). Opcionais: `RUN_WORKER=true`, `WORKER_INTERVAL_SECONDS=60`, `MELI_REDIRECT_URI` e `MELI_OAUTH_PKCE=false`. `NODE_ENV`, `HOST`, `PORT` e `TRUST_PROXY` são definidos pelo Compose. Preserve `ENCRYPTION_KEY` e o volume para ler as credenciais criptografadas existentes.
+Runtime obrigatório: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `MIGRATION_DATABASE_URL` e `DATABASE_URL` restrita (host `postgres`), `APP_ORIGIN` HTTPS e `ENCRYPTION_KEY` (32 bytes aleatórios em base64). Para login: `GOOGLE_CLIENT_ID`. Para extração: `SCRAPER_SERVICE_URL=http://espertinho-extractor:3010` e `EXTRACTION_SERVICE_TOKEN` compartilhado com jobs (ao menos 32 caracteres). Opcionais: `RUN_WORKER=true`, `WORKER_INTERVAL_SECONDS=60`, `MELI_REDIRECT_URI` e `MELI_OAUTH_PKCE=false`. `NODE_ENV`, `HOST`, `PORT` e `TRUST_PROXY` são definidos pelo Compose. Preserve `ENCRYPTION_KEY` e o volume para ler as credenciais criptografadas existentes.
 
 Se a troca do container falhar, o script tenta reiniciar a imagem anterior e o job continua marcado como falha. Rollback de imagem **não desfaz migrations SQL**. O arquivo de runtime permanece fora das releases, e as imagens anteriores ficam disponíveis para recuperação. O arquivo de imagem transferido é removido depois do sucesso; agende manutenção de imagens antigas, backups e metadados conforme o espaço da VPS. Os artefatos de imagem no GitHub têm retenção de 3 dias; relatórios, 7 dias.
 
 O workflow não provisiona a VPS, DNS, certificados, runners ou projetos SonarQube e não recebe credenciais de produção nos jobs de validação. O deploy só é executado depois que você configurar o environment e acioná-lo/habilitá-lo.
+
+## Segurança
+
+O CI executa `npm audit --omit=dev --audit-level=high`: vulnerabilidades altas/críticas em dependências de produção e falhas da consulta bloqueiam a validação. Alertas devem ser investigados; o pipeline não aplica downgrade nem ignora findings automaticamente. A análise de dependências não substitui atualizações do sistema, navegador e imagens base.
+
+### Transição de banco existente, preservando o volume
+
+1. Mantenha `POSTGRES_USER`, `POSTGRES_PASSWORD` e `POSTGRES_DB` atuais. Não recrie o volume nem altere a conta que já é dona dos objetos.
+2. Defina `MIGRATION_DATABASE_URL` com a conexão administrativa anterior. Defina `DATABASE_URL` com uma conta NOVA exclusiva (por exemplo `espertinho_app`) e outra senha aleatória de ao menos 24 caracteres; use o mesmo host e banco, codificando caracteres especiais na URL.
+3. O deploy verifica as variáveis antes de alterar serviços, faz o backup existente e executa o serviço `migrate`. Ele aplica as migrations e cria/atualiza a conta restrita, concedendo somente DML nas tabelas da aplicação e uso de sequências. Não transfere propriedade nem apaga dados.
+4. O backend recebe somente as variáveis de runtime, sem a conexão administrativa ou a senha do superusuário. Na inicialização em produção, recusa contas com superuser, criação de roles/bancos, bypass de RLS, memberships, propriedade de objetos ou CREATE no schema público.
+
+Para preparar manualmente, use o mesmo Compose e variáveis documentados no deploy: `docker compose --env-file /opt/o-espertinho/backend/.env -f /caminho/compose.production.yml run --rm migrate`. A imagem validada precisa estar definida em `APP_IMAGE`. Não use `db:migrate` com a conta restrita; esse comando local continua destinado à conta de migrations.
+
+A migration `018_admin_reauthentication.sql` apenas adiciona campos às sessões. Sessões antigas e logins automáticos continuam servindo à navegação pessoal, mas operações sensíveis de usuários/perfis, marketplaces, seletores, atualizações e OAuth exigem confirmação da conta Google nos últimos 15 minutos. O desafio é vinculado à sessão, expira em cinco minutos e é consumido uma única vez. Não equivale a exigir MFA do Google. Sessões pessoais continuam com validade de 30 dias.
+
+Em produção (`NODE_ENV=production`), Swagger, assets e `/api/openapi.json` exigem sessão de administrador. Faça login pelo site antes de abrir `/api/docs/`.

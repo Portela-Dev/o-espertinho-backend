@@ -44,7 +44,7 @@ mkdir -p "$root/backups"
 chmod 700 "$root/backups"
 "${compose[@]}" exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' > "$root/backups/pre-$release_id.dump"
 chmod 600 "$root/backups/pre-$release_id.dump"
-"${compose[@]}" run --rm --no-deps backend node dist/migrate.js
+"${compose[@]}" run --rm --no-deps migrate
 trap restore_previous ERR
 "${compose[@]}" up -d --no-deps --wait --wait-timeout 180 "$service"
 ln -sfn "$release" "$root/current"

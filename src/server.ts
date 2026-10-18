@@ -1,9 +1,11 @@
+import {assertRestrictedDatabase} from './database-security.js';
 import { loadConfig } from './config.js';
 import { createDatabase } from './db.js';
 import { createApp } from './app.js';
 import { ProviderService } from './providers.js';
 import { startWorker } from './worker-runtime.js';
 const config=loadConfig(),db=createDatabase(config.DATABASE_URL),providers=new ProviderService();
+if(config.NODE_ENV==='production')await assertRestrictedDatabase(db);
 await db.query('SELECT 1 FROM users LIMIT 1');
 const app=createApp(db,config,{providers});
 const server=app.listen(config.PORT,config.HOST,()=>console.log(`API: http://${config.HOST}:${config.PORT}/api`));
