@@ -56,8 +56,10 @@ async function activeProgress(db:Database,run:any){
  (SELECT outcome FROM offer_refresh_items WHERE run_id=$1 AND status='done' ORDER BY finished_at DESC,id DESC LIMIT 1) AS last_outcome
  FROM offer_refresh_runs WHERE id=$1 AND status IN ('queued','running')`,[run.id])).rows[0];
  if(!state)return null;
- const phase=state.extracting?'extracting':state.waiting?'paused':'queued';
- return {...run,phase,pause_reason:phase==='paused'?(state.last_outcome==='pending'?'technical_failure':'interval'):null};
+ let phase='queued';
+ if(state.extracting){phase='extracting';}else if(state.waiting){phase='paused';}
+ const pauseReason=state.last_outcome==='pending'?'technical_failure':'interval';
+ return {...run,phase,pause_reason:phase==='paused'?pauseReason:null};
 }
 export function registerOfferRefreshAdmin(app:Express,db:Database){
  app.get('/api/admin/offer-refresh',async(_req,res)=>{

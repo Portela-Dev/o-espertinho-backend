@@ -16,7 +16,10 @@ export async function migrate(db: Database) {
       const sql = await readFile(resolve(dir,name),'utf8');
       const checksums=migrationChecksums(sql),checksum=checksums.canonical;
       const existing = await client.query('SELECT checksum FROM schema_migrations WHERE name=$1',[name]);
-      if (existing.rows.length) { if (!checksums.compatible.includes(existing.rows[0].checksum)) throw new Error(`Migration alterada: ${name}`); continue; }
+      if (existing.rows.length) {
+        if (!checksums.compatible.includes(existing.rows[0].checksum)) { throw new Error(`Migration alterada: ${name}`); }
+        continue;
+      }
       await client.query('BEGIN');
       try { await client.query(sql); await client.query('INSERT INTO schema_migrations(name,checksum) VALUES($1,$2)',[name,checksum]); await client.query('COMMIT'); }
       catch (e) { await client.query('ROLLBACK'); throw e; }
