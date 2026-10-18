@@ -40,6 +40,8 @@ test('administrative collections page without caps and public product range is i
  assert.equal((await admin.get('/api/admin/audit?paginate=true&pageSize=1&page=105')).body.total,105);
  const profiles=await admin.get('/api/admin/access-profiles?paginate=true&pageSize=1');assert.equal(profiles.body.profiles.length,1);assert.ok(profiles.body.permissions.length);assert.ok(profiles.body.total>=2);
  const detail=await admin.get('/api/products/'+product+'?paginate=true&pageSize=1&page=2');assert.equal(detail.body.offers.length,1);assert.equal(detail.body.offer_count,2);assert.equal(detail.body.min_price_cents,10000);assert.equal(detail.body.max_price_cents,20000);assert.equal(detail.body.sku,undefined);
+ for(const offer of (await db.query('SELECT id,marketplace_id FROM offers')).rows)await db.query("INSERT INTO click_events(id,offer_id,marketplace_id,placement) VALUES($1,$2,$3,'detail')",[randomUUID(),offer.id,offer.marketplace_id]);
+ const stats=await admin.get('/api/admin/stats?paginate=true&topPage=2&pageSize=1');assert.equal(stats.body.top.length,1);assert.equal(stats.body.topTotal,3);assert.equal(stats.body.topPage,2);assert.equal(stats.body.totalClicks,3);
 });
 test('refresh history pagination keeps active run visible and pages all error occurrences',async t=>{
  const {db,admin}=await fixture(t);const active=randomUUID();

@@ -286,9 +286,9 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     const [counts,clicks,top,daily]=await Promise.all([
       db.query('SELECT status,count(*)::int AS count FROM offers GROUP BY status'),
       db.query('SELECT m.id,m.name,count(c.id)::int AS clicks FROM marketplaces m LEFT JOIN click_events c ON c.marketplace_id=m.id AND c.created_at>=$1 GROUP BY m.id,m.name ORDER BY clicks DESC',[since]),
-      db.query('SELECT o.id,o.title,o.marketplace_id,count(c.id)::int AS clicks FROM offers o JOIN click_events c ON c.offer_id=o.id WHERE c.created_at>=$1 GROUP BY o.id,o.title,o.marketplace_id ORDER BY clicks DESC LIMIT 10',[since]),
+      pagedQuery(db,{...req.query,page:req.query.topPage??1,pageSize:req.query.pageSize??5},'SELECT o.id,o.title,o.marketplace_id,count(c.id)::int AS clicks FROM offers o JOIN click_events c ON c.offer_id=o.id WHERE c.created_at>=$1 GROUP BY o.id,o.title,o.marketplace_id ORDER BY clicks DESC,o.id',[since],10),
       db.query("SELECT to_char(created_at,'YYYY-MM-DD') AS day,count(*)::int AS clicks FROM click_events WHERE created_at>=$1 GROUP BY day ORDER BY day",[since])
-    ]);res.json({days,offers:counts.rows,marketplaces:clicks.rows,top:top.rows,daily:daily.rows,totalClicks:clicks.rows.reduce((n,r)=>n+r.clicks,0)});
+    ]);res.json({days,offers:counts.rows,marketplaces:clicks.rows,top:Array.isArray(top)?top:top.items,topTotal:Array.isArray(top)?top.length:top.total,topPage:Array.isArray(top)?1:top.page,topPageSize:Array.isArray(top)?10:top.pageSize,daily:daily.rows,totalClicks:clicks.rows.reduce((n,r)=>n+r.clicks,0)});
   });
   app.get('/api/admin/audit',async(req,res)=>res.json(await pagedQuery(db,req.query,'SELECT a.*,u.email FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC,a.id',[],100)));
   app.use('/api',(_req,_res,next)=>next(new HttpError(404,'Recurso não encontrado.')));
