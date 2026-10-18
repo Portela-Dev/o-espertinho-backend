@@ -89,7 +89,9 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     const access=(await db.query('SELECT u.access_profile_id,p.permissions FROM users u JOIN access_profiles p ON p.id=u.access_profile_id WHERE u.id=$1 AND u.blocked=false',[user!.id])).rows[0];
     if(!access)throw new HttpError(403,'Sua conta está bloqueada.');
     Object.assign(user!,access);
-    await newSession(db,res,config,user!.id,!automatic);if(!automatic)setSignedOut(res,config,false); res.set('Cache-Control','no-store').json({user:user!});
+    await newSession(db,res,config,user!.id,!automatic);
+    if(!automatic){setSignedOut(res,config,false);}
+    res.set('Cache-Control','no-store').json({user:user!});
   });
   const reauthLimit=rateLimit({windowMs:60000,limit:10,skip:()=>config.NODE_ENV==='test',message:{error:'Muitas confirmações. Aguarde um minuto.'}});
   app.post('/api/auth/reauth/challenge',requireUser,reauthLimit,async(req,res)=>{
