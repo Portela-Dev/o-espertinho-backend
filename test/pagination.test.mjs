@@ -51,3 +51,12 @@ test('refresh history pagination keeps active run visible and pages all error oc
  const history=await admin.get('/api/admin/offer-refresh?paginate=true&pageSize=1');assert.equal(history.body.runs.length,1);assert.equal(history.body.total,2);assert.equal(history.body.active.id,active);
  const detail=await admin.get('/api/admin/offer-refresh/runs/'+completed+'?paginate=true&pageSize=1&page=2');assert.equal(detail.body.total,2);assert.equal(detail.body.errorTotal,2);assert.equal(detail.body.errors.length,1);assert.equal(detail.body.page,2);
 });
+
+test('users accept selected page size, preserve filters and validate server limits',async t=>{
+ const {admin}=await fixture(t);
+ const first=await admin.get('/api/admin/users?pageSize=1');assert.equal(first.status,200);assert.equal(first.body.items.length,1);assert.equal(first.body.pageSize,1);assert.equal(first.body.total,2);
+ const second=await admin.get('/api/admin/users?pageSize=1&page=2');assert.notEqual(first.body.items[0].id,second.body.items[0].id);
+ const resized=await admin.get('/api/admin/users?pageSize=50&page=1');assert.equal(resized.body.items.length,2);assert.equal(resized.body.page,1);assert.equal(resized.body.pageSize,50);
+ const filtered=await admin.get('/api/admin/users?pageSize=5&q=alice');assert.equal(filtered.body.total,1);assert.equal(filtered.body.items[0].email,'alice@gmail.com');
+ for(const value of ['0','51','1.5','invalid'])assert.equal((await admin.get('/api/admin/users?pageSize='+value)).status,400);
+});

@@ -44,12 +44,13 @@ export function registerUserAdmin(app:Express,db:Database){
   }catch(e){await c.query('ROLLBACK');if((e as {code?:string}).code==='23503')throw new HttpError(409,'Este perfil está em uso.');throw e;}finally{c.release();}
  });
  app.get('/api/admin/users',async(req,res)=>{
-  const v=z.object({q:z.string().trim().max(160).default(''),page:z.coerce.number().int().min(1).max(100000).default(1),profile:z.string().max(80).default(''),status:z.enum(['all','active','blocked']).default('all')}).parse(req.query);
+  const v=z.object({q:z.string().trim().max(160).default(''),page:z.coerce.number().int().min(1).max(100000).default(1),pageSize:z.coerce.number().int().min(1).max(50).default(25),profile:z.string().max(80).default(''),status:z.enum(['all','active','blocked']).default('all')}).parse(req.query);
   const args=[`%${v.q.replaceAll('\\','\\\\').replaceAll('%','\\%').replaceAll('_','\\_')}%`,v.profile,v.status];
   const where="(u.name ILIKE $1 OR u.email ILIKE $1) AND ($2='' OR u.access_profile_id=$2) AND ($3='all' OR u.blocked=($3='blocked'))";
   const total=(await db.query(`SELECT count(*)::int AS total FROM users u WHERE ${where}`,args)).rows[0].total;
-  const items=(await db.query(`SELECT ${userColumns} FROM users u JOIN access_profiles p ON p.id=u.access_profile_id WHERE ${where} ORDER BY u.created_at DESC,u.id LIMIT 25 OFFSET $4`,[...args,(v.page-1)*25])).rows;
-  res.json({items,total,page:v.page,pageSize:25});
+  const page=v.page;
+  const items=(await db.query(`SELECT ${userColumns} FROM users u JOIN access_profiles p ON p.id=u.access_profile_id WHERE ${where} ORDER BY u.created_at DESC,u.id LIMIT $4 OFFSET $5`,[...args,v.pageSize,(page-1)*v.pageSize])).rows;
+  res.json({items,total,page,pageSize:v.pageSize});
  });
  app.patch('/api/admin/users/:id',async(req,res)=>{
   const id=z.uuid().parse(req.params.id),v=z.object({profileId:z.string().min(1).max(80),blocked:z.boolean(),expectedProfileId:z.string().min(1).max(80),expectedBlocked:z.boolean()}).parse(req.body);
