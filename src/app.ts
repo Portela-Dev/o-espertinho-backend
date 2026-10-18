@@ -1,4 +1,5 @@
 import express from 'express';
+import {registerExtensionMock} from './extension-mock.js';
 import {registerUserAdmin} from './user-admin.js';
 import {registerPriceHistory} from './price-history.js';
 import {registerOfferRefreshAdmin} from './offer-refresh.js';
@@ -61,6 +62,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     res.json({user:req.user??null,autoSignInAllowed:req.cookies[SIGNED_OUT_COOKIE]!=='1'});
   });
   registerMeliCallback(app,config);
+  registerExtensionMock(app,db,config);
   app.use('/api',csrfMiddleware(config));
   app.post('/api/auth/google',rateLimit({windowMs:60000,limit:15,skip:()=>config.NODE_ENV==='test',message:{error:'Muitas tentativas de login. Aguarde.'}}),async(req,res)=>{
     if(!config.GOOGLE_CLIENT_ID) throw new HttpError(503,'Login Google não configurado. Defina GOOGLE_CLIENT_ID no backend.');
