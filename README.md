@@ -71,3 +71,6 @@ A receita define domínios, página de sessão, intervalo, seletores, headers co
 Consulte a seção **Extensão Chrome** no Swagger para os contratos. A configuração administrativa das receitas, discovery e publicação reais ainda não foram implementados; este escopo entrega o consumidor genérico e os endpoints mockados.
 
 O processamento agendado e o consumo da fila de atualização de preços pertencem exclusivamente a `Portela-Dev/o-espertinho-job-update-price`. O backend mantém os endpoints administrativos de configuração, disparo e acompanhamento. `RUN_WORKER` controla apenas a manutenção interna da API. Nenhum extrator HTTP legado na porta 3010 é necessário.
+
+
+Admin → Atualizações permite cancelar uma rodada, preservando preços já atualizados e ignorando respostas de tentativas invalidadas. A pausa de proteção após falha técnica aparece explicitamente na tela. O backend oferece `POST /api/admin/offer-refresh/runs/:id/cancel`, com autorização de atualizações, XSRF e confirmação administrativa recente. A migration `020_offer_refresh_cancellation.sql` registra o cancelamento sem apagar execuções, links ou histórico. O job existente já confere o token da tentativa antes de gravar; seu advisory lock continua impedindo extrações simultâneas. Uma nova rodada pode ser enfileirada e aguarda o intervalo de proteção e o término de uma consulta anterior.

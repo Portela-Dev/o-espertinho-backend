@@ -1,3 +1,4 @@
+import {productUrl} from './product-url.js';
 import type {Express} from 'express';
 import {getProduct} from './products.js';
 import {randomUUID} from 'node:crypto';
@@ -32,6 +33,7 @@ export function registerScrapingAdmin(app:Express,db:Database,extractor:OfferExt
   const data=await extractor.extract(v.url,market,profile);const classification=await resolveClassification(db,product.category,product.subcategory);Object.assign(data,classification,{sellerName:v.sellerName});
   // URLs are validated again even for injected extractors used by tests.
   marketUrl(data.productUrl,market.allowed_hosts);
+  data.productUrl=productUrl(data.productUrl);
   const previewId=randomUUID(),expiresAt=new Date(Date.now()+15*60000);
   await db.query('DELETE FROM offer_import_previews WHERE expires_at<now() AND offer_id IS NULL');
   await db.query('INSERT INTO offer_import_previews(id,user_id,marketplace_id,affiliate_url,source_url,result,profile_version,expires_at,product_id,product_updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',[previewId,req.user!.id,v.marketplaceId,v.url,data.productUrl,JSON.stringify(data),profile.version,expiresAt,product.id,product.updated_at]);
