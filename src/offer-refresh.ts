@@ -6,6 +6,7 @@ import type {Database} from './db.js';
 import type {Config} from './config.js';
 import type {OfferExtractor,ScrapedData} from './scraping.js';
 import {RemoteOfferExtractor} from './remote-extractor.js';
+import {linkIdentity,sameProductUrl} from './link-identity.js';
 import {HttpError} from './security.js';
 import {audit,credentials,withMeliCredentials} from './offers.js';
 import {ProviderService,type Candidate} from './providers.js';
@@ -57,6 +58,10 @@ async function claim(db:Database){
   await client.query('COMMIT');return {...item,attemptId,requestInterval:settings.request_interval_ms};
  }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
 }
+function matchesStoredLink(offer:any,data:ScrapedData):boolean{
+ if(offer.external_id.startsWith('url-v1:'))return offer.external_id===linkIdentity(offer.marketplace_id,offer.affiliate_url)&&sameProductUrl(data.productUrl,offer.product_url);
+ return data.externalId===offer.external_id;
+}
 async function inspectOffer(db:Database,config:Config,providers:ProviderService,extractor:OfferExtractor|undefined,offer:any):Promise<Result>{
  if(offer.source==='api'){
   let candidate:Candidate|null;
@@ -72,7 +77,7 @@ async function inspectOffer(db:Database,config:Config,providers:ProviderService,
  const service=extractor??(config.SCRAPER_SERVICE_URL?new RemoteOfferExtractor(config.SCRAPER_SERVICE_URL,config.EXTRACTION_SERVICE_TOKEN):null);
  if(!service)throw new HttpError(503,'Serviço de extração não configurado.');
  const data:ScrapedData=await service.extract(offer.affiliate_url,market,profile);
- if(!data.title.trim()||data.externalId!==offer.external_id)throw new HttpError(422,'Não foi possível confirmar a identificação do anúncio. Confira a página e os seletores.');
+ if(!data.title.trim()||!matchesStoredLink(offer,data))throw new HttpError(422,'Não foi possível confirmar o destino do anúncio. Confira a página e os seletores.');
  if(data.priceCents===null)return {outcome:'unavailable'};
  if(data.missing.length||!Number.isInteger(data.priceCents)||data.priceCents<=0)throw new HttpError(422,'A extração retornou campos obrigatórios ausentes ou preço inconsistente.');
  return {outcome:'updated',price:data.priceCents,original:data.originalPriceCents,conditions:data.conditions,expires:new Date(Date.now()+profile.validity_minutes*60000)};

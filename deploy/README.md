@@ -59,6 +59,8 @@ O relatório LCOV vem dos testes reais do mesmo commit, via artefato do job vali
 
 O primeiro deploy cria a rede Docker externa compartilhada `espertinho-internal`. Ordem inicial recomendada: **jobs → backend → frontend**. Depois os deploys são independentes. O backend usa `http://espertinho-extractor:3010`; frontend/proxy SSR usa `http://espertinho-backend:3000`. O agendamento dos jobs continua no backend e não foi duplicado no extrator.
 
+As extrações manuais agora usam um serviço separado. Antes de habilitar testes de seletores/prévias, disponibilize `o-espertinho-extractor` na mesma rede e configure `MANUAL_EXTRACTOR_URL=http://espertinho-manual-extractor:3011` e `MANUAL_EXTRACTION_SERVICE_TOKEN` com o segredo desse novo serviço. Não reutilize a URL/token do job para essa configuração. A ausência de configuração manual desativa somente os fluxos manuais, sem mudar o job. O script `setup:manual-extractor` é destinado ao workspace local; em produção configure os valores no `.env` da VPS.
+
 O site usa um único domínio: Nginx encaminha ao frontend em `127.0.0.1:4200`; o frontend encaminha `/api` internamente preservando o caminho e a origem. Configure o domínio em `APP_ORIGIN`, `ALLOWED_HOSTS` e nas origens JavaScript do login Google. O proxy Nginx do exemplo sobrescreve os cabeçalhos encaminhados; o backend só confia em loopback e redes privadas na configuração de produção.
 
 ## Atualizações, persistência e recuperação
