@@ -49,7 +49,7 @@ export function registerProductAdmin(app:Express,db:Database){
  app.get('/api/admin/category-tree',async(_req,res)=>res.json((await db.query('SELECT id,path,cardinality(path) AS depth FROM category_nodes ORDER BY path')).rows));
  app.get('/api/admin/products',async(req,res)=>{
   const q=z.string().max(160).default('').parse(req.query.q);
-  res.json(await pagedQuery(db,req.query,`SELECT p.*,(SELECT count(*)::int FROM offers o WHERE o.product_id=p.id) AS link_count,(SELECT count(*)::int FROM offers o WHERE o.product_id=p.id AND ${valid}) AS available_count FROM products p WHERE p.name ILIKE $1 OR p.sku ILIKE $1 ORDER BY p.created_at DESC,p.id`,['%'+q.replaceAll('%','\\%').replaceAll('_','\\_')+'%']));
+  res.json(await pagedQuery(db,req.query,`SELECT p.*,(SELECT count(*)::int FROM offers o WHERE o.product_id=p.id) AS link_count,(SELECT count(*)::int FROM offers o WHERE o.product_id=p.id AND ${valid}) AS available_count FROM products p WHERE p.name ILIKE $1 OR p.sku ILIKE $1 ORDER BY p.created_at DESC,p.id`,['%'+q.replaceAll('%',String.raw`\%`).replaceAll('_',String.raw`\_`)+'%']));
  });
  const save=async(req:any,res:any)=>{
   const v=productSchema.parse(req.body),id=req.params.id?uuid.parse(req.params.id):randomUUID(),client=await db.connect();let product;
