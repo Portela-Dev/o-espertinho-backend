@@ -69,7 +69,6 @@ Cada versão fica em `/opt/o-espertinho/backend/releases/<sha>-<run>-<attempt>`.
 
 O Compose inicia PostgreSQL em rede privada e conserva os dados no volume `o-espertinho-postgres-data`. Antes de cada migration, o script grava um `pg_dump` em `backups/pre-<release>.dump`, com permissão 600; só depois executa `node dist/migrate.js` e substitui o backend. Um backup local não substitui cópias externas e testes de restauração. Nunca use `docker compose down -v` na operação normal.
 
-Runtime obrigatório: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `MIGRATION_DATABASE_URL` e `DATABASE_URL` restrita (host `postgres`), `APP_ORIGIN` HTTPS e `ENCRYPTION_KEY` (32 bytes aleatórios em base64). Para login: `GOOGLE_CLIENT_ID`. Para extração: `SCRAPER_SERVICE_URL=http://espertinho-extractor:3010` e `EXTRACTION_SERVICE_TOKEN` compartilhado com jobs (ao menos 32 caracteres). Opcionais: `RUN_WORKER=true`, `WORKER_INTERVAL_SECONDS=60`, `MELI_REDIRECT_URI` e `MELI_OAUTH_PKCE=false`. `NODE_ENV`, `HOST`, `PORT` e `TRUST_PROXY` são definidos pelo Compose. Preserve `ENCRYPTION_KEY` e o volume para ler as credenciais criptografadas existentes.
 
 Se a troca do container falhar, o script tenta reiniciar a imagem anterior e o job continua marcado como falha. Rollback de imagem **não desfaz migrations SQL**. O arquivo de runtime permanece fora das releases, e as imagens anteriores ficam disponíveis para recuperação. O arquivo de imagem transferido é removido depois do sucesso; agende manutenção de imagens antigas, backups e metadados conforme o espaço da VPS. Os artefatos de imagem no GitHub têm retenção de 3 dias; relatórios, 7 dias.
 
@@ -91,3 +90,5 @@ Para preparar manualmente, use o mesmo Compose e variáveis documentados no depl
 A migration `018_admin_reauthentication.sql` apenas adiciona campos às sessões. Sessões antigas e logins automáticos continuam servindo à navegação pessoal, mas operações sensíveis de usuários/perfis, marketplaces, seletores, atualizações e OAuth exigem confirmação da conta Google nos últimos 15 minutos. O desafio é vinculado à sessão, expira em cinco minutos e é consumido uma única vez. Não equivale a exigir MFA do Google. Sessões pessoais continuam com validade de 30 dias.
 
 Em produção (`NODE_ENV=production`), Swagger, assets e `/api/openapi.json` exigem sessão de administrador. Faça login pelo site antes de abrir `/api/docs/`.
+
+O processamento agendado e o consumo da fila de atualização de preços pertencem exclusivamente a `Portela-Dev/o-espertinho-job-update-price`. O backend mantém os endpoints administrativos de configuração, disparo e acompanhamento. `RUN_WORKER` controla apenas a manutenção interna da API. Nenhum extrator HTTP legado na porta 3010 é necessário.

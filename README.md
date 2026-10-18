@@ -2,7 +2,7 @@
 
 Node.js + TypeScript + Express, PostgreSQL, migrations SQL versionadas e worker de ofertas.
 
-Este Ã© o repositÃ³rio `o-espertinho-backend`. Projetos relacionados: [frontend](https://github.com/Portela-Dev/o-espertinho-frontend) e [extrator](https://github.com/Portela-Dev/o-espertinho-jobs).
+Este Ã© o repositÃ³rio `o-espertinho-backend`. Projetos relacionados: [frontend](https://github.com/Portela-Dev/o-espertinho-frontend) e [extrator](https://github.com/Portela-Dev/o-espertinho-extractor).
 
 ## Primeiro uso
 
@@ -25,11 +25,10 @@ Aguarde o PostgreSQL ficar saudÃ¡vel antes de executar as migrations. A API es
 
 Para testes de seletores e prévias de cadastro de links, execute o novo projeto `o-espertinho-extractor` e configure `MANUAL_EXTRACTOR_URL` e `MANUAL_EXTRACTION_SERVICE_TOKEN`. No workspace local, execute `npm run setup:manual-extractor` para copiar apenas o segredo do `.env` desse serviço e configurar `http://127.0.0.1:3011`; valores conflitantes existentes são preservados e exigem ajuste explícito.
 
-O job de atualização de preços continua usando `SCRAPER_SERVICE_URL` e `EXTRACTION_SERVICE_TOKEN` do serviço anterior (`o-espertinho-jobs`, porta 3010). As configurações e os clientes HTTP são independentes. O worker continua no backend quando `RUN_WORKER=true`. Não houve alteração no repositório dos jobs nem migração de dados.
 
 O novo cliente chama `POST /v1/extractions` com Bearer token, converte os perfis salvos para o contrato da biblioteca e valida o resultado. Falhas técnicas não são tratadas como produto indisponível; prévias incompletas e indisponíveis não podem ser confirmadas. Autenticação, permissões administrativas e XSRF permanecem exigidos nas rotas existentes.
 
-O administrador continua escolhendo o produto antes de cadastrar o link. O identificador técnico do novo link é um hash da URL e do marketplace, com prefixo `url-v1:`; não identifica o produto do catálogo e não usa identificadores de produto do marketplace. O job reconhece esses links pela chave da URL e confere seu destino antes de atualizar o preço. Links anteriores continuam sendo tratados pelo fluxo legado.
+O administrador continua escolhendo o produto antes de cadastrar o link. O identificador técnico do novo link é um hash da URL e do marketplace, com prefixo `url-v1:`; não identifica o produto do catálogo e não usa identificadores de produto do marketplace. O job independente confere o destino dos links sem derivar identificadores do marketplace.
 
 Perfis existentes são adaptados somente em memória: atributos vazios são omitidos, características usam seus seletores de pares e regras de preço recebem fallback de partes inteiro/centavos antes da leitura do texto completo. A regra de identificador externo não é enviada ao novo serviço. O atributo proprietário de galeria JSON é substituído por `src`; regras de URL direta já cadastradas mantêm sua prioridade. O limite do serviço é 40 regras após adaptação; perfis que excederem esse limite retornam orientação para reduzir as regras. Nenhum seletor salvo é alterado automaticamente.
 
@@ -70,3 +69,5 @@ As demais rotas exigem Bearer token e o header `X-Espertinho-Extension-Id`, vinc
 A receita define domínios, página de sessão, intervalo, seletores, headers com variáveis locais e caminho JSON do link retornado. A página `/demo/store` e o endpoint `/demo/convert` simulam o marketplace sem usar credenciais reais. Os resultados só alteram a fila em memória: não criam produtos, categorias ou ofertas e não publicam conteúdo. A fila reinicia com o processo; a autenticação da extensão é persistida no PostgreSQL. Respostas são no-store e as rotas têm limite de chamadas.
 
 Consulte a seção **Extensão Chrome** no Swagger para os contratos. A configuração administrativa das receitas, discovery e publicação reais ainda não foram implementados; este escopo entrega o consumidor genérico e os endpoints mockados.
+
+O processamento agendado e o consumo da fila de atualização de preços pertencem exclusivamente a `Portela-Dev/o-espertinho-job-update-price`. O backend mantém os endpoints administrativos de configuração, disparo e acompanhamento. `RUN_WORKER` controla apenas a manutenção interna da API. Nenhum extrator HTTP legado na porta 3010 é necessário.

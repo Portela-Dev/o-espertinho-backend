@@ -10,6 +10,3 @@ function normalizedUrl(value: string): string {
 export function linkIdentity(marketplaceId: string, affiliateUrl: string): string {
   return 'url-v1:' + createHash('sha256').update(marketplaceId + ':' + normalizedUrl(affiliateUrl)).digest('hex');
 }
-export function sameProductUrl(actual: string, expected: string): boolean {
-  return normalizedUrl(actual) === normalizedUrl(expected);
-}

@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {ManualOfferExtractor} from '../dist/manual-extractor.js';
 import {manualProfile} from '../dist/manual-extractor-profile.js';
-import {linkIdentity,sameProductUrl} from '../dist/link-identity.js';
+import {linkIdentity} from '../dist/link-identity.js';
 const token='test-only-'.padEnd(64,'a');
 const market={id:'loja-teste',name:'Loja de teste',allowed_hosts:['loja.example.com'],scraping_enabled:true};
 const url='https://loja.example.com/item?affiliate=abc';
@@ -31,8 +31,6 @@ test('link identity is technical, stable and independent from product or marketp
  assert.equal(linkIdentity('loja',url+'#anchor'),linkIdentity('loja',url));
  assert.equal(linkIdentity('loja','https://loja.example.com/p?b=2&a=1'),linkIdentity('loja','https://loja.example.com/p?a=1&b=2'));
  assert.notEqual(linkIdentity('other',url),linkIdentity('loja',url));assert.notEqual(linkIdentity('loja',url+'/other'),linkIdentity('loja',url));
- assert.equal(sameProductUrl('https://loja.example.com/p?b=2&a=1#part','https://loja.example.com/p?a=1&b=2'),true);
- assert.equal(sameProductUrl('https://loja.example.com/p','https://loja.example.com/other'),false);
 });
 test('incomplete previews remain incomplete and explicit unavailability cannot be confirmed',async()=>{
  const incomplete=await remote({status:'technical_failure',reason:'incomplete',data:{...data(),priceCents:null,availability:'unknown',missing:['price']}}).extract(url,market,profile);
