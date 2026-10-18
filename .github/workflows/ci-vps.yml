@@ -116,6 +116,18 @@ jobs:
           $response = Invoke-WebRequest -UseBasicParsing -Uri ($env:SONAR_HOST_URL.TrimEnd('/') + '/api/system/status') -Headers $headers -TimeoutSec 30
           try { $status = $response.Content | ConvertFrom-Json } catch { throw 'A URL do SonarQube não retornou JSON. Confira o túnel ngrok e sua configuração de acesso.' }
           if ($status.status -ne 'UP') { throw 'SonarQube indisponível.' }
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            try {
+              Write-Output 'Diagnóstico da análise anterior; o Quality Gate desta execução será calculado pelo scanner.'
+              $key = ((Get-Content sonar-project.properties | Select-String '^sonar.projectKey=').Line -split '=', 2)[1]
+              $authHeaders = @{ Authorization = 'Bearer ' + $env:SONAR_TOKEN; 'ngrok-skip-browser-warning' = 'true' }
+              $base = $env:SONAR_HOST_URL.TrimEnd('/')
+              $gate = Invoke-RestMethod -Uri ($base + '/api/qualitygates/project_status?projectKey=' + $key) -Headers $authHeaders -TimeoutSec 30
+              $gate.projectStatus | ConvertTo-Json -Depth 5
+              $issues = Invoke-RestMethod -Uri ($base + '/api/issues/search?componentKeys=' + $key + '&resolved=false&ps=100') -Headers $authHeaders -TimeoutSec 30
+              $issues.issues | Select-Object rule,component,line,message | ConvertTo-Json -Depth 5
+            } catch { Write-Warning 'Não foi possível consultar o diagnóstico anterior. A análise seguirá normalmente.' }
+          }
       - name: Preparar verificação de assinatura do scanner
         run: |
           $ErrorActionPreference = 'Stop'
