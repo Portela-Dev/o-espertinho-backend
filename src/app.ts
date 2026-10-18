@@ -16,7 +16,7 @@ import type { Database } from './db.js';
 import { HttpError, sessionMiddleware, csrfMiddleware, newSession, setSignedOut, SIGNED_OUT_COOKIE, hash, requireUser, requireAdmin, requireRecentAdmin, encrypt, decrypt, marketplaceURL, type User } from './security.js';
 import { ProviderService, credentialFields, type ProviderId } from './providers.js';
 import { type OfferExtractor } from './scraping.js';
-import { RemoteOfferExtractor } from './remote-extractor.js';
+import { ManualOfferExtractor } from './manual-extractor.js';
 import { classificationText,requiredCategory,resolveClassification } from './classifications.js';
 import { registerScrapingAdmin,assertRegisteredLink } from './scraping-admin.js';
 import { registerMeliCallback, registerMeliAdminOAuth, meliRedirectUri } from './mercadolivre-oauth.js';
@@ -178,7 +178,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
   registerUserAdmin(app,db);
   registerProductAdmin(app,db);
   registerOfferRefreshAdmin(app,db);
-  registerScrapingAdmin(app,db,options.extractor??(config.SCRAPER_SERVICE_URL?new RemoteOfferExtractor(config.SCRAPER_SERVICE_URL,config.EXTRACTION_SERVICE_TOKEN):{extract:async()=>{throw new HttpError(503,'Configure SCRAPER_SERVICE_URL e inicie o extrator para coletar ofertas.');}}));
+  registerScrapingAdmin(app,db,options.extractor??(config.MANUAL_EXTRACTOR_URL?new ManualOfferExtractor(config.MANUAL_EXTRACTOR_URL,config.MANUAL_EXTRACTION_SERVICE_TOKEN):{extract:async()=>{throw new HttpError(503,'Configure MANUAL_EXTRACTOR_URL e MANUAL_EXTRACTION_SERVICE_TOKEN e inicie o novo extrator manual.');}}));
   registerMeliAdminOAuth(app,db,config,providers);
   app.get('/api/admin/marketplaces',async(_req,res)=>{
     const {rows}=await db.query('SELECT * FROM marketplaces ORDER BY name');

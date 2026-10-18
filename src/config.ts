@@ -9,17 +9,29 @@ export const envSchema = z.object({
   DATABASE_URL: z.string().min(1), ENCRYPTION_KEY: z.string().refine(v => Buffer.from(v,'base64').length === 32, 'Use uma chave base64 de 32 bytes'),
   MELI_REDIRECT_URI: z.string().default(''), MELI_OAUTH_PKCE: z.enum(['true','false']).default('false'),
   SCRAPER_SERVICE_URL: z.string().default(''), EXTRACTION_SERVICE_TOKEN: z.string().default(''),
+  MANUAL_EXTRACTOR_URL: z.string().default(''), MANUAL_EXTRACTION_SERVICE_TOKEN: z.string().default(''),
   GOOGLE_CLIENT_ID: z.string().default(''), RUN_WORKER: z.string().default('true'),
   EXTENSION_MOCK_ENABLED: z.enum(['true','false']).default('true'),
   EXTENSION_BACKEND_URL: z.url().default('http://localhost:3000'),
   WORKER_INTERVAL_SECONDS: z.coerce.number().min(30).default(60)
 });
 export type Config = z.infer<typeof envSchema>;
+function validateManualExtractor(config: Config) {
+  if (!config.MANUAL_EXTRACTOR_URL) { return; }
+  const url = new URL(config.MANUAL_EXTRACTOR_URL);
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
+    throw new Error('MANUAL_EXTRACTOR_URL deve ser uma origem HTTP(S).');
+  }
+  if (!/^[\w-]{32,256}$/.test(config.MANUAL_EXTRACTION_SERVICE_TOKEN) || config.MANUAL_EXTRACTION_SERVICE_TOKEN.startsWith('DUMMY_')) {
+    throw new Error('Configure MANUAL_EXTRACTION_SERVICE_TOKEN com o segredo do novo extrator manual.');
+  }
+}
 export function loadConfig(): Config {
   const config = envSchema.parse(process.env);
   const extensionURL=new URL(config.EXTENSION_BACKEND_URL);
   if(!['http:','https:'].includes(extensionURL.protocol)||extensionURL.username||extensionURL.password||extensionURL.pathname!=='/'||extensionURL.search||extensionURL.hash)throw new Error('EXTENSION_BACKEND_URL deve ser uma origem HTTP(S).');
   if (config.NODE_ENV === 'production' && !config.APP_ORIGIN.startsWith('https://')) throw new Error('APP_ORIGIN deve usar HTTPS em produção.');
   if(config.SCRAPER_SERVICE_URL){const url=new URL(config.SCRAPER_SERVICE_URL);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.pathname!=='/'||url.search||url.hash)throw new Error('SCRAPER_SERVICE_URL deve ser uma origem HTTP(S).');if(config.EXTRACTION_SERVICE_TOKEN.length<32)throw new Error('Configure EXTRACTION_SERVICE_TOKEN com ao menos 32 caracteres.');}
+  validateManualExtractor(config);
   return config;
 }

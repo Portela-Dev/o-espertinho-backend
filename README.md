@@ -23,7 +23,15 @@ npm run dev
 
 Aguarde o PostgreSQL ficar saudÃ¡vel antes de executar as migrations. A API escuta em `127.0.0.1:3000`, o banco em `127.0.0.1:5432`, e `APP_ORIGIN` deve corresponder Ã  origem do frontend (por padrÃ£o `http://localhost:4200`). O frontend encaminha `/api` para a API. O login Google usa ID token e nÃ£o exige client secret.
 
-Para extraÃ§Ã£o, execute separadamente o projeto `o-espertinho-jobs`, configure `SCRAPER_SERVICE_URL` e use o mesmo `EXTRACTION_SERVICE_TOKEN` nos dois serviÃ§os. O backend nÃ£o inicia o extrator. O worker de atualizaÃ§Ã£o roda com o backend quando `RUN_WORKER=true`.
+Para testes de seletores e prévias de cadastro de links, execute o novo projeto `o-espertinho-extractor` e configure `MANUAL_EXTRACTOR_URL` e `MANUAL_EXTRACTION_SERVICE_TOKEN`. No workspace local, execute `npm run setup:manual-extractor` para copiar apenas o segredo do `.env` desse serviço e configurar `http://127.0.0.1:3011`; valores conflitantes existentes são preservados e exigem ajuste explícito.
+
+O job de atualização de preços continua usando `SCRAPER_SERVICE_URL` e `EXTRACTION_SERVICE_TOKEN` do serviço anterior (`o-espertinho-jobs`, porta 3010). As configurações e os clientes HTTP são independentes. O worker continua no backend quando `RUN_WORKER=true`. Não houve alteração no repositório dos jobs nem migração de dados.
+
+O novo cliente chama `POST /v1/extractions` com Bearer token, converte os perfis salvos para o contrato da biblioteca e valida o resultado. Falhas técnicas não são tratadas como produto indisponível; prévias incompletas e indisponíveis não podem ser confirmadas. Autenticação, permissões administrativas e XSRF permanecem exigidos nas rotas existentes.
+
+O administrador continua escolhendo o produto antes de cadastrar o link. O identificador técnico do novo link é um hash da URL e do marketplace, com prefixo `url-v1:`; não identifica o produto do catálogo e não usa identificadores de produto do marketplace. O job reconhece esses links pela chave da URL e confere seu destino antes de atualizar o preço. Links anteriores continuam sendo tratados pelo fluxo legado.
+
+Perfis existentes são adaptados somente em memória: atributos vazios são omitidos, características usam seus seletores de pares e regras de preço recebem fallback de partes inteiro/centavos antes da leitura do texto completo. A regra de identificador externo não é enviada ao novo serviço. O atributo proprietário de galeria JSON é substituído por `src`; regras de URL direta já cadastradas mantêm sua prioridade. O limite do serviço é 40 regras após adaptação; perfis que excederem esse limite retornam orientação para reduzir as regras. Nenhum seletor salvo é alterado automaticamente.
 
 Swagger: `http://localhost:3000/api/docs/`. Para operaÃ§Ãµes autenticadas de escrita, faÃ§a login no frontend e abra `http://localhost:4200/api/docs/`, preservando sessÃ£o, origem e XSRF.
 
