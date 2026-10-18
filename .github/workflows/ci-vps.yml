@@ -26,6 +26,17 @@ jobs:
     name: 1. Validar, testar e gerar cobertura
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: ci-only-security-tests
+          POSTGRES_DB: security
+        ports: [5432/tcp]
+        options: >-
+          --health-cmd "pg_isready -U test -d security"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - name: Obter código
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -38,6 +49,8 @@ jobs:
           cache: npm
       - name: Instalar dependências
         run: npm ci --no-audit --no-fund
+      - name: Auditar dependências de produção
+        run: npm audit --omit=dev --audit-level=high
       - name: Validar TypeScript e scripts de deploy
         run: |
           npm run typecheck
@@ -45,6 +58,8 @@ jobs:
           shellcheck -S warning scripts/ci/*.sh
 
       - name: Testar com cobertura real
+        env:
+          TEST_DATABASE_ADMIN_URL: postgresql://test:ci-only-security-tests@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/security
         run: npm run test:coverage
 
       - name: Publicar cobertura e relatórios

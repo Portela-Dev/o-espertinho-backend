@@ -1,10 +1,13 @@
 import type {Express,RequestHandler} from 'express';
+import {requireUser,HttpError} from './security.js';
 import swaggerUi from 'swagger-ui-express';
 import type {Config} from './config.js';
 import {createOpenApiDocument} from './openapi.js';
 
 export function registerApiDocs(app:Express,config:Config){
  const document=createOpenApiDocument(config);
+ const adminOnly:RequestHandler=(req,_res,next)=>next(req.user?.role==='admin'?undefined:new HttpError(403,'Documentação restrita a administradores.'));
+ if(config.NODE_ENV==='production')for(const route of ['/api/docs','/api/openapi.json'])app.use(route,requireUser,adminOnly);
  app.get('/api/openapi.json',(_req,res)=>res.set('Cache-Control','no-store').json(document));
  // Served as an external script so Helmet's script-src self remains intact.
  app.get('/api/docs/xsrf.js',(_req,res)=>res.type('application/javascript').set('Cache-Control','no-store').send(`

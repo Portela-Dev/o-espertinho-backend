@@ -18,8 +18,17 @@ services:
     image: ${APP_IMAGE:?Use a imagem validada pelo CI}
     init: true
     restart: unless-stopped
-    env_file: ${VPS_ENV_FILE:?Caminho absoluto do .env na VPS}
     environment:
+      DATABASE_URL: ${DATABASE_URL:?Configure a conta restrita}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Configure ENCRYPTION_KEY}
+      APP_ORIGIN: ${APP_ORIGIN:?Configure APP_ORIGIN}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      SCRAPER_SERVICE_URL: ${SCRAPER_SERVICE_URL:-}
+      EXTRACTION_SERVICE_TOKEN: ${EXTRACTION_SERVICE_TOKEN:-}
+      MELI_REDIRECT_URI: ${MELI_REDIRECT_URI:-}
+      MELI_OAUTH_PKCE: ${MELI_OAUTH_PKCE:-false}
+      RUN_WORKER: ${RUN_WORKER:-true}
+      WORKER_INTERVAL_SECONDS: ${WORKER_INTERVAL_SECONDS:-60}
       NODE_ENV: production
       HOST: 0.0.0.0
       TRUST_PROXY: loopback,uniquelocal
@@ -37,6 +46,17 @@ services:
       timeout: 5s
       retries: 6
       start_period: 30s
+  migrate:
+    image: ${APP_IMAGE:?Use a imagem validada pelo CI}
+    profiles: [tools]
+    command: [node, dist/provision-database.js]
+    environment:
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?Configure a conta de migrations}
+      DATABASE_URL: ${DATABASE_URL:?Configure a conta restrita}
+    networks: [database]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
 networks:
   database:
     internal: true

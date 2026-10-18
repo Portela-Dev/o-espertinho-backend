@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEq
 import type { Request, Response, NextFunction } from 'express';
 import type { Database } from './db.js';
 import type { Config } from './config.js';
-export class HttpError extends Error { constructor(public status: number, message: string) { super(message); } }
+export class HttpError extends Error { constructor(public status: number, message: string, public code?: string) { super(message); } }
 export const hash = (s: string) => createHash('sha256').update(s).digest('hex');
 export function equal(a: string, b: string) { const x=Buffer.from(a), y=Buffer.from(b); return x.length===y.length && timingSafeEqual(x,y); }
 export function encrypt(value: unknown, key: string) {
@@ -16,7 +16,7 @@ export function decrypt(value: string, key: string): Record<string,string> {
   return JSON.parse(Buffer.concat([decipher.update(data),decipher.final()]).toString('utf8'));
 }
 export interface User { id: string; email: string; name: string; avatar: string|null; role: 'user'|'admin'; access_profile_id?:string; permissions?:string[] }
-declare global { namespace Express { interface Request { sessionId?: string; user?: User; csrfHash?: string } } }
+declare global { namespace Express { interface Request { sessionId?: string; user?: User; csrfHash?: string; adminVerifiedAt?: Date } } }
 export const AUTH_SESSION_MS=30*86400000;
 const ANONYMOUS_SESSION_MS=12*3600000;
 export const SIGNED_OUT_COOKIE='espertinho.signed_out';
@@ -30,9 +30,9 @@ export function sessionMiddleware(db: Database, config: Config) {
     try {
       const cookie=req.cookies['espertinho.sid'];
       if (typeof cookie==='string' && /^[a-f0-9]{64}$/.test(cookie)) {
-        const { rows }=await db.query(`SELECT s.id,s.csrf_hash,s.expires_at<clock_timestamp()+interval '29 days' AS renew_due,u.id AS user_id,u.email,u.name,u.avatar,u.role,u.blocked,u.access_profile_id,p.permissions FROM sessions s LEFT JOIN users u ON u.id=s.user_id LEFT JOIN access_profiles p ON p.id=u.access_profile_id WHERE s.id=$1 AND s.expires_at>now()`,[hash(cookie)]);
+        const { rows }=await db.query(`SELECT s.id,s.csrf_hash,s.admin_verified_at,s.expires_at<clock_timestamp()+interval '29 days' AS renew_due,u.id AS user_id,u.email,u.name,u.avatar,u.role,u.blocked,u.access_profile_id,p.permissions FROM sessions s LEFT JOIN users u ON u.id=s.user_id LEFT JOIN access_profiles p ON p.id=u.access_profile_id WHERE s.id=$1 AND s.expires_at>now()`,[hash(cookie)]);
         if (rows[0]) {
-          const r=rows[0];req.sessionId=r.id;req.csrfHash=r.csrf_hash;
+          const r=rows[0];req.sessionId=r.id;req.csrfHash=r.csrf_hash;req.adminVerifiedAt=r.admin_verified_at?new Date(r.admin_verified_at):undefined;
           // A late automatic response must not undo an explicit sign-out in another tab.
           if(r.user_id&&(r.blocked||req.cookies[SIGNED_OUT_COOKIE]==='1')){
             await db.query('DELETE FROM sessions WHERE id=$1',[r.id]);delete req.sessionId;delete req.csrfHash;return next();
@@ -54,9 +54,9 @@ export function sessionMiddleware(db: Database, config: Config) {
     } catch(e) { next(e); }
   };
 }
-export async function newSession(db: Pick<Database,'query'>,res: Response,config: Config,userId: string|null) {
+export async function newSession(db: Pick<Database,'query'>,res: Response,config: Config,userId: string|null, recentlyVerified=false) {
   const sid=randomBytes(32).toString('hex'), csrf=randomBytes(32).toString('hex'),ttl=userId?AUTH_SESSION_MS:ANONYMOUS_SESSION_MS;
-  await db.query("INSERT INTO sessions(id,user_id,csrf_hash,expires_at) VALUES($1,$2,$3,clock_timestamp()+$4*interval '1 millisecond')",[hash(sid),userId,hash(csrf),ttl]);
+  await db.query("INSERT INTO sessions(id,user_id,csrf_hash,expires_at,admin_verified_at) VALUES($1,$2,$3,clock_timestamp()+$4*interval '1 millisecond',CASE WHEN $5 THEN clock_timestamp() ELSE NULL END)",[hash(sid),userId,hash(csrf),ttl,recentlyVerified]);
   const opts=cookieOptions(config,ttl);
   res.cookie('espertinho.sid',sid,{...opts,httpOnly:true}); res.cookie('XSRF-TOKEN',csrf,{...opts,httpOnly:false});
 }
@@ -72,7 +72,7 @@ export function csrfMiddleware(config: Config) {
 export function requireUser(req: Request,_res: Response,next: NextFunction) { next(req.user ? undefined : new HttpError(401,'Entre com Google para continuar.')); }
 export function requireAdmin(req: Request,_res: Response,next: NextFunction) {
  if(req.user?.role==='admin')return next();
- const p=req.path.split('/').filter(Boolean),resource=p[0],method=req.method,granted=req.user?.permissions??[];
+ const p=req.path.split('/').filter(Boolean).map(part=>part.toLowerCase()),resource=p[0],method=req.method,granted=req.user?.permissions??[];
  let allowed:string[]=[];
  if(['users','access-profiles'].includes(resource))allowed=['users'];
  else if(resource==='stats')allowed=['overview'];
@@ -91,4 +91,12 @@ export function marketplaceURL(value: string, marketplace: string) {
   let url: URL; try { url=new URL(value); } catch { throw new HttpError(400,'URL inválida.'); }
   if(url.protocol!=='https:' || url.username || url.password || url.port || !domains[marketplace]?.some(d=>url.hostname===d || url.hostname.endsWith('.'+d))) throw new HttpError(400,'Use um endereço HTTPS oficial do marketplace.');
   return value;
+}
+
+export const ADMIN_VERIFICATION_MS=15*60*1000;
+export function requireRecentAdmin(req:Request,_res:Response,next:NextFunction){
+ const resource=req.path.split('/').filter(Boolean)[0]?.toLowerCase();
+ const sensitive=!['GET','HEAD','OPTIONS'].includes(req.method)&&['users','access-profiles','marketplaces','catalog-marketplaces','selectors','mercadolivre','offer-refresh'].includes(resource);
+ if(sensitive&&(!req.adminVerifiedAt||Date.now()-req.adminVerifiedAt.getTime()>ADMIN_VERIFICATION_MS))return next(new HttpError(403,'Confirme sua conta Google para concluir esta operação.','ADMIN_REAUTH_REQUIRED'));
+ next();
 }

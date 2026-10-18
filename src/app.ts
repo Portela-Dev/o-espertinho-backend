@@ -7,12 +7,12 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { rateLimit } from 'express-rate-limit';
 import { OAuth2Client } from 'google-auth-library';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes } from 'node:crypto';
 import {getProduct,registerPublicProducts,registerProductAdmin} from './products.js';
 import { z, ZodError } from 'zod';
 import type { Config } from './config.js';
 import type { Database } from './db.js';
-import { HttpError, sessionMiddleware, csrfMiddleware, newSession, setSignedOut, SIGNED_OUT_COOKIE, hash, requireUser, requireAdmin, encrypt, decrypt, marketplaceURL, type User } from './security.js';
+import { HttpError, sessionMiddleware, csrfMiddleware, newSession, setSignedOut, SIGNED_OUT_COOKIE, hash, requireUser, requireAdmin, requireRecentAdmin, encrypt, decrypt, marketplaceURL, type User } from './security.js';
 import { ProviderService, credentialFields, type ProviderId } from './providers.js';
 import { type OfferExtractor } from './scraping.js';
 import { RemoteOfferExtractor } from './remote-extractor.js';
@@ -27,18 +27,31 @@ const filtersSchema=z.object({q:z.string().max(160).default(''),marketplace:z.st
 const ruleSchema=z.object({marketplaceId:provider,name:text(),keywords:text(160),category:text(80),maxPriceCents:z.number().int().positive().max(100000000).nullable().default(null),minDiscount:z.number().int().min(0).max(99).default(0),intervalMinutes:z.number().int().min(60).max(10080).default(360),enabled:z.boolean().default(true)});
 const editSchema=z.object({title:text(300),description:z.string().max(4000).default(''),category:requiredCategory.default('Outros'),subcategory:classificationText.optional(),conditions:z.string().max(1500).default(''),featured:z.boolean().default(false),priceCents:z.number().int().positive().max(100000000).optional(),originalPriceCents:z.number().int().positive().max(100000000).nullable().optional(),expiresAt:z.iso.datetime().optional()});
 const manualSchema=editSchema.extend({productId:uuid,sellerName:z.string().trim().max(200).default(''),marketplaceId:provider,externalId:text(100),productUrl:z.url(),affiliateUrl:z.url(),imageUrl:z.url().nullable().default(null),priceCents:z.number().int().positive().max(100000000),originalPriceCents:z.number().int().positive().max(100000000).nullable().default(null),expiresAt:z.iso.datetime(),authorizedContent:z.literal(true)});
-export interface Identity { sub:string; email:string; emailVerified:boolean; name:string; avatar?:string; authoritative:boolean }
+export interface Identity { sub:string; email:string; emailVerified:boolean; name:string; avatar?:string; authoritative:boolean; nonce?:string }
 export interface AppOptions { extractor?:OfferExtractor; providers?:ProviderService; verifyGoogle?:(token:string)=>Promise<Identity> }
 export function createApp(db: Database,config: Config,options: AppOptions={}) {
   const app=express(), providers=options.providers??new ProviderService();
   const google=new OAuth2Client(config.GOOGLE_CLIENT_ID);
+  const verifyIdentity=async(credential:string):Promise<Identity>=>{
+    let identity: Identity;
+    try {
+      if(options.verifyGoogle) identity=await options.verifyGoogle(credential);
+      else {
+        const ticket=await google.verifyIdToken({idToken:credential,audience:config.GOOGLE_CLIENT_ID}); const p=ticket.getPayload();
+        if(!p?.sub||!p.email) throw new Error('Token incompleto');
+        identity={sub:p.sub,email:p.email,emailVerified:!!p.email_verified,name:p.name||p.email,avatar:p.picture,nonce:(p as any).nonce,authoritative:p.email.toLowerCase().endsWith('@gmail.com')||!!p.hd};
+      }
+    } catch { throw new HttpError(401,'Não foi possível validar sua conta Google.'); }
+    if(!identity.emailVerified || !identity.authoritative) throw new HttpError(403,'Use uma conta Gmail ou Google Workspace com e-mail verificado.');
+    return identity;
+  };
   app.disable('x-powered-by'); app.set('trust proxy',(config.TRUST_PROXY||'loopback').split(','));
   app.use(helmet(),express.json({limit:'64kb'}),cookieParser());
   app.use('/api',rateLimit({windowMs:60000,limit:300,standardHeaders:'draft-8',legacyHeaders:false,skip:()=>config.NODE_ENV==='test',message:{error:'Muitos acessos. Aguarde um minuto.'}}));
   app.get('/api/health',async(_req,res)=>{await db.query('SELECT 1');res.json({status:'ok'});});
   app.get('/api/config',(_req,res)=>res.json({googleClientId:config.GOOGLE_CLIENT_ID,loginAvailable:!!config.GOOGLE_CLIENT_ID}));
-  registerApiDocs(app,config);
   app.use('/api',sessionMiddleware(db,config));
+  registerApiDocs(app,config);
   app.get('/api/auth/session',async(req,res)=>{
     res.set('Cache-Control','no-store');
     if(!req.sessionId || typeof req.cookies['XSRF-TOKEN']!=='string' || hash(req.cookies['XSRF-TOKEN'])!==req.csrfHash){
@@ -53,16 +66,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     if(!config.GOOGLE_CLIENT_ID) throw new HttpError(503,'Login Google não configurado. Defina GOOGLE_CLIENT_ID no backend.');
     const {credential,automatic}=z.object({credential:text(10000),automatic:z.boolean().default(false)}).parse(req.body);
     if(automatic&&req.cookies[SIGNED_OUT_COOKIE]==='1')throw new HttpError(409,'Você saiu da conta. Escolha Entrar para acessar novamente.');
-    let identity: Identity;
-    try {
-      if(options.verifyGoogle) identity=await options.verifyGoogle(credential);
-      else {
-        const ticket=await google.verifyIdToken({idToken:credential,audience:config.GOOGLE_CLIENT_ID}); const p=ticket.getPayload();
-        if(!p?.sub||!p.email) throw new Error('Token incompleto');
-        identity={sub:p.sub,email:p.email,emailVerified:!!p.email_verified,name:p.name||p.email,avatar:p.picture,authoritative:p.email.toLowerCase().endsWith('@gmail.com')||!!p.hd};
-      }
-    } catch { throw new HttpError(401,'Não foi possível validar sua conta Google.'); }
-    if(!identity.emailVerified || !identity.authoritative) throw new HttpError(403,'Use uma conta Gmail ou Google Workspace com e-mail verificado.');
+    const identity=await verifyIdentity(credential);
     const email=identity.email.toLowerCase(), client=await db.connect(); let user: User;
     try {
       await client.query('BEGIN');
@@ -83,7 +87,21 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     const access=(await db.query('SELECT u.access_profile_id,p.permissions FROM users u JOIN access_profiles p ON p.id=u.access_profile_id WHERE u.id=$1 AND u.blocked=false',[user!.id])).rows[0];
     if(!access)throw new HttpError(403,'Sua conta está bloqueada.');
     Object.assign(user!,access);
-    await newSession(db,res,config,user!.id);if(!automatic)setSignedOut(res,config,false); res.set('Cache-Control','no-store').json({user:user!});
+    await newSession(db,res,config,user!.id,!automatic);if(!automatic)setSignedOut(res,config,false); res.set('Cache-Control','no-store').json({user:user!});
+  });
+  const reauthLimit=rateLimit({windowMs:60000,limit:10,skip:()=>config.NODE_ENV==='test',message:{error:'Muitas confirmações. Aguarde um minuto.'}});
+  app.post('/api/auth/reauth/challenge',requireUser,reauthLimit,async(req,res)=>{
+    if(req.user!.role!=='admin'&&!req.user!.permissions?.length)throw new HttpError(403,'Acesso administrativo necessário.');
+    const nonce=randomBytes(32).toString('hex');
+    await db.query("UPDATE sessions SET reauth_nonce_hash=$2,reauth_nonce_expires_at=clock_timestamp()+interval '5 minutes' WHERE id=$1",[req.sessionId,hash(nonce)]);
+    res.set('Cache-Control','no-store').json({nonce});
+  });
+  app.post('/api/auth/reauth',requireUser,reauthLimit,async(req,res)=>{
+    const {credential}=z.object({credential:text(10000)}).parse(req.body),identity=await verifyIdentity(credential);
+    if(typeof identity.nonce!=='string'||!/^[a-f0-9]{64}$/.test(identity.nonce))throw new HttpError(403,'Confirmação sem desafio válido.');
+    const result=await db.query("UPDATE sessions s SET admin_verified_at=clock_timestamp(),reauth_nonce_hash=NULL,reauth_nonce_expires_at=NULL FROM users u WHERE s.id=$1 AND s.user_id=u.id AND u.id=$2 AND u.google_sub=$3 AND u.blocked=false AND s.expires_at>clock_timestamp() AND s.reauth_nonce_hash=$4 AND s.reauth_nonce_expires_at>clock_timestamp() RETURNING s.id",[req.sessionId,req.user!.id,identity.sub,hash(identity.nonce)]);
+    if(!result.rows.length)throw new HttpError(403,'Confirmação inválida ou expirada. Use a mesma conta conectada.');
+    await audit(db,req.user!.id,'session.admin_verified',req.user!.id);res.set('Cache-Control','no-store').json({ok:true});
   });
   app.post('/api/auth/logout',async(req,res)=>{if(req.sessionId) await db.query('DELETE FROM sessions WHERE id=$1',[req.sessionId]);await newSession(db,res,config,null);setSignedOut(res,config,true);res.json({ok:true});});
   registerPublicProducts(app,db);
@@ -152,7 +170,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     if(req.user!.role==='admin') throw new HttpError(409,'A conta administradora deve ser transferida antes da exclusão.');
     await db.query('DELETE FROM users WHERE id=$1',[req.user!.id]);await newSession(db,res,config,null);setSignedOut(res,config,true);res.json({ok:true});
   });
-  app.use('/api/admin',requireUser,requireAdmin,(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
+  app.use('/api/admin',requireUser,requireAdmin,requireRecentAdmin,(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
   registerUserAdmin(app,db);
   registerProductAdmin(app,db);
   registerOfferRefreshAdmin(app,db);
@@ -270,7 +288,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
   app.use('/api',(_req,_res,next)=>next(new HttpError(404,'Recurso não encontrado.')));
   app.use((err:unknown,_req:express.Request,res:express.Response,_next:express.NextFunction)=>{
     if(err instanceof ZodError) return res.status(400).json({error:'Confira os campos preenchidos.',fields:err.issues.map(i=>({field:i.path.join('.'),message:i.message}))});
-    if(err instanceof HttpError) return res.status(err.status).json({error:err.message});
+    if(err instanceof HttpError) return res.status(err.status).json({error:err.message,...(err.code?{code:err.code}:{})});
     if((err as any)?.code==='23505') return res.status(409).json({error:'Este registro já existe.'});
     if((err as any)?.type==='entity.parse.failed') return res.status(400).json({error:'JSON inválido.'});
     if((err as any)?.type==='entity.too.large') return res.status(413).json({error:'Conteúdo excede o tamanho permitido.'});

@@ -14,8 +14,8 @@ for _attempt in $(seq 1 60); do
  if docker exec "$name-db" pg_isready -U test -d test >/dev/null 2>&1; then break; fi
  sleep 1
 done
-settings=(--network "$name-net" -e "DATABASE_URL=postgresql://test:ci-only-password@$name-db:5432/test" -e APP_ORIGIN=https://ci.example.com -e ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= -e RUN_WORKER=false)
-docker run --rm "${settings[@]}" "$image" node dist/migrate.js
+settings=(--network "$name-net" -e "DATABASE_URL=postgresql://espertinho_app:ci-only-application-password-32-chars@$name-db:5432/test" -e APP_ORIGIN=https://ci.example.com -e ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= -e RUN_WORKER=false)
+docker run --rm "${settings[@]}" -e "MIGRATION_DATABASE_URL=postgresql://test:ci-only-password@$name-db:5432/test" "$image" node dist/provision-database.js
 docker run -d --name "$name" "${settings[@]}" "$image" >/dev/null
 for _attempt in $(seq 1 90); do
  if docker exec "$name" node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))" >/dev/null 2>&1; then
