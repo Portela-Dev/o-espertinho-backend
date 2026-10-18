@@ -72,7 +72,7 @@ export function csrfMiddleware(config: Config) {
 export function requireUser(req: Request,_res: Response,next: NextFunction) { next(req.user ? undefined : new HttpError(401,'Entre com Google para continuar.')); }
 export function requireAdmin(req: Request,_res: Response,next: NextFunction) {
  if(req.user?.role==='admin')return next();
- const p=req.path.split('/').filter(Boolean),resource=p[0],method=req.method,granted=req.user?.permissions??[];
+ const p=req.path.split('/').filter(Boolean).map(part=>part.toLowerCase()),resource=p[0],method=req.method,granted=req.user?.permissions??[];
  let allowed:string[]=[];
  if(['users','access-profiles'].includes(resource))allowed=['users'];
  else if(resource==='stats')allowed=['overview'];
@@ -95,7 +95,7 @@ export function marketplaceURL(value: string, marketplace: string) {
 
 export const ADMIN_VERIFICATION_MS=15*60*1000;
 export function requireRecentAdmin(req:Request,_res:Response,next:NextFunction){
- const resource=req.path.split('/').filter(Boolean)[0];
+ const resource=req.path.split('/').filter(Boolean)[0]?.toLowerCase();
  const sensitive=!['GET','HEAD','OPTIONS'].includes(req.method)&&['users','access-profiles','marketplaces','catalog-marketplaces','selectors','mercadolivre','offer-refresh'].includes(resource);
  if(sensitive&&(!req.adminVerifiedAt||Date.now()-req.adminVerifiedAt.getTime()>ADMIN_VERIFICATION_MS))return next(new HttpError(403,'Confirme sua conta Google para concluir esta operação.','ADMIN_REAUTH_REQUIRED'));
  next();

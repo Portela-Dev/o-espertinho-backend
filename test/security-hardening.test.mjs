@@ -8,6 +8,7 @@ test('sessão antiga mantém navegação mas exige desafio Google em alteraçõe
  await db.query("UPDATE sessions SET admin_verified_at=clock_timestamp()-interval '16 minutes' WHERE user_id IS NOT NULL");
  assert.equal((await admin.get('/api/admin/users')).status,200);
  const blocked=await admin.mutate('post','/api/admin/access-profiles',{name:'Segurança',permissions:[]});assert.equal(blocked.status,403);assert.equal(blocked.body.code,'ADMIN_REAUTH_REQUIRED');
+ assert.equal((await admin.mutate('post','/api/admin/ACCESS-PROFILES',{name:'Tentativa com maiúsculas',permissions:[]})).body.code,'ADMIN_REAUTH_REQUIRED');
  const challenge=await admin.mutate('post','/api/auth/reauth/challenge');assert.equal(challenge.status,200);
  assert.equal((await admin.mutate('post','/api/auth/reauth',{credential:'admin'})).status,403);
  assert.equal((await admin.mutate('post','/api/auth/reauth',{credential:'other:'+challenge.body.nonce})).status,403);
