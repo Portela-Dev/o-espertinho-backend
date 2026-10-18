@@ -1,3 +1,4 @@
+import {pagedQuery,wantsPage} from './pagination.js';
 import express from 'express';
 import {registerExtensionMock} from './extension-mock.js';
 import {registerUserAdmin} from './user-admin.js';
@@ -140,28 +141,28 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     await db.query('INSERT INTO click_events(id,offer_id,marketplace_id,placement) VALUES($1,$2,$3,$4)',[randomUUID(),id,rows[0].marketplace_id,placement]);res.json({ok:true});
   });
   app.use('/api/me',requireUser,(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
-  app.get('/api/me/favorites',async(req,res)=>{const {rows}=await db.query('SELECT o.*,(SELECT name FROM marketplaces WHERE id=o.marketplace_id) AS marketplace_name, (SELECT logo_url FROM marketplaces WHERE id=o.marketplace_id) AS marketplace_logo_url FROM favorites f JOIN offers o ON o.id=f.offer_id WHERE f.user_id=$1 ORDER BY f.created_at DESC',[req.user!.id]);res.json(rows);});
+  app.get('/api/me/favorites',async(req,res)=>{const result=await pagedQuery(db,req.query,'SELECT o.*,(SELECT name FROM marketplaces WHERE id=o.marketplace_id) AS marketplace_name, (SELECT logo_url FROM marketplaces WHERE id=o.marketplace_id) AS marketplace_logo_url FROM favorites f JOIN offers o ON o.id=f.offer_id WHERE f.user_id=$1 ORDER BY f.created_at DESC,f.offer_id',[req.user!.id]);res.json(result);});
   app.put('/api/me/favorites/:id',async(req,res)=>{
     const id=uuid.parse(req.params.id), exists=await db.query("SELECT id FROM offers WHERE id=$1 AND status='published' AND availability_status='available'",[id]);
     if(!exists.rows.length) throw new HttpError(404,'Oferta indisponível.');
     await db.query('INSERT INTO favorites(user_id,offer_id) VALUES($1,$2) ON CONFLICT DO NOTHING',[req.user!.id,id]);res.json({ok:true});
   });
   app.delete('/api/me/favorites/:id',async(req,res)=>{await db.query('DELETE FROM favorites WHERE user_id=$1 AND offer_id=$2',[req.user!.id,uuid.parse(req.params.id)]);res.json({ok:true});});
-  app.get('/api/me/filters',async(req,res)=>{const {rows}=await db.query('SELECT * FROM saved_filters WHERE user_id=$1 ORDER BY created_at DESC',[req.user!.id]);res.json(rows);});
+  app.get('/api/me/filters',async(req,res)=>{const result=await pagedQuery(db,req.query,'SELECT * FROM saved_filters WHERE user_id=$1 ORDER BY created_at DESC,id',[req.user!.id]);res.json(result);});
   app.post('/api/me/filters',async(req,res)=>{
     const v=z.object({name:text(80),filters:filtersSchema}).parse(req.body);
     const {rows}=await db.query('INSERT INTO saved_filters(id,user_id,name,filters) VALUES($1,$2,$3,$4) RETURNING *',[randomUUID(),req.user!.id,v.name,JSON.stringify(v.filters)]);res.status(201).json(rows[0]);
   });
   app.delete('/api/me/filters/:id',async(req,res)=>{await db.query('DELETE FROM saved_filters WHERE id=$1 AND user_id=$2',[uuid.parse(req.params.id),req.user!.id]);res.json({ok:true});});
   app.get('/api/me/collections',async(req,res)=>{
-    const {rows}=await db.query('SELECT c.*,(SELECT count(*)::int FROM collection_items i WHERE i.collection_id=c.id) AS item_count FROM collections c WHERE c.user_id=$1 ORDER BY c.created_at DESC',[req.user!.id]);res.json(rows);
+    const result=await pagedQuery(db,req.query,'SELECT c.*,(SELECT count(*)::int FROM collection_items i WHERE i.collection_id=c.id) AS item_count FROM collections c WHERE c.user_id=$1 ORDER BY c.created_at DESC,id',[req.user!.id]);res.json(result);
   });
   app.post('/api/me/collections',async(req,res)=>{
     const v=z.object({name:text(80),description:z.string().max(400).default('')}).parse(req.body);
     const {rows}=await db.query('INSERT INTO collections(id,user_id,name,description) VALUES($1,$2,$3,$4) RETURNING *',[randomUUID(),req.user!.id,v.name,v.description]);res.status(201).json(rows[0]);
   });
   const ownedCollection=async(id:string,userId:string)=>{const {rows}=await db.query('SELECT * FROM collections WHERE id=$1 AND user_id=$2',[uuid.parse(id),userId]);if(!rows[0]) throw new HttpError(404,'Catálogo não encontrado.');return rows[0];};
-  app.get('/api/me/collections/:id',async(req,res)=>{const collection=await ownedCollection(String(req.params.id),req.user!.id);const {rows}=await db.query('SELECT o.*,(SELECT name FROM marketplaces WHERE id=o.marketplace_id) AS marketplace_name, (SELECT logo_url FROM marketplaces WHERE id=o.marketplace_id) AS marketplace_logo_url FROM collection_items i JOIN offers o ON o.id=i.offer_id WHERE i.collection_id=$1 ORDER BY i.created_at DESC',[collection.id]);res.json({...collection,items:rows});});
+  app.get('/api/me/collections/:id',async(req,res)=>{const collection=await ownedCollection(String(req.params.id),req.user!.id);const result=await pagedQuery(db,req.query,'SELECT o.*,(SELECT name FROM marketplaces WHERE id=o.marketplace_id) AS marketplace_name, (SELECT logo_url FROM marketplaces WHERE id=o.marketplace_id) AS marketplace_logo_url FROM collection_items i JOIN offers o ON o.id=i.offer_id WHERE i.collection_id=$1 ORDER BY i.created_at DESC,o.id',[collection.id]);res.json({...collection,...(Array.isArray(result)?{items:result}:result)});});
   app.patch('/api/me/collections/:id',async(req,res)=>{await ownedCollection(String(req.params.id),req.user!.id);const v=z.object({name:text(80),description:z.string().max(400).default('')}).parse(req.body);await db.query('UPDATE collections SET name=$2,description=$3 WHERE id=$1',[req.params.id,v.name,v.description]);res.json({ok:true});});
   app.delete('/api/me/collections/:id',async(req,res)=>{await ownedCollection(String(req.params.id),req.user!.id);await db.query('DELETE FROM collections WHERE id=$1',[req.params.id]);res.json({ok:true});});
   app.put('/api/me/collections/:id/items/:offerId',async(req,res)=>{
@@ -207,6 +208,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     const status=z.enum(['all','pending','published','rejected','expired']).default('pending').parse(req.query.status);
     const page=z.coerce.number().int().min(1).default(1).parse(req.query.page);
     const where=status==='all'?'TRUE':'status=$1',args=status==='all'?[]:[status];
+    if(wantsPage(req.query)){res.json(await pagedQuery(db,req.query,`SELECT * FROM offers WHERE ${where} ORDER BY updated_at DESC,id`,args));return;}
     const {rows}=await db.query(`SELECT * FROM offers WHERE ${where} ORDER BY updated_at DESC LIMIT 50 OFFSET $${args.length+1}`,[...args,(page-1)*50]);res.json(rows);
   });
   app.post('/api/admin/offers',async(req,res)=>{
@@ -288,7 +290,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
       db.query("SELECT to_char(created_at,'YYYY-MM-DD') AS day,count(*)::int AS clicks FROM click_events WHERE created_at>=$1 GROUP BY day ORDER BY day",[since])
     ]);res.json({days,offers:counts.rows,marketplaces:clicks.rows,top:top.rows,daily:daily.rows,totalClicks:clicks.rows.reduce((n,r)=>n+r.clicks,0)});
   });
-  app.get('/api/admin/audit',async(_req,res)=>{res.json((await db.query('SELECT a.*,u.email FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC LIMIT 100')).rows);});
+  app.get('/api/admin/audit',async(req,res)=>res.json(await pagedQuery(db,req.query,'SELECT a.*,u.email FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC,a.id',[],100)));
   app.use('/api',(_req,_res,next)=>next(new HttpError(404,'Recurso não encontrado.')));
   app.use((err:unknown,_req:express.Request,res:express.Response,_next:express.NextFunction)=>{
     if(err instanceof ZodError) return res.status(400).json({error:'Confira os campos preenchidos.',fields:err.issues.map(i=>({field:i.path.join('.'),message:i.message}))});

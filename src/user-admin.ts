@@ -1,3 +1,4 @@
+import {pagedQuery} from './pagination.js';
 import type {Express} from 'express';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
@@ -18,7 +19,10 @@ export const accessPermissions=[
 const profileInput=z.object({name:z.string().trim().min(1).max(80),description:z.string().trim().max(400).default(''),permissions:z.array(z.enum(['overview','catalog','marketplaces','selectors','updates','activity','users','affiliate_links'])).max(8).transform(v=>[...new Set(v)])});
 const userColumns='u.id,u.email,u.name,u.avatar,u.role,u.access_profile_id,u.blocked,u.created_at,p.name AS profile_name';
 export function registerUserAdmin(app:Express,db:Database){
- app.get('/api/admin/access-profiles',async(_req,res)=>res.json({permissions:accessPermissions,profiles:(await db.query('SELECT p.*,(SELECT count(*)::int FROM users u WHERE u.access_profile_id=p.id) AS user_count FROM access_profiles p ORDER BY p.system DESC,lower(p.name)')).rows}));
+ app.get('/api/admin/access-profiles',async(req,res)=>{
+  const result=await pagedQuery(db,req.query,'SELECT p.*,(SELECT count(*)::int FROM users u WHERE u.access_profile_id=p.id) AS user_count FROM access_profiles p ORDER BY p.system DESC,lower(p.name),p.id');
+  res.json({permissions:accessPermissions,...(Array.isArray(result)?{profiles:result}:{...result,profiles:result.items})});
+ });
  app.post('/api/admin/access-profiles',async(req,res)=>{
   const v=profileInput.parse(req.body),id=randomUUID();
   const c=await db.connect();try{await c.query('BEGIN');await c.query('INSERT INTO access_profiles(id,name,description,permissions) VALUES($1,$2,$3,$4)',[id,v.name,v.description,v.permissions]);await audit(c,req.user!.id,'profile.created',id);await c.query('COMMIT');res.status(201).json({id});}catch(e){await c.query('ROLLBACK');if((e as {code?:string}).code==='23505')throw new HttpError(409,'Já existe um perfil com esse nome.');throw e;}finally{c.release();}
