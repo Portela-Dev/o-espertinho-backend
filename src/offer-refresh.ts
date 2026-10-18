@@ -33,11 +33,38 @@ export async function startOfferRefresh(db:Database,userId:string){
   run=await enqueue(client,'manual',userId);await completeIfFinished(client,run.id);await audit(client,userId,'offer_refresh.started',run.id);run=(await client.query('SELECT * FROM offer_refresh_runs WHERE id=$1',[run.id])).rows[0];await client.query('COMMIT');
  }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}return run;
 }
+export async function cancelOfferRefresh(db:Database,runId:string,userId:string){
+ const client=await db.connect();
+ try{
+  await client.query('BEGIN');
+  await client.query('SELECT id FROM offer_refresh_settings WHERE id=true FOR UPDATE');
+  const run=(await client.query('SELECT * FROM offer_refresh_runs WHERE id=$1 FOR UPDATE',[runId])).rows[0];
+  if(!run)throw new HttpError(404,'Execução não encontrada.');
+  if(run.status==='cancelled'){await client.query('COMMIT');return run;}
+  if(run.status==='completed')throw new HttpError(409,'Esta atualização já foi concluída. Atualize o painel.');
+  const remaining=(await client.query("UPDATE offer_refresh_items SET status='done',outcome='skipped',error='Execução cancelada pelo administrador.',attempt_id=NULL,lease_until=NULL,finished_at=clock_timestamp() WHERE run_id=$1 AND status<>'done' RETURNING id",[runId])).rows.length;
+  const cancelled=(await client.query("UPDATE offer_refresh_runs SET status='cancelled',cancelled_at=clock_timestamp(),cancelled_by=$2,finished_at=clock_timestamp(),processed=processed+$3,skipped=skipped+$3 WHERE id=$1 RETURNING *",[runId,userId,remaining])).rows[0];
+  await advanceSchedule(client);
+  await audit(client,userId,'offer_refresh.cancelled',runId);
+  await client.query('COMMIT');return cancelled;
+ }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+}
+async function activeProgress(db:Database,run:any){
+ if(!run)return null;
+ const state=(await db.query(`SELECT next_item_at>clock_timestamp() AS waiting,
+ EXISTS(SELECT 1 FROM offer_refresh_items WHERE run_id=$1 AND status='running') AS extracting,
+ (SELECT outcome FROM offer_refresh_items WHERE run_id=$1 AND status='done' ORDER BY finished_at DESC,id DESC LIMIT 1) AS last_outcome
+ FROM offer_refresh_runs WHERE id=$1 AND status IN ('queued','running')`,[run.id])).rows[0];
+ if(!state)return null;
+ const phase=state.extracting?'extracting':state.waiting?'paused':'queued';
+ return {...run,phase,pause_reason:phase==='paused'?(state.last_outcome==='pending'?'technical_failure':'interval'):null};
+}
 export function registerOfferRefreshAdmin(app:Express,db:Database){
  app.get('/api/admin/offer-refresh',async(_req,res)=>{
   const settings=(await db.query('SELECT * FROM offer_refresh_settings WHERE id=true')).rows[0];
   const runs=(await db.query('SELECT * FROM offer_refresh_runs ORDER BY created_at DESC,id LIMIT 20')).rows;
-  res.json({settings,active:runs.find(r=>r.status!=='completed')??null,runs});
+  const active=runs.find(r=>['queued','running'].includes(r.status));
+  res.json({settings,active:await activeProgress(db,active),runs});
  });
  app.put('/api/admin/offer-refresh',async(req,res)=>{
   const v=settingsSchema.parse(req.body),client=await db.connect();let settings;
@@ -48,6 +75,7 @@ export function registerOfferRefreshAdmin(app:Express,db:Database){
   }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}res.json(settings);
  });
  app.post('/api/admin/offer-refresh/run',async(req,res)=>res.status(202).json(await startOfferRefresh(db,req.user!.id)));
+ app.post('/api/admin/offer-refresh/runs/:id/cancel',async(req,res)=>res.json(await cancelOfferRefresh(db,z.uuid().parse(req.params.id),req.user!.id)));
  app.get('/api/admin/offer-refresh/runs/:id',async(req,res)=>{
   const id=z.uuid().parse(req.params.id),run=(await db.query('SELECT * FROM offer_refresh_runs WHERE id=$1',[id])).rows[0];if(!run)throw new HttpError(404,'Execução não encontrada.');
   const errors=(await db.query("SELECT i.offer_id,i.marketplace_id,i.outcome,i.error,i.finished_at,o.title FROM offer_refresh_items i LEFT JOIN offers o ON o.id=i.offer_id WHERE i.run_id=$1 AND i.error IS NOT NULL ORDER BY i.finished_at DESC LIMIT 50",[id])).rows;
