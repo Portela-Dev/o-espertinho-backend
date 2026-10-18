@@ -1,4 +1,5 @@
 import express from 'express';
+import {registerExtensionMock} from './extension-mock.js';
 import {registerUserAdmin} from './user-admin.js';
 import {registerPriceHistory} from './price-history.js';
 import {registerOfferRefreshAdmin} from './offer-refresh.js';
@@ -61,6 +62,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     res.json({user:req.user??null,autoSignInAllowed:req.cookies[SIGNED_OUT_COOKIE]!=='1'});
   });
   registerMeliCallback(app,config);
+  registerExtensionMock(app,db,config);
   app.use('/api',csrfMiddleware(config));
   app.post('/api/auth/google',rateLimit({windowMs:60000,limit:15,skip:()=>config.NODE_ENV==='test',message:{error:'Muitas tentativas de login. Aguarde.'}}),async(req,res)=>{
     if(!config.GOOGLE_CLIENT_ID) throw new HttpError(503,'Login Google não configurado. Defina GOOGLE_CLIENT_ID no backend.');
@@ -87,7 +89,9 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     const access=(await db.query('SELECT u.access_profile_id,p.permissions FROM users u JOIN access_profiles p ON p.id=u.access_profile_id WHERE u.id=$1 AND u.blocked=false',[user!.id])).rows[0];
     if(!access)throw new HttpError(403,'Sua conta está bloqueada.');
     Object.assign(user!,access);
-    await newSession(db,res,config,user!.id,!automatic);if(!automatic)setSignedOut(res,config,false); res.set('Cache-Control','no-store').json({user:user!});
+    await newSession(db,res,config,user!.id,!automatic);
+    if(!automatic){setSignedOut(res,config,false);}
+    res.set('Cache-Control','no-store').json({user:user!});
   });
   const reauthLimit=rateLimit({windowMs:60000,limit:10,skip:()=>config.NODE_ENV==='test',message:{error:'Muitas confirmações. Aguarde um minuto.'}});
   app.post('/api/auth/reauth/challenge',requireUser,reauthLimit,async(req,res)=>{

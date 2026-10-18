@@ -24,6 +24,10 @@ test('PostgreSQL real: provisionamento preserva dados e restringe runtime, DDL e
   await provisionDatabase(owner,appUrl.href);assert.equal((await app.query('SELECT name FROM products WHERE id=$1',[id])).rows[0].name,'Atualizado');
   await owner.query(`GRANT pg_monitor TO "${role}"`);await assert.rejects(()=>assertRestrictedDatabase(app));await assert.rejects(()=>provisionDatabase(owner,appUrl.href));
  }finally{
-  await app?.end();await owner?.end();await admin.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);await admin.query(`DROP ROLE IF EXISTS "${role}"`);await admin.end();
+  await app?.end();await owner?.end();
+  // Pool.end resolves before PostgreSQL necessarily finishes closing each socket.
+  // A normal DROP waits for disconnection instead of killing these test clients.
+  await admin.query(`DROP DATABASE IF EXISTS "${database}"`);
+  await admin.query(`DROP ROLE IF EXISTS "${role}"`);await admin.end();
  }
 });

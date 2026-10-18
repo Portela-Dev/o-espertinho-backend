@@ -95,7 +95,7 @@ export function marketplaceURL(value: string, marketplace: string) {
 
 export const ADMIN_VERIFICATION_MS=15*60*1000;
 export function requireRecentAdmin(req:Request,_res:Response,next:NextFunction){
- const resource=req.path.split('/').filter(Boolean)[0]?.toLowerCase();
+ const resource=req.path.split('/').find(Boolean)?.toLowerCase()??'';
  const sensitive=!['GET','HEAD','OPTIONS'].includes(req.method)&&['users','access-profiles','marketplaces','catalog-marketplaces','selectors','mercadolivre','offer-refresh'].includes(resource);
  if(sensitive&&(!req.adminVerifiedAt||Date.now()-req.adminVerifiedAt.getTime()>ADMIN_VERIFICATION_MS))return next(new HttpError(403,'Confirme sua conta Google para concluir esta operação.','ADMIN_REAUTH_REQUIRED'));
  next();
