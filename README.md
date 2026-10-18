@@ -38,3 +38,27 @@ Nunca versione `.env` nem descarte o volume do PostgreSQL em uma parada rotineir
 ## CI/CD e deploy em VPS
 
 O workflow de GitHub Actions valida o projeto, gera cobertura para SonarQube e prepara deploy independente com Docker Compose via SSH. Consulte [o guia de CI/CD](deploy/README.md) para secrets/variables, projeto SonarQube, preparação da VPS, runtime e recuperação. O deploy automático começa desativado.
+
+
+## Extensão Chrome: autenticação real e API demonstrativa
+
+A migration `019_extension_access.sql` adiciona `affiliate_links` aos perfis e cria `extension_sessions`, armazenando apenas hashes dos tokens. O perfil Administrador recebe a nova permissão; outros perfis podem recebê-la na gestão de perfis existente. A autorização da extensão verifica a permissão exata, não apenas o papel de administrador.
+
+Em desenvolvimento, `EXTENSION_MOCK_ENABLED=true` e `EXTENSION_BACKEND_URL=http://localhost:3000` habilitam `/api/extension`. Em produção essas rotas ficam desativadas independentemente da flag. A extensão precisa da mesma origem base; use localhost no frontend e no backend para compartilhar o cookie na aba de aprovação.
+
+O login usa pareamento de cinco minutos com prova SHA-256: `/auth/start` fornece a URL de autorização; `/auth/connect` abre a página, `/auth/approve` exige sessão real, origem correta e XSRF; `/auth/poll` troca uma autorização de uso único pelos tokens. Não existe usuário fake nem login que ignore a validação Google em runtime. O token de acesso dura 15 minutos; `/auth/refresh` gira os tokens, com limite de sete dias para a renovação. A sessão depende da sessão web original. Logout web, bloqueio ou remoção da permissão impedem o acesso; `/auth/logout` revoga a sessão da extensão.
+
+As demais rotas exigem Bearer token e o header `X-Espertinho-Extension-Id`, vinculado à sessão:
+
+| Rota sob `/api/extension` | Método | Finalidade |
+| --- | --- | --- |
+| `/session` | GET | Conta e permissões atuais |
+| `/config` | GET | Receita declarativa da loja demonstrativa |
+| `/queue` | GET | Cinco itens de teste, separados por usuário |
+| `/batches/claim` | POST | `{ "marketplaceId": "demo" }`, reserva de dois itens por 120 segundos |
+| `/batches/results` | POST | `{ "leaseId": "...", "results": [{ "id": "...", "affiliateUrl": "..." }] }` ou erro por item |
+| `/queue/reset` | POST | Recriar apenas a fila demonstrativa do usuário |
+
+A receita define domínios, página de sessão, intervalo, seletores, headers com variáveis locais e caminho JSON do link retornado. A página `/demo/store` e o endpoint `/demo/convert` simulam o marketplace sem usar credenciais reais. Os resultados só alteram a fila em memória: não criam produtos, categorias ou ofertas e não publicam conteúdo. A fila reinicia com o processo; a autenticação da extensão é persistida no PostgreSQL. Respostas são no-store e as rotas têm limite de chamadas.
+
+Consulte a seção **Extensão Chrome** no Swagger para os contratos. A configuração administrativa das receitas, discovery e publicação reais ainda não foram implementados; este escopo entrega o consumidor genérico e os endpoints mockados.
