@@ -74,3 +74,9 @@ O processamento agendado e o consumo da fila de atualização de preços pertenc
 
 
 Admin → Atualizações permite cancelar uma rodada, preservando preços já atualizados e ignorando respostas de tentativas invalidadas. A pausa de proteção após falha técnica aparece explicitamente na tela. O backend oferece `POST /api/admin/offer-refresh/runs/:id/cancel`, com autorização de atualizações, XSRF e confirmação administrativa recente. A migration `020_offer_refresh_cancellation.sql` registra o cancelamento sem apagar execuções, links ou histórico. O job existente já confere o token da tentativa antes de gravar; seu advisory lock continua impedindo extrações simultâneas. Uma nova rodada pode ser enfileirada e aguarda o intervalo de proteção e o término de uma consulta anterior.
+
+## Paginação das coleções
+
+As consultas de listas pessoais e administrativas aceitam `paginate=true`, `page` (a partir de 1) e `pageSize` (20 por padrão; máximo 50). O resultado inclui `total`, `page` e `pageSize`; a lista é retornada em `items`, ou em `offers`, `runs`, `profiles` e `errors` nos detalhes correspondentes. Produtos retornam `offer_count`; ocorrências de execução retornam `errorTotal`. As faixas de preço consideram todas as ofertas, independentemente da página. Páginas além do fim são ajustadas à última disponível. Os contratos sem `paginate` permanecem compatíveis para consultas de seleção e clientes existentes. Não há migration nesta alteração.
+
+A lista de usuários também aceita `pageSize` de 1 a 50, mantendo 25 como padrão para clientes existentes. A interface oferece quantidades de 5, 10, 15, 20, 25 e 50 nas listas paginadas.

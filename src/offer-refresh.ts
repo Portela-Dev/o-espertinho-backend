@@ -1,3 +1,4 @@
+import {pagedQuery} from './pagination.js';
 import type {Express} from 'express';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
@@ -62,11 +63,11 @@ async function activeProgress(db:Database,run:any){
  return {...run,phase,pause_reason:phase==='paused'?pauseReason:null};
 }
 export function registerOfferRefreshAdmin(app:Express,db:Database){
- app.get('/api/admin/offer-refresh',async(_req,res)=>{
+ app.get('/api/admin/offer-refresh',async(req,res)=>{
   const settings=(await db.query('SELECT * FROM offer_refresh_settings WHERE id=true')).rows[0];
-  const runs=(await db.query('SELECT * FROM offer_refresh_runs ORDER BY created_at DESC,id LIMIT 20')).rows;
-  const active=runs.find(r=>['queued','running'].includes(r.status));
-  res.json({settings,active:await activeProgress(db,active),runs});
+  const result=await pagedQuery(db,req.query,'SELECT * FROM offer_refresh_runs ORDER BY created_at DESC,id',[],20);
+  const active=(await db.query("SELECT * FROM offer_refresh_runs WHERE status IN ('queued','running') LIMIT 1")).rows[0];
+  res.json({settings,active:await activeProgress(db,active),...(Array.isArray(result)?{runs:result}:{...result,runs:result.items})});
  });
  app.put('/api/admin/offer-refresh',async(req,res)=>{
   const v=settingsSchema.parse(req.body),client=await db.connect();let settings;
@@ -80,7 +81,7 @@ export function registerOfferRefreshAdmin(app:Express,db:Database){
  app.post('/api/admin/offer-refresh/runs/:id/cancel',async(req,res)=>res.json(await cancelOfferRefresh(db,z.uuid().parse(req.params.id),req.user!.id)));
  app.get('/api/admin/offer-refresh/runs/:id',async(req,res)=>{
   const id=z.uuid().parse(req.params.id),run=(await db.query('SELECT * FROM offer_refresh_runs WHERE id=$1',[id])).rows[0];if(!run)throw new HttpError(404,'Execução não encontrada.');
-  const errors=(await db.query("SELECT i.offer_id,i.marketplace_id,i.outcome,i.error,i.finished_at,o.title FROM offer_refresh_items i LEFT JOIN offers o ON o.id=i.offer_id WHERE i.run_id=$1 AND i.error IS NOT NULL ORDER BY i.finished_at DESC LIMIT 50",[id])).rows;
-  res.json({...run,errors});
+  const result=await pagedQuery(db,req.query,"SELECT i.offer_id,i.marketplace_id,i.outcome,i.error,i.finished_at,o.title FROM offer_refresh_items i LEFT JOIN offers o ON o.id=i.offer_id WHERE i.run_id=$1 AND i.error IS NOT NULL ORDER BY i.finished_at DESC,i.id",[id],50);
+  res.json({...run,...(Array.isArray(result)?{errors:result}:{...result,total:run.total,errorTotal:result.total,errors:result.items})});
  });
 }

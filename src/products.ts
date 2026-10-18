@@ -1,3 +1,4 @@
+import {pagedQuery,wantsPage} from './pagination.js';
 import type {Express} from 'express';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
@@ -32,6 +33,13 @@ export function registerPublicProducts(app:Express,db:Database){
  });
  app.get('/api/products/:id',async(req,res)=>{
   const product=await getProduct(db,String(req.params.id));
+  if(wantsPage(req.query)){
+   const result=await pagedQuery(db,req.query,`SELECT o.*,m.name AS marketplace_name,m.logo_url AS marketplace_logo_url FROM offers o JOIN marketplaces m ON m.id=o.marketplace_id WHERE o.product_id=$1 AND ${valid} ORDER BY o.price_cents,o.id`,[product.id]);
+   const summary=(await db.query(`SELECT min(o.price_cents)::int AS min_price_cents,max(o.price_cents)::int AS max_price_cents FROM offers o WHERE o.product_id=$1 AND ${valid}`,[product.id])).rows[0];
+   const image=(await db.query(`SELECT image_url FROM offers o WHERE o.product_id=$1 AND ${valid} AND image_url IS NOT NULL ORDER BY o.price_cents,o.id LIMIT 1`,[product.id])).rows[0]?.image_url;
+   const {sku:_sku,...publicProduct}=product;
+   res.json({...publicProduct,...summary,available:result.total>0,status:result.total?'available':'unavailable',offers:result.items,offer_count:result.total,page:result.page,pageSize:result.pageSize,display_image_url:product.image_url??image??null});return;
+  }
   const offers=(await db.query(`SELECT o.*,m.name AS marketplace_name,m.logo_url AS marketplace_logo_url FROM offers o JOIN marketplaces m ON m.id=o.marketplace_id WHERE o.product_id=$1 AND ${valid} ORDER BY o.price_cents,o.id`,[product.id])).rows;
   const {sku:_internalCode,...publicProduct}=product;
   res.json({...publicProduct,available:offers.length>0,status:offers.length?'available':'unavailable',min_price_cents:offers[0]?.price_cents??null,max_price_cents:offers.at(-1)?.price_cents??null,offers,display_image_url:product.image_url??offers.find(o=>o.image_url)?.image_url??null});
@@ -41,7 +49,7 @@ export function registerProductAdmin(app:Express,db:Database){
  app.get('/api/admin/category-tree',async(_req,res)=>res.json((await db.query('SELECT id,path,cardinality(path) AS depth FROM category_nodes ORDER BY path')).rows));
  app.get('/api/admin/products',async(req,res)=>{
   const q=z.string().max(160).default('').parse(req.query.q);
-  res.json((await db.query(`SELECT p.*,(SELECT count(*)::int FROM offers o WHERE o.product_id=p.id) AS link_count,(SELECT count(*)::int FROM offers o WHERE o.product_id=p.id AND ${valid}) AS available_count FROM products p WHERE p.name ILIKE $1 OR p.sku ILIKE $1 ORDER BY p.created_at DESC,p.id`,['%'+q.replaceAll('%','\\%').replaceAll('_','\\_')+'%'])).rows);
+  res.json(await pagedQuery(db,req.query,`SELECT p.*,(SELECT count(*)::int FROM offers o WHERE o.product_id=p.id) AS link_count,(SELECT count(*)::int FROM offers o WHERE o.product_id=p.id AND ${valid}) AS available_count FROM products p WHERE p.name ILIKE $1 OR p.sku ILIKE $1 ORDER BY p.created_at DESC,p.id`,['%'+q.replaceAll('%',String.raw`\%`).replaceAll('_',String.raw`\_`)+'%']));
  });
  const save=async(req:any,res:any)=>{
   const v=productSchema.parse(req.body),id=req.params.id?uuid.parse(req.params.id):randomUUID(),client=await db.connect();let product;
