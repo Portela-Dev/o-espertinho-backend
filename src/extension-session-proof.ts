@@ -23,7 +23,13 @@ export function registerSessionProof(router:Router,db:Database,config:Config,acc
   res.json({marketplaces:rows.map(m=>({id:m.id,name:m.name,loginUrl:marketUrl(m.website_url,m.allowed_hosts),allowedOrigins:m.allowed_hosts.map((h:string)=>'https://'+h),cookieDomains:m.allowed_hosts,testUrl:m.test_url||''}))});
  });
  router.post('/session-proof/tests',async(req,res)=>{
-  const actor=await admin(req),v=input.parse(req.body);cleanup();
+  const actor=await admin(req),parsed=input.safeParse(req.body);
+  if(!parsed.success){
+   const fields=parsed.error.issues.map(issue=>issue.path.join('.')).filter(Boolean).slice(0,8);
+   console.info(JSON.stringify({event:'session_proof_invalid',fields,codes:parsed.error.issues.map(issue=>issue.code).slice(0,8)}));
+   throw new HttpError(400,'Confira estes campos da prova: '+fields.join(', ')+'. Nenhum valor da sessão foi registrado.');
+  }
+  const v=parsed.data;cleanup();
   if(starting.size+[...proofs.values()].filter(p=>p.status==='running').length>=2||starting.has(actor.extension_session_id)||[...proofs.values()].some(p=>p.owner===actor.extension_session_id&&p.status==='running'))throw new HttpError(429,'Já existe um teste em andamento. Aguarde.');
   if(proofs.size>=100)throw new HttpError(429,'Aguarde a expiração dos testes anteriores.');
   starting.add(actor.extension_session_id);
