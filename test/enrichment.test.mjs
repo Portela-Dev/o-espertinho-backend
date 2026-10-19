@@ -1,7 +1,7 @@
 import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {testDatabase,testConfig,client,createApp,identity} from './helpers.mjs';
+import {testDatabase,testConfig,client,createApp,identity,seedProduct} from './helpers.mjs';
 import {categoryKey} from '../dist/enrichment-admin.js';
 let db,admin,user,ids=[];
 const base='/api/admin/discovery/enrichment';
@@ -62,4 +62,49 @@ test('review creates reusable category trees up to ten levels without assigning 
  for(const categoryPath of [[],[' '],['a'.repeat(81)],Array(11).fill('Categoria')])assert.equal((await admin.mutate('post',base+'/categories',{categoryPath})).status,400);
  assert.equal((await user.mutate('post',base+'/categories',{categoryPath:['Proibida']})).status,403);
  assert.equal((await admin.agent.post(base+'/categories').send({categoryPath:['Sem XSRF']})).status,403);
+});
+
+test('product assignment requires confirmed category, creates atomically and rejects stale retries',async()=>{
+ const id=ids[0],url=base+'/review/'+id;
+ const row=(await db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];
+ const product={name:'Fone revisado',description:'Descrição editada',brand:'Marca editada',imageUrl:'https://example.com/fone.jpg'};
+ const body={mode:'new',version:row.enrichment_version,product};
+ assert.equal((await user.mutate('post',url+'/product',body)).status,403);
+ assert.equal((await admin.agent.post(url+'/product').send(body)).status,403);
+ const pending=randomUUID();await db.query("INSERT INTO discovery_links(id,marketplace_id,url) VALUES($1,'amazon',$2)",[pending,'https://example.com/'+pending]);
+ assert.equal((await admin.mutate('post',base+'/review/'+pending+'/product',{...body,version:0})).status,409);
+ assert.equal((await admin.get(base+'/review/'+pending+'/products')).status,409);
+ assert.equal((await admin.mutate('post',url+'/product',{...body,product:{...product,imageUrl:'http://example.com/x'}})).status,400);
+ const created=await admin.mutate('post',url+'/product',body);assert.equal(created.status,200,JSON.stringify(created.body));
+ assert.equal(created.body.status,'awaiting_affiliate_link');assert.equal(created.body.product.name,product.name);
+ assert.equal(created.body.product.description,product.description);assert.equal(created.body.product.brand,product.brand);assert.equal(created.body.product.image_url,product.imageUrl);
+ const category=(await db.query('SELECT path FROM category_nodes WHERE id=$1',[row.confirmed_category_id])).rows[0];assert.deepEqual(created.body.product.category_path,category.path);
+ assert.equal((await admin.mutate('post',url+'/product',body)).status,409);
+ assert.equal((await db.query('SELECT count(*)::int n FROM products')).rows[0].n,1);
+ const review=(await admin.get(base+'/review')).body.items.find(l=>l.id===id);assert.equal(review.product_id,created.body.product.id);assert.equal(review.product_name,product.name);
+ assert.equal((await db.query('SELECT count(*)::int n FROM offers')).rows[0].n,0);
+});
+
+test('existing products are searched within category, preserved and invalidated on category changes',async()=>{
+ const id=ids[1],url=base+'/review/'+id;
+ let row=(await db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];
+ const existing=(await db.query('SELECT * FROM products LIMIT 1')).rows[0];
+ const unrelated=await seedProduct(db,{name:'Produto fora da categoria',category:'Casa'});
+ const found=await admin.get(url+'/products?q=Fone&pageSize=1');assert.equal(found.status,200);assert.equal(found.body.total,1);assert.equal(found.body.items[0].id,existing.id);
+ assert.equal((await admin.get(url+'/products?q=%25')).body.total,0);
+ assert.equal((await admin.mutate('post',url+'/product',{mode:'existing',version:row.enrichment_version,productId:unrelated})).status,409);
+ assert.equal((await admin.mutate('post',url+'/product',{mode:'existing',version:row.enrichment_version,productId:existing.id})).status,200);
+ assert.deepEqual((await db.query('SELECT * FROM products WHERE id=$1',[existing.id])).rows[0],existing);
+ row=(await db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];
+ const root=existing.category_ids[0];assert.equal((await admin.mutate('post',url+'/category',{categoryId:root,version:row.enrichment_version})).status,200);
+ assert.equal((await db.query('SELECT product_id FROM discovery_links WHERE id=$1',[id])).rows[0].product_id,null);
+ // Simulate worker invalidation after the source category changes.
+ await db.query('UPDATE discovery_links SET confirmed_category_id=NULL WHERE id=$1',[ids[0]]);
+ assert.equal((await db.query('SELECT product_id FROM discovery_links WHERE id=$1',[ids[0]])).rows[0].product_id,null);
+ row=(await db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];
+ assert.equal((await admin.mutate('post',url+'/product',{mode:'existing',version:row.enrichment_version,productId:existing.id})).status,200);
+ await db.query("UPDATE products SET category_path=ARRAY['Casa'] WHERE id=$1",[existing.id]);
+ assert.equal((await db.query('SELECT product_id FROM discovery_links WHERE id=$1',[id])).rows[0].product_id,null);
+ await db.query("UPDATE discovery_links SET status='archived' WHERE id=$1",[id]);
+ assert.equal((await admin.mutate('post',url+'/product',{mode:'existing',version:row.enrichment_version,productId:existing.id})).status,409);
 });

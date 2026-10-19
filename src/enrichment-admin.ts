@@ -9,6 +9,17 @@ import {requiredCategory} from './classifications.js';
 const uuid=z.uuid();
 const marketId=z.string().regex(/^[a-z][a-z0-9_-]{1,39}$/);
 const settings=z.strictObject({requestIntervalMs:z.number().int().min(100).max(600000),categorySeparator:z.string().max(10)});
+const newProduct=z.strictObject({name:z.string().trim().min(1).max(300),description:z.string().max(4000).default(''),brand:z.string().trim().max(120).default(''),imageUrl:z.url().refine(v=>new URL(v).protocol==='https:','A imagem deve usar HTTPS.').nullable().default(null)});
+const assignment=z.discriminatedUnion('mode',[
+ z.strictObject({mode:z.literal('existing'),version:z.number().int().nonnegative(),productId:uuid}),
+ z.strictObject({mode:z.literal('new'),version:z.number().int().nonnegative(),product:newProduct})
+]);
+async function reviewableLink(db:Pick<Database,'query'>,id:string,lock=false){
+ const row=(await db.query('SELECT * FROM discovery_links WHERE id=$1'+(lock?' FOR UPDATE':''),[id])).rows[0];
+ if(!row)throw new HttpError(404,'Link não encontrado.');
+ if(row.status!=='pending'||row.extraction_status!=='completed'||!row.confirmed_category_id)throw new HttpError(409,'Confirme a categoria antes de atribuir um produto.');
+ return row;
+}
 export const categoryKey=(path:string[])=>JSON.stringify(path.map(s=>s.normalize('NFC').replace(/\s+/gu,' ').trim().toLowerCase()));
 const runView=`SELECT r.id,r.marketplace_id,m.name AS marketplace_name,r.status,r.total,r.error,r.current_link_id,r.created_at,r.started_at,r.finished_at,r.heartbeat_at,
  (SELECT count(*)::int FROM enrichment_items i WHERE i.run_id=r.id AND i.status='completed') AS completed,
@@ -59,10 +70,38 @@ export function registerEnrichmentAdmin(app:Express,db:Database){
  });
  app.get(base+'/review',async(req,res)=>{
   const f=z.object({marketplaceId:marketId.or(z.literal('')).default(''),sourceCategory:z.string().max(1000).default(''),state:z.enum(['','pending','completed','failed']).default('')}).parse(req.query);
-  res.json(await pagedQuery(db,{...req.query,paginate:'true'},`SELECT l.*,m.name AS marketplace_name,cm.id AS mapping_id,cm.category_id AS suggested_category_id,n.path AS suggested_category_path,confirmed.path AS confirmed_category_path
+  res.json(await pagedQuery(db,{...req.query,paginate:'true'},`SELECT l.*,p.name AS product_name,p.sku AS product_sku,m.name AS marketplace_name,cm.id AS mapping_id,cm.category_id AS suggested_category_id,n.path AS suggested_category_path,confirmed.path AS confirmed_category_path
    FROM discovery_links l JOIN marketplaces m ON m.id=l.marketplace_id LEFT JOIN category_mappings cm ON cm.marketplace_id=l.marketplace_id AND cm.source_key=l.source_category_key
-   LEFT JOIN category_nodes n ON n.id=cm.category_id LEFT JOIN category_nodes confirmed ON confirmed.id=l.confirmed_category_id
+   LEFT JOIN category_nodes n ON n.id=cm.category_id LEFT JOIN category_nodes confirmed ON confirmed.id=l.confirmed_category_id LEFT JOIN products p ON p.id=l.product_id
    WHERE l.status='pending' AND ($1='' OR l.marketplace_id=$1) AND ($2='' OR l.extraction_status=$2) AND ($3='' OR position(lower($3) in lower(array_to_string(l.source_category_path,' > ')))>0) ORDER BY l.first_seen_at,l.id`,[f.marketplaceId,f.state,f.sourceCategory]));
+ });
+ app.get(base+'/review/:id/products',async(req,res)=>{
+  const row=await reviewableLink(db,uuid.parse(req.params.id));
+  const q=z.string().max(160).default('').parse(req.query.q);
+  const search='%'+q.replaceAll('\\','\\\\').replaceAll('%',String.raw`\%`).replaceAll('_',String.raw`\_`)+'%';
+  res.json(await pagedQuery(db,{...req.query,paginate:'true'},'SELECT p.* FROM products p WHERE p.category_ids @> ARRAY[$1]::uuid[] AND (p.name ILIKE $2 OR p.sku ILIKE $2) ORDER BY p.name,p.id',[row.confirmed_category_id,search]));
+ });
+ app.post(base+'/review/:id/product',async(req,res)=>{
+  const id=uuid.parse(req.params.id),v=assignment.parse(req.body);
+  const product=await transaction(db,async c=>{
+   const row=await reviewableLink(c,id,true);
+   if(row.enrichment_version!==v.version)throw new HttpError(409,'Os dados foram atualizados. Reabra a revisão.');
+   const category=(await c.query('SELECT path FROM category_nodes WHERE id=$1',[row.confirmed_category_id])).rows[0];
+   let product;
+   if(v.mode==='existing'){
+    // NOWAIT avoids a lock cycle with catalog recategorization, which also invalidates assignments.
+    try{product=(await c.query('SELECT * FROM products WHERE id=$1 FOR SHARE NOWAIT',[v.productId])).rows[0];}catch(error){if((error as {code?:string}).code==='55P03')throw new HttpError(409,'O produto está sendo alterado. Tente novamente.');throw error;}
+    if(!product)throw new HttpError(404,'Produto não encontrado.');
+    if(!product.category_ids.includes(row.confirmed_category_id))throw new HttpError(409,'Escolha um produto da categoria confirmada ou de suas subcategorias.');
+   }else{
+    const p=v.product,path=category.path;
+    product=(await c.query('INSERT INTO products(id,name,description,brand,category,subcategory,image_url,category_path) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',[randomUUID(),p.name,p.description,p.brand,path[0],path[1]??'',p.imageUrl,path])).rows[0];
+    await audit(c,req.user!.id,'product.created',product.id);
+   }
+   await c.query('UPDATE discovery_links SET product_id=$2,product_assigned_by=$3,product_assigned_at=clock_timestamp(),enrichment_version=enrichment_version+1 WHERE id=$1',[id,product.id,req.user!.id]);
+   await audit(c,req.user!.id,'discovery.product.assigned',id);
+   return product;
+  });res.json({product,status:'awaiting_affiliate_link'});
  });
  app.post(base+'/review/:id/category',async(req,res)=>{
   const id=uuid.parse(req.params.id),v=z.strictObject({categoryId:uuid,version:z.number().int().nonnegative(),saveMapping:z.boolean().default(false)}).parse(req.body);
