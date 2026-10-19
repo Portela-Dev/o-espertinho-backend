@@ -1,3 +1,5 @@
+import {registerEnrichmentAdmin} from './enrichment-admin.js';
+import {registerDiscoveryRuns} from './discovery-runs.js';
 import {registerDiscoveryAdmin} from './discovery-admin.js';
 import {pagedQuery,wantsPage} from './pagination.js';
 import express from 'express';
@@ -180,7 +182,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
   registerUserAdmin(app,db);
   registerProductAdmin(app,db);
   registerOfferRefreshAdmin(app,db);
-  registerDiscoveryAdmin(app,db);
+  registerDiscoveryAdmin(app,db);registerDiscoveryRuns(app,db);registerEnrichmentAdmin(app,db);
   registerScrapingAdmin(app,db,options.extractor??(config.MANUAL_EXTRACTOR_URL?new ManualOfferExtractor(config.MANUAL_EXTRACTOR_URL,config.MANUAL_EXTRACTION_SERVICE_TOKEN):{extract:async()=>{throw new HttpError(503,'Configure MANUAL_EXTRACTOR_URL e MANUAL_EXTRACTION_SERVICE_TOKEN e inicie o novo extrator manual.');}}));
   registerMeliAdminOAuth(app,db,config,providers);
   app.get('/api/admin/marketplaces',async(_req,res)=>{

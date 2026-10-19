@@ -18,6 +18,21 @@ test('cadastro de marketplace e seletores exige admin e XSRF, com controle de ve
 test('teste de seletores não cadastra ofertas nem modifica regras salvas',async()=>{
  const response=await admin.mutate('post','/api/admin/selectors/loja-teste/test',{url:affiliate,profile:{version:1,rules,waitTimeoutMs:1000,validityMinutes:60}});assert.equal(response.status,200);assert.equal(response.body.isTest,true);assert.equal((await db.query('SELECT * FROM offers')).rows.length,0);assert.equal((await db.query('SELECT * FROM offer_import_previews')).rows.length,0);
 });
+
+test('marketplace normalization is configurable, preview-only and preserved for older clients',async()=>{
+ const rules=[{type:'remove_path_suffix',marker:'/tracking/'}],body={id:'normalization-test',name:'Normalization test',websiteUrl:'https://shop.example.com',allowedHosts:['shop.example.com'],scrapingEnabled:true,urlNormalizationRules:rules};
+ assert.equal((await admin.mutate('post','/api/admin/catalog-marketplaces',body)).status,201);
+ const preview={url:'https://shop.example.com/p/123/tracking/context?x=1#details',allowedHosts:body.allowedHosts,rules};
+ const before=calls;assert.deepEqual((await admin.mutate('post','/api/admin/catalog-marketplaces/normalize-url',preview)).body,{url:'https://shop.example.com/p/123'});assert.equal(calls,before);
+ assert.equal((await admin.mutate('post','/api/admin/catalog-marketplaces/normalize-url',{...preview,url:'https://evil.example/p/123'})).status,400);
+ assert.equal((await admin.mutate('post','/api/admin/catalog-marketplaces/normalize-url',{...preview,url:'https://shop.example.com/tracking/context'})).status,400);
+ const normal=client(app);await normal.login('alice');assert.equal((await normal.mutate('post','/api/admin/catalog-marketplaces/normalize-url',preview)).status,403);
+ const {urlNormalizationRules,...oldBody}=body;assert.equal((await admin.mutate('put','/api/admin/catalog-marketplaces/'+body.id,oldBody)).status,200);
+ assert.deepEqual((await db.query('SELECT url_normalization_rules FROM marketplaces WHERE id=$1',[body.id])).rows[0].url_normalization_rules,rules);
+ assert.equal((await admin.mutate('put','/api/admin/catalog-marketplaces/'+body.id,{...body,urlNormalizationRules:[{type:'script',marker:'/x'}]})).status,400);
+ assert.equal((await admin.mutate('put','/api/admin/catalog-marketplaces/'+body.id,{...body,urlNormalizationRules:[]})).status,200);
+ assert.deepEqual((await db.query('SELECT url_normalization_rules FROM marketplaces WHERE id=$1',[body.id])).rows[0].url_normalization_rules,[]);
+});
 test('prévia não cadastra oferta; confirmação mantém link original, imagens e características pendentes',async()=>{
  const response=await admin.mutate('post','/api/admin/link-imports/preview',{productId,marketplaceId:'loja-teste',url:affiliate,category:'Tecnologia'});assert.equal(response.status,200);assert.equal(response.body.canConfirm,true);assert.equal((await db.query('SELECT * FROM offers')).rows.length,0);
  assert.equal(response.body.data.productUrl,source);const stored=(await db.query('SELECT * FROM offer_import_previews WHERE id=$1',[response.body.previewId])).rows[0];assert.equal(stored.source_url,source);assert.equal(stored.result.productUrl,source);assert.equal(stored.affiliate_url,affiliate);

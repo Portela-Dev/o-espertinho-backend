@@ -78,7 +78,7 @@ export function requireAdmin(req: Request,_res: Response,next: NextFunction) {
  else if(resource==='stats')allowed=['overview'];
  else if(resource==='audit')allowed=['activity'];
  else if(resource==='offer-refresh')allowed=['updates'];
- else if(resource==='discovery')allowed=['discovery'];
+ else if(resource==='discovery')allowed=p[1]==='enrichment'?['discovery','catalog']:['discovery'];
  else if(resource==='selectors')allowed=['selectors'];
  else if(['marketplaces','mercadolivre'].includes(resource)&&!p.includes('import'))allowed=['marketplaces'];
  else if(resource==='catalog-marketplaces')allowed=method==='GET'?['catalog','selectors','marketplaces','discovery']:['marketplaces'];

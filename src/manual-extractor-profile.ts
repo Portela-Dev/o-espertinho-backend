@@ -4,6 +4,8 @@ import type { ScrapingMarket, ScrapingProfile, SelectorRule } from './scraping.j
 function ruleContract(rule: SelectorRule) {
   return {
     field: rule.field, selectors: rule.selectors, mode: rule.mode, required: rule.required,
+    ...(rule.wholeSelector ? {wholeSelector:rule.wholeSelector} : {}),
+    ...(rule.fractionSelector ? {fractionSelector:rule.fractionSelector} : {}),
     ...(rule.mode === 'attribute' ? { attribute: rule.attribute } : {}),
     ...(rule.mode === 'pairs' ? { nameSelector: rule.nameSelector || 'th', valueSelector: rule.valueSelector || 'td' } : {}),
   };
@@ -13,7 +15,7 @@ export function manualProfile(market: ScrapingMarket, profile: ScrapingProfile) 
     const base = ruleContract(rule);
     // Legacy profiles relied on these price parts implicitly. Keep a text fallback
     // because selectors such as .a-offscreen contain the entire price directly.
-    if (rule.mode === 'text' && ['price', 'originalPrice'].includes(rule.field)) {
+    if (rule.mode === 'text' && !rule.wholeSelector && ['price', 'originalPrice'].includes(rule.field)) {
       return [{ ...base, wholeSelector: '.a-price-whole,.andes-money-amount__fraction',
         fractionSelector: '.a-price-fraction,.andes-money-amount__cents' }, base];
     }

@@ -23,7 +23,7 @@ function validateTemplate(config:DiscoveryConfig,allowedHosts:string[]){
 function databaseError(error:unknown):never{
  const code=(error as {code?:string})?.code;
  if(code==='23505'){throw new HttpError(409,'Já existe uma configuração com esse nome ou URL no marketplace.');}
- if(code==='23503'){throw new HttpError(409,'O perfil não pertence ao marketplace ou está vinculado a páginas de seção.');}
+ if(code==='23503'||code==='23001'){throw new HttpError(409,'Existem registros vinculados a esta configuração ou o perfil não pertence ao marketplace. Não é possível excluir ou mover.');}
  throw error;
 }
 async function mutate(db:Database,actor:string,action:string,work:(client:Pick<Database,'query'>)=>Promise<Record<string,unknown>>){
@@ -31,7 +31,7 @@ async function mutate(db:Database,actor:string,action:string,work:(client:Pick<D
 }
 export function registerDiscoveryAdmin(app:Express,db:Database){
  app.get('/api/admin/discovery/profile-options',async(req,res)=>{const f=filters.parse(req.query);res.json((await db.query("SELECT id,name,marketplace_id FROM discovery_profiles WHERE ($1='' OR marketplace_id=$1) ORDER BY lower(name),id",[f.marketplaceId])).rows);});
- app.get('/api/admin/discovery/defaults',(_req,res)=>res.json({config:defaultDiscoveryConfig(),executionAvailable:false}));
+ app.get('/api/admin/discovery/defaults',(_req,res)=>res.json({config:defaultDiscoveryConfig(),executionAvailable:true}));
  for(const kind of ['profiles','sources'] as const){
   const table=kind==='profiles'?'discovery_profiles':'discovery_sources';
   app.get('/api/admin/discovery/'+kind,async(req,res)=>{
