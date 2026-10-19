@@ -16,7 +16,7 @@ const sourceBody=(p,name='Monitores')=>({marketplaceId:'amazon',profileId:p.id,n
 test('discovery saves and retrieves all five pagination modes, selectors, limits and failure settings without running extraction',async()=>{
  const defaults=await admin.get('/api/admin/discovery/defaults');assert.equal(defaults.status,200);assert.equal(defaults.body.executionAvailable,false);assert.deepEqual(defaults.body.config,defaultDiscoveryConfig());
  for(const mode of ['single','next','url','load_more','scroll']){
-  const c=config(mode);c.rendering.frameSelector='iframe.catalog';c.pagination.previousSelector='.previous';c.pagination.currentPageSelector='[aria-current=page]';c.pagination.totalPagesSelector='.total';c.pagination.endSelector='.end';c.extraction.categorySelector='.breadcrumb li';
+  const c=config(mode);c.rendering.frameSelector='iframe.catalog';c.pagination.previousSelector='.previous';c.pagination.currentPageSelector='[aria-current=page]';c.pagination.totalPagesSelector='.total';c.pagination.endSelector='.end';
   c.failures.timeout={action:mode==='url'?'skip_page':'stop_section',retries:3,delayMs:1500,backoffMultiplier:2};c.limits.requestIntervalMs=100;
   const r=await admin.mutate('post','/api/admin/discovery/profiles',{name:'Modo '+mode,marketplaceId:'amazon',config:c});assert.equal(r.status,201,JSON.stringify(r.body));assert.deepEqual(r.body.config,c);assert.equal(r.body.version,1);
   const get=await admin.get('/api/admin/discovery/profiles/'+r.body.id);assert.deepEqual(get.body.config,c);
@@ -82,4 +82,41 @@ test('OpenAPI documents configuration bodies, versions, pagination and no-execut
 
 test('migration preserves existing offers/products/categories and only adds a permission and empty configuration tables',async()=>{
  const legacy=await testDatabase({through:'021\uffff'});try{const id=await seedOffer(legacy.db);const before=(await legacy.db.query('SELECT * FROM offers WHERE id=$1',[id])).rows[0];await legacy.pg.exec(await readFile(new URL('../migrations/022_discovery_configuration.sql',import.meta.url),'utf8'));assert.deepEqual((await legacy.db.query('SELECT * FROM offers WHERE id=$1',[id])).rows[0],before);assert.equal((await legacy.db.query('SELECT count(*)::int AS n FROM discovery_sources')).rows[0].n,0);assert.equal((await legacy.db.query('SELECT count(*)::int AS n FROM discovery_profiles')).rows[0].n,0);}finally{await legacy.db.end();}
+});
+
+
+test('discovery contract excludes product details and rejects retired fields on create and update',async()=>{
+ const p=await profile('Links only');
+ const keys=['itemSelector','linkSelector','linkAttribute'];
+ assert.deepEqual(Object.keys(p.config.extraction).sort(),keys.sort());
+ const defaults=(await admin.get('/api/admin/discovery/defaults')).body.config;
+ assert.deepEqual(Object.keys(defaults.extraction).sort(),keys);
+ for(const key of ['titleSelector','priceSelector','imageSelector','imageAttribute','brandSelector','descriptionSelector','categorySelector','categoryScope','categorySeparator']){
+  const c=config();c.extraction[key]='legacy';
+  assert.equal((await admin.mutate('post','/api/admin/discovery/profiles',{...profileBody('Retired '+key),config:c})).status,400);
+  assert.equal((await admin.mutate('put','/api/admin/discovery/profiles/'+p.id,{...profileBody('Links only'),config:c,version:p.version})).status,400);
+ }
+ const spec=(await admin.get('/api/openapi.json')).body;
+ const extraction=spec.paths['/admin/discovery/profiles'].post.requestBody.content['application/json'].schema.properties.config.properties.extraction;
+ assert.deepEqual(Object.keys(extraction.properties).sort(),keys);
+});
+
+test('links-only migration removes obsolete selectors while preserving source bindings and catalog data',async()=>{
+ const legacy=await testDatabase({through:'022\uffff'});
+ try{
+  const offerId=await seedOffer(legacy.db),profileId=randomUUID(),sourceId=randomUUID(),untouchedId=randomUUID();
+  const beforeOffer=(await legacy.db.query('SELECT * FROM offers WHERE id=$1',[offerId])).rows[0];
+  const oldConfig=config('scroll');Object.assign(oldConfig.extraction,{titleSelector:'h2',priceSelector:'.price',imageSelector:'img',imageAttribute:'src',brandSelector:'.brand',descriptionSelector:'.summary',categorySelector:'.breadcrumb li',categoryScope:'page',categorySeparator:'>'});
+  await legacy.db.query('INSERT INTO discovery_profiles(id,marketplace_id,name,config) VALUES($1,$2,$3,$4)',[profileId,'amazon','Legacy profile',JSON.stringify(oldConfig)]);
+  await legacy.db.query('INSERT INTO discovery_profiles(id,marketplace_id,name,config) VALUES($1,$2,$3,$4)',[untouchedId,'amazon','Clean profile',JSON.stringify(config())]);
+  await legacy.db.query('INSERT INTO discovery_sources(id,marketplace_id,profile_id,name,url,source_category_path) VALUES($1,$2,$3,$4,$5,$6)',[sourceId,'amazon',profileId,'Source','https://www.amazon.com.br/s?k=teste',['Origem']]);
+  const sourceBefore=(await legacy.db.query('SELECT * FROM discovery_sources WHERE id=$1',[sourceId])).rows[0];
+  const sql=await readFile(new URL('../migrations/023_discovery_links_only.sql',import.meta.url),'utf8');await legacy.pg.exec(sql);
+  const migrated=(await legacy.db.query('SELECT * FROM discovery_profiles WHERE id=$1',[profileId])).rows[0];
+  assert.deepEqual(migrated.config,config('scroll'));assert.equal(migrated.version,2);assert.equal(discoveryConfigSchema.safeParse(migrated.config).success,true);
+  assert.deepEqual((await legacy.db.query('SELECT * FROM discovery_sources WHERE id=$1',[sourceId])).rows[0],sourceBefore);
+  assert.deepEqual((await legacy.db.query('SELECT * FROM offers WHERE id=$1',[offerId])).rows[0],beforeOffer);
+  assert.equal((await legacy.db.query('SELECT version FROM discovery_profiles WHERE id=$1',[untouchedId])).rows[0].version,1);
+  await legacy.pg.exec(sql);assert.equal((await legacy.db.query('SELECT version FROM discovery_profiles WHERE id=$1',[profileId])).rows[0].version,2);
+ }finally{await legacy.db.end();}
 });
