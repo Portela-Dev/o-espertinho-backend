@@ -14,7 +14,7 @@ async function profile(name,mode){const r=await admin.mutate('post','/api/admin/
 const sourceBody=(p,name='Monitores')=>({marketplaceId:'amazon',profileId:p.id,name,url:'https://www.amazon.com.br/s?k=monitor&rh=n%3A16364755011#ignored',sourceCategoryPath:['Informática','Monitores'],enabled:true,intervalHours:12,notes:'Página de busca'});
 
 test('discovery saves and retrieves all five pagination modes, selectors, limits and failure settings without running extraction',async()=>{
- const defaults=await admin.get('/api/admin/discovery/defaults');assert.equal(defaults.status,200);assert.equal(defaults.body.executionAvailable,false);assert.deepEqual(defaults.body.config,defaultDiscoveryConfig());
+ const defaults=await admin.get('/api/admin/discovery/defaults');assert.equal(defaults.status,200);assert.equal(defaults.body.executionAvailable,true);assert.deepEqual(defaults.body.config,defaultDiscoveryConfig());
  for(const mode of ['single','next','url','load_more','scroll']){
   const c=config(mode);c.rendering.frameSelector='iframe.catalog';c.pagination.previousSelector='.previous';c.pagination.currentPageSelector='[aria-current=page]';c.pagination.totalPagesSelector='.total';c.pagination.endSelector='.end';
   c.failures.timeout={action:mode==='url'?'skip_page':'stop_section',retries:3,delayMs:1500,backoffMultiplier:2};c.limits.requestIntervalMs=100;
@@ -77,7 +77,7 @@ test('permission, XSRF and recent Google verification protect configuration endp
 test('OpenAPI documents configuration bodies, versions, pagination and no-execution contract',async()=>{
  const spec=(await admin.get('/api/openapi.json')).body;await SwaggerParser.validate(structuredClone(spec));
  for(const kind of ['profiles','sources']){for(const method of ['get','post'])assert.ok(spec.paths['/admin/discovery/'+kind][method]);for(const method of ['get','put','delete'])assert.ok(spec.paths['/admin/discovery/'+kind+'/{id}'][method]);assert.ok(spec.paths['/admin/discovery/'+kind+'/{id}'].put.requestBody.content['application/json'].schema.required.includes('version'));}
- assert.match(spec.paths['/admin/discovery/defaults'].get.description,/nenhum job/i);
+ assert.match(spec.paths['/admin/discovery/defaults'].get.description,/não inicia nenhum job/i);
 });
 
 test('migration preserves existing offers/products/categories and only adds a permission and empty configuration tables',async()=>{
