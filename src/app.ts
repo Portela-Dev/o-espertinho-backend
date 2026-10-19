@@ -1,3 +1,4 @@
+import {registerDiscoveryAdmin} from './discovery-admin.js';
 import {pagedQuery,wantsPage} from './pagination.js';
 import express from 'express';
 import {registerExtensionMock} from './extension-mock.js';
@@ -21,7 +22,7 @@ import { ManualOfferExtractor } from './manual-extractor.js';
 import { classificationText,requiredCategory,resolveClassification } from './classifications.js';
 import { registerScrapingAdmin,assertRegisteredLink } from './scraping-admin.js';
 import { registerMeliCallback, registerMeliAdminOAuth, meliRedirectUri } from './mercadolivre-oauth.js';
-import { audit, withMeliCredentials, credentials, insertCandidate, refreshOffer, runRule } from './offers.js';
+import { audit, withMeliCredentials, credentials, refreshOffer, runRule } from './offers.js';
 const uuid=z.uuid();
 const provider=z.enum(['amazon','mercadolivre']);
 const text=(max=120)=>z.string().trim().min(1).max(max);
@@ -179,6 +180,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
   registerUserAdmin(app,db);
   registerProductAdmin(app,db);
   registerOfferRefreshAdmin(app,db);
+  registerDiscoveryAdmin(app,db);
   registerScrapingAdmin(app,db,options.extractor??(config.MANUAL_EXTRACTOR_URL?new ManualOfferExtractor(config.MANUAL_EXTRACTOR_URL,config.MANUAL_EXTRACTION_SERVICE_TOKEN):{extract:async()=>{throw new HttpError(503,'Configure MANUAL_EXTRACTOR_URL e MANUAL_EXTRACTION_SERVICE_TOKEN e inicie o novo extrator manual.');}}));
   registerMeliAdminOAuth(app,db,config,providers);
   app.get('/api/admin/marketplaces',async(_req,res)=>{
@@ -213,23 +215,13 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
   });
   app.post('/api/admin/offers',async(req,res)=>{
     const v=manualSchema.parse(req.body),product=await getProduct(db,v.productId);
-    if(v.marketplaceId==='amazon') throw new HttpError(400,'Importe produtos Amazon pela Creators API para utilizar preços e imagens autorizados.');
+    if(v.marketplaceId==='amazon') throw new HttpError(400,'Cadastre a oferta por link e use os seletores configurados no marketplace.');
     marketplaceURL(v.productUrl,v.marketplaceId);marketplaceURL(v.affiliateUrl,v.marketplaceId);
     if(new Date(v.expiresAt)<=new Date()||new Date(v.expiresAt)>new Date(Date.now()+7*86400000)) throw new HttpError(400,'Defina validade futura de até sete dias.');
     if(v.imageUrl&&!v.imageUrl.startsWith('https://')) throw new HttpError(400,'A imagem deve usar HTTPS.');
     const classification={category:product.category,subcategory:product.subcategory};
     const {rows}=await db.query(`INSERT INTO offers(id,marketplace_id,external_id,title,description,category,image_url,product_url,affiliate_url,price_cents,original_price_cents,source,conditions,featured,expires_at,subcategory,product_id,seller_name) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'manual',$12,$13,$14,$15,$16,$17) RETURNING *`,[randomUUID(),v.marketplaceId,v.externalId,v.title,v.description,classification.category,v.imageUrl,v.productUrl,v.affiliateUrl,v.priceCents,v.originalPriceCents,v.conditions,v.featured,v.expiresAt,classification.subcategory,v.productId,v.sellerName]);
     await audit(db,req.user!.id,'offer.created',rows[0].id);res.status(201).json(rows[0]);
-  });
-  app.post('/api/admin/amazon/import',async(req,res)=>{
-    const v=z.object({asin:z.string().regex(/^[A-Z0-9]{10}$/),productId:uuid,category:text(80).default('Outros')}).parse(req.body),{secrets}=await credentials(db,config,'amazon');
-    await getProduct(db,v.productId);const c=await providers.refresh('amazon',secrets,v.asin);if(!c) throw new HttpError(404,'Produto sem oferta disponível na API.');await insertCandidate(db,'amazon',c,v.category,v.productId);res.json({ok:true});
-  });
-  app.post('/api/admin/mercadolivre/import',async(req,res)=>{
-    const v=z.object({itemId:z.string().regex(/^MLB\d+$/),productId:uuid,affiliateUrl:z.url(),category:text(80).default('Outros'),authorizedContent:z.literal(true)}).parse(req.body);
-    await getProduct(db,v.productId);marketplaceURL(v.affiliateUrl,'mercadolivre');
-    const c=await withMeliCredentials(db,config,secrets=>providers.refresh('mercadolivre',secrets,v.itemId));
-    if(!c)throw new HttpError(404,'Item indisponível na API geral.');c.affiliateUrl=v.affiliateUrl;await insertCandidate(db,'mercadolivre',c,v.category,v.productId);res.json({ok:true});
   });
   const getOffer=async(id:string)=>{const {rows}=await db.query('SELECT * FROM offers WHERE id=$1',[uuid.parse(id)]);if(!rows[0]) throw new HttpError(404,'Oferta não encontrada.');return rows[0];};
   app.patch('/api/admin/offers/:id',async(req,res)=>{

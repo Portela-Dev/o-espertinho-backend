@@ -17,7 +17,7 @@ test('produto exige admin e XSRF; produto sem links tem página e fica fora da v
 test('nenhuma entrada aceita link sem produto existente, incluindo importação e prévia',async()=>{
  const b=offerBody(undefined);assert.equal((await admin.mutate('post','/api/admin/offers',b)).status,400);assert.equal((await admin.mutate('post','/api/admin/offers',{...b,productId:randomUUID()})).status,404);
  assert.equal((await admin.mutate('post','/api/admin/link-imports/preview',{marketplaceId:'amazon',url:'https://www.amazon.com.br/dp/B012345678'})).status,400);
- assert.equal((await admin.mutate('post','/api/admin/amazon/import',{asin:'B012345678'})).status,400);assert.equal((await admin.mutate('post','/api/admin/mercadolivre/import',{itemId:'MLB12345',affiliateUrl:b.affiliateUrl,authorizedContent:true})).status,400);
+ assert.equal((await admin.mutate('post','/api/admin/amazon/import',{asin:'B012345678'})).status,404);assert.equal((await admin.mutate('post','/api/admin/mercadolivre/import',{itemId:'MLB12345',affiliateUrl:b.affiliateUrl,authorizedContent:true})).status,404);
  await assert.rejects(()=>db.query("INSERT INTO offers(id,marketplace_id,external_id,title,product_url,price_cents,source,expires_at) VALUES($1,'amazon','missing','X','https://www.amazon.com.br',100,'manual',now())",[randomUUID()]));
 });
 test('vitrine agrupa links, calcula faixa apenas com publicadas válidas e filtra por produto',async()=>{
