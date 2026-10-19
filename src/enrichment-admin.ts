@@ -5,6 +5,7 @@ import type {Database} from './db.js';
 import {HttpError} from './security.js';
 import {audit} from './offers.js';
 import {pagedQuery} from './pagination.js';
+import {requiredCategory} from './classifications.js';
 const uuid=z.uuid();
 const marketId=z.string().regex(/^[a-z][a-z0-9_-]{1,39}$/);
 const settings=z.strictObject({requestIntervalMs:z.number().int().min(100).max(600000),categorySeparator:z.string().max(10)});
@@ -47,6 +48,15 @@ export function registerEnrichmentAdmin(app:Express,db:Database){
  app.post(base+'/runs/:id/cancel',async(req,res)=>res.json(await cancelEnrichment(db,uuid.parse(req.params.id),req.user!.id)));
  app.post(base+'/review/:id/archive',async(req,res)=>{const id=uuid.parse(req.params.id);await transaction(db,async c=>{if(!(await c.query("UPDATE discovery_links SET status='archived' WHERE id=$1 RETURNING id",[id])).rows.length)throw new HttpError(404,'Link não encontrado.');await audit(c,req.user!.id,'discovery.link.archived',id);});res.json({ok:true});});
  app.get(base+'/categories',async(_req,res)=>res.json((await db.query('SELECT id,path FROM category_nodes ORDER BY normalized_path')).rows));
+ app.post(base+'/categories',async(req,res)=>{
+  const {categoryPath}=z.strictObject({categoryPath:z.array(requiredCategory).min(1).max(10)}).parse(req.body);
+  const result=await transaction(db,async c=>{
+   const row=(await c.query('SELECT names,ids FROM register_category_path($1::text[])',[categoryPath])).rows[0];
+   const nodes=(row.ids as string[]).map((id,index)=>({id,path:(row.names as string[]).slice(0,index+1)}));
+   const leaf=nodes.at(-1)!;await audit(c,req.user!.id,'discovery.category_tree.created',leaf.id);
+   return {...leaf,nodes};
+  });res.status(201).json(result);
+ });
  app.get(base+'/review',async(req,res)=>{
   const f=z.object({marketplaceId:marketId.or(z.literal('')).default(''),sourceCategory:z.string().max(1000).default(''),state:z.enum(['','pending','completed','failed']).default('')}).parse(req.query);
   res.json(await pagedQuery(db,{...req.query,paginate:'true'},`SELECT l.*,m.name AS marketplace_name,cm.id AS mapping_id,cm.category_id AS suggested_category_id,n.path AS suggested_category_path,confirmed.path AS confirmed_category_path

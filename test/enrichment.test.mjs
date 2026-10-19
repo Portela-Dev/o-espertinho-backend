@@ -49,3 +49,17 @@ test('missing origin allows item-only confirmation and permissions/XSRF/limits r
  assert.equal((await admin.mutate('post',base+'/runs',{marketplaceId:'amazon',schedule:true})).status,400);
  assert.equal((await admin.get(base+'/review?pageSize=51')).status,400);
 });
+test('review creates reusable category trees up to ten levels without assigning or publishing anything',async()=>{
+ const before=(await db.query('SELECT id,confirmed_category_id FROM discovery_links ORDER BY id')).rows;
+ const categoryPath=['  Nova   árvore  ',...Array.from({length:9},(_,i)=>'Nível '+(i+2))];
+ const created=await admin.mutate('post',base+'/categories',{categoryPath});assert.equal(created.status,201);
+ assert.equal(created.body.nodes.length,10);assert.equal(created.body.path[0],'Nova árvore');assert.equal(created.body.path.length,10);
+ assert.equal(created.body.nodes[9].id,created.body.id);
+ const reused=await admin.mutate('post',base+'/categories',{categoryPath:created.body.path.map(p=>p.toLowerCase())});assert.equal(reused.status,201);assert.equal(reused.body.id,created.body.id);assert.deepEqual(reused.body.path,created.body.path);
+ assert.ok((await admin.get(base+'/categories')).body.some(n=>n.id===created.body.id));
+ assert.deepEqual((await db.query('SELECT id,confirmed_category_id FROM discovery_links ORDER BY id')).rows,before);
+ for(const table of ['products','offers'])assert.equal((await db.query('SELECT count(*)::int n FROM '+table)).rows[0].n,0);
+ for(const categoryPath of [[],[' '],['a'.repeat(81)],Array(11).fill('Categoria')])assert.equal((await admin.mutate('post',base+'/categories',{categoryPath})).status,400);
+ assert.equal((await user.mutate('post',base+'/categories',{categoryPath:['Proibida']})).status,403);
+ assert.equal((await admin.agent.post(base+'/categories').send({categoryPath:['Sem XSRF']})).status,403);
+});
