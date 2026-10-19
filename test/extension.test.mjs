@@ -12,10 +12,11 @@ import {
 const extensionId = "a".repeat(32),
   base = "http://localhost:3000";
 const digest = (value) => createHash("sha256").update(value).digest("hex");
-async function fixture(t) {
+async function fixture(t, options = {}) {
   const { db } = await testDatabase();
   t.after(() => db.end());
-  const app = createApp(db, testConfig(), {
+  const app = createApp(db, {...testConfig(),...options.config}, {
+    sessionProofTransport: options.transport,
     verifyGoogle: async (token) => identity(token),
   });
   const browser = client(app);
@@ -242,4 +243,26 @@ test("mocks ficam desativados em produção e podem ser desligados em desenvolvi
     const app = createApp(db, config);
     assert.equal((await request(app).get("/api/extension/config")).status, 404);
   }
+});
+
+
+test('session proof uses real extension auth, scoped domains, ephemeral private results and no cookie echo',async t=>{
+ let resolve,submitted;
+ const f=await fixture(t,{config:{MANUAL_EXTRACTOR_URL:'http://127.0.0.1:3011',MANUAL_EXTRACTION_SERVICE_TOKEN:'a'.repeat(40)},transport:async(url,options)=>{submitted=JSON.parse(options.body);return new Promise(done=>{resolve=done;});}});
+ const auth=await f.login();
+ await f.db.query("UPDATE marketplaces SET website_url='https://shop.example.com',allowed_hosts=ARRAY['shop.example.com','example.com'],scraping_enabled=true WHERE id='amazon'");
+ await f.db.query("INSERT INTO scraping_profiles(marketplace_id,rules,wait_timeout_ms,validity_minutes) VALUES('amazon',$1,15000,360) ON CONFLICT(marketplace_id) DO UPDATE SET rules=$1",[JSON.stringify([{field:'title',selectors:['h1'],mode:'text',required:true},{field:'price',selectors:['.price'],mode:'text',required:true}])]);
+ const base='/session-proof',cookie={name:'session',value:'PRIVATE-COOKIE',domain:'.example.com',path:'/',expires:-1,httpOnly:true,secure:true,sameSite:'Lax'};
+ const body={marketplaceId:'amazon',url:'https://shop.example.com/product?tracking=remove#fragment',consent:true,session:{cookies:[cookie],origins:[]}};
+ assert.equal((await f.get(base+'/marketplaces')).status,401);
+ const markets=await f.get(base+'/marketplaces',auth.token);assert.equal(markets.status,200);assert.ok(markets.body.marketplaces.some(m=>m.id==='amazon'&&m.cookieDomains.includes('example.com')));
+ for(const bad of [{...body,consent:false},{...body,url:'https://foreign.example/product'},{...body,session:{cookies:[{...cookie,domain:'.com'}],origins:[]}},{...body,session:{cookies:[cookie],origins:[{origin:'https://foreign.example',localStorage:[]}]}}])assert.equal((await f.post(base+'/tests',bad,auth.token)).status,400);
+ const created=await f.post(base+'/tests',body,auth.token);assert.equal(created.status,202,JSON.stringify(created.body));assert.equal(submitted.url,'https://shop.example.com/product');assert.equal(submitted.session.cookies[0].value,'PRIVATE-COOKIE');assert.equal(submitted.profile.allowedHosts.includes('example.com'),true);
+ assert.equal((await f.post(base+'/tests',body,auth.token)).status,429);
+ const second=await f.login();assert.equal((await f.get(base+'/tests/'+created.body.id,second.token)).status,404);
+ resolve(Response.json({requestId:crypto.randomUUID(),status:'technical_failure',reason:'incomplete',title:null,priceCents:null,missing:['title','price'],finalUrl:'https://shop.example.com/login',navigationStatuses:[302,200],cookiesImported:1,storageOriginsImported:0,cookies:'PRIVATE-COOKIE'}));
+ let result;for(let i=0;i<20;i++){result=await f.get(base+'/tests/'+created.body.id,auth.token);if(result.body.status==='completed')break;await new Promise(ok=>setTimeout(ok,5));}
+ assert.equal(result.body.status,'completed');assert.equal(result.body.result.finalUrl,'https://shop.example.com/login');assert.equal(JSON.stringify([created.body,result.body]).includes('PRIVATE-COOKIE'),false);
+ const logs=(await f.db.query('SELECT action,entity_id FROM audit_logs')).rows;assert.equal(JSON.stringify(logs).includes('PRIVATE-COOKIE'),false);
+ await f.db.query("INSERT INTO access_profiles(id,name,permissions) VALUES('proof-editor','Proof editor',ARRAY['affiliate_links'])");await f.db.query("UPDATE users SET role='user',access_profile_id='proof-editor' WHERE id=$1",[auth.user.id]);assert.equal((await f.get(base+'/marketplaces',auth.token)).status,403);
 });

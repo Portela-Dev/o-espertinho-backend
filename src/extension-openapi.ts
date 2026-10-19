@@ -90,7 +90,7 @@ export function extensionApiPaths() {
         tags: ["Extensão Chrome"],
         summary,
         description:
-          "Disponível somente fora de produção, com EXTENSION_MOCK_ENABLED=true. Login, sessão e permissão são reais; configuração, fila e conversão são mockadas. Cookies de marketplace não são recebidos pelo backend.",
+          "Disponível somente fora de produção, com EXTENSION_MOCK_ENABLED=true. Login, sessão e permissão são reais; configuração, fila e conversão são mockadas. A prova de sessão é uma operação separada, explícita e restrita a administradores.",
         security,
         parameters:
           auth === "browser"
@@ -132,6 +132,39 @@ export function extensionApiPaths() {
         },
       },
     };
+  }
+  const proofOperations = [
+    ['get','session-proof/marketplaces','Listar marketplaces para a prova'],
+    ['post','session-proof/tests','Testar uma sessão temporária no container'],
+    ['get','session-proof/tests/{id}','Consultar resultado privado da prova']
+  ] as const;
+  const proofBody = {
+    type:'object', required:['marketplaceId','url','consent','session'],
+    properties:{
+      marketplaceId:{type:'string'},url:{type:'string',format:'uri'},consent:{type:'boolean',enum:[true]},
+      session:{type:'object',required:['cookies'],description:'Até 48 KiB. Cookies HTTPS de domínios cadastrados, incluindo HttpOnly; origins opcional com localStorage.',properties:{
+        cookies:{type:'array',minItems:1,maxItems:200,items:{type:'object'}},
+        origins:{type:'array',maxItems:10,items:{type:'object'}}
+      }}
+    }
+  };
+  for(const [method,path,summary] of proofOperations){
+    paths['/extension/'+path] = {[method]:{
+      summary,operationId:'extension_proof_'+method+'_'+path.replaceAll('/','_'),tags:['Extensão Chrome'],
+      description:'Prova fora de produção. Exige administrador com affiliate_links. Sessão usada uma vez, sem persistência no banco. Resultado privado expira em cinco minutos.',
+      security:[{ExtensionBearer:[]}],
+      parameters:[
+        {name:'X-Espertinho-Extension-Id',in:'header',required:true,schema:{type:'string',pattern:'^[a-p]{32}$'}},
+        ...(path.includes('{id}')?[{name:'id',in:'path',required:true,schema:{type:'string',format:'uuid'}}]:[])
+      ],
+      ...(method==='post'?{requestBody:{required:true,content:{'application/json':{schema:proofBody}}}}:{}),
+      responses:{
+        '200':{description:'Configuração ou resultado sem cookies'},'202':{description:'Teste enfileirado'},
+        '400':{description:'Sessão ou domínio inválido'},'401':{description:'Extensão não autenticada'},
+        '403':{description:'Exige administrador'},'404':{description:'Teste expirado ou de outra sessão'},
+        '429':{description:'Teste já em andamento'},'503':{description:'Extrator não configurado'}
+      }
+    }};
   }
   return paths;
 }
