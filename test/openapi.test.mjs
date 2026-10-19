@@ -16,6 +16,7 @@ test('OpenAPI é válido e descreve todas as rotas existentes',async()=>{
    const path=match[2].replace(/^\/api/,'').replace(/:([A-Za-z]+)/g,'{$1}');assert.ok(spec.paths[path]?.[match[1]],'Rota sem documentação: '+match[1]+' '+path);
   }
  }
+ for(const path of ['/admin/amazon/import','/admin/mercadolivre/import'])assert.equal(spec.paths[path],undefined,'Importação específica removida');
  for(const path of ['/admin/mercadolivre/callback','/admin/mercadolivre/oauth/complete'])assert.ok(spec.paths[path].get);
  assert.equal(spec.paths['/admin/link-imports/preview'].post.requestBody.content['application/json'].schema.required.includes('productId'),true);
 });
