@@ -108,3 +108,11 @@ URLs de seção e templates preservam query strings necessárias à pesquisa/pag
 O cadastro administrativo de ofertas usa o fluxo genérico de links, produto vinculado e seletores configurados por marketplace. A revisão oferece o atalho para esse cadastro, sem formulários de importação por identificadores próprios de uma loja. Novas integrações de cadastro/exploração devem ser declarativas e reutilizáveis entre marketplaces.
 
 A migration `023_discovery_links_only.sql` remove dos perfis de exploração existentes somente os campos de dados de produto e breadcrumb que deixaram de fazer parte deste contrato. Preserva os demais seletores, a navegação e as páginas de seção vinculadas. Incrementa a versão dos perfis alterados para impedir gravações com formulários antigos. Não altera os perfis da aba Seletores nem produtos, ofertas ou histórico.
+
+## Enriquecimento manual e categorias de origem
+
+Migration 026 adiciona a fila consumida pelo repositório independente `o-espertinho-job-enrich-links`. Não existe agendamento nem publicação automática. Na Revisão de ofertas, escolha um marketplace para solicitar um lote, acompanhar resultados por item ou cancelar.
+
+Rotas documentadas no Swagger em `/api/admin/discovery/enrichment`: `GET/PUT /settings/:market`, `POST/GET /runs`, `GET /runs/:id/items`, `POST /runs/:id/cancel`, `GET /review`, `POST /review/:id/category`, `POST /review/:id/archive`, `GET /categories`, `GET /mappings`, `PUT/DELETE /mappings/:id`. Exigem perfil com discovery ou catalog; escritas exigem XSRF e confirmação recente.
+
+A árvore extraída pelos seletores de categoria fica separada da categoria sugerida e da confirmada. A correspondência utiliza o marketplace e o caminho completo normalizado, sem inferir pelo último nível ou categoria pai. Salvar um mapeamento apenas sugere a classificação nos demais itens. Confirmar um item exige sua versão atual; edição/exclusão de mapeamento preserva classificações já confirmadas. Cancelamento impede novas gravações imediatamente e mantém o marketplace reservado até o worker encerrar o navegador ou a lease expirar.
