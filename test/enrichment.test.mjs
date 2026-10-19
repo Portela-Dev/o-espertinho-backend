@@ -1,0 +1,51 @@
+import {test,before,after} from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {testDatabase,testConfig,client,createApp,identity} from './helpers.mjs';
+import {categoryKey} from '../dist/enrichment-admin.js';
+let db,admin,user,ids=[];
+const base='/api/admin/discovery/enrichment';
+before(async()=>{({db}=await testDatabase());const app=createApp(db,testConfig(),{verifyGoogle:async token=>identity(token)});admin=client(app);user=client(app);await admin.login('admin');await user.login('alice');
+ await db.query("INSERT INTO scraping_profiles(marketplace_id,rules,wait_timeout_ms,validity_minutes) VALUES('amazon',$1,15000,360) ON CONFLICT(marketplace_id) DO UPDATE SET rules=$1",[JSON.stringify([{field:'title',selectors:['h1'],mode:'text',required:true},{field:'price',selectors:['.price'],mode:'text',required:true}])]);
+ for(let i=0;i<3;i++){const id=randomUUID();ids.push(id);await db.query("INSERT INTO discovery_links(id,marketplace_id,url) VALUES($1,'amazon',$2)",[id,'https://www.amazon.com.br/product/'+id]);}
+});
+after(async()=>db.end());
+test('manual runs snapshot settings, prevent overlap, cancel idempotently and preserve data',async()=>{
+ assert.equal((await admin.mutate('put',base+'/settings/amazon',{requestIntervalMs:100,categorySeparator:'>'})).status,200);
+ const run=await admin.mutate('post',base+'/runs',{marketplaceId:'amazon',limit:2});assert.equal(run.status,202);assert.equal(run.body.total,2);
+ assert.equal((await db.query('SELECT snapshot FROM enrichment_runs WHERE id=$1',[run.body.id])).rows[0].snapshot.requestIntervalMs,100);
+ assert.equal((await admin.mutate('post',base+'/runs',{marketplaceId:'amazon'})).status,409);
+ assert.equal((await admin.get(base+'/runs')).body.items[0].total,2);
+ assert.equal((await admin.get(base+'/runs/'+run.body.id+'/items')).body.total,2);
+ assert.equal((await admin.mutate('post',base+'/runs/'+run.body.id+'/cancel',{})).status,200);
+ assert.equal((await admin.mutate('post',base+'/runs/'+run.body.id+'/cancel',{})).status,200);
+ assert.equal((await db.query("SELECT count(*)::int n FROM enrichment_items WHERE run_id=$1 AND status='cancelled'",[run.body.id])).rows[0].n,2);
+ assert.equal((await db.query('SELECT count(*)::int n FROM products')).rows[0].n,0);
+});
+test('exact marketplace/full-path mappings only suggest; confirmation and mapping mutation are separate',async()=>{
+ const path=['Eletrônicos','Áudio','Fones'],key=categoryKey(path);
+ const nodes=(await db.query("SELECT * FROM register_category_path(ARRAY['Informática','Acessórios'])")).rows[0];const categoryId=nodes.ids.at(-1),otherId=nodes.ids[0];
+ for(const id of ids)await db.query("UPDATE discovery_links SET extraction_status='completed',enrichment_data=$2,source_category_path=$3,source_category_key=$4,enrichment_version=1 WHERE id=$1",[id,JSON.stringify({title:'Fone',priceCents:1000}),path,key]);
+ assert.equal((await admin.mutate('post',base+'/review/'+ids[0]+'/category',{categoryId,version:1,saveMapping:true})).status,200);
+ let links=(await admin.get(base+'/review')).body.items;const pending=links.find(l=>l.id===ids[1]);assert.equal(pending.suggested_category_id,categoryId);assert.equal(pending.confirmed_category_id,null);assert.deepEqual(pending.source_category_path,path);
+ assert.equal((await admin.mutate('post',base+'/review/'+ids[0]+'/category',{categoryId,version:1})).status,409);
+ const mapping=(await admin.get(base+'/mappings')).body.items[0];assert.equal((await admin.mutate('put',base+'/mappings/'+mapping.id,{categoryId:otherId})).status,200);
+ links=(await admin.get(base+'/review')).body.items;assert.equal(links.find(l=>l.id===ids[0]).confirmed_category_id,categoryId);assert.equal(links.find(l=>l.id===ids[1]).suggested_category_id,otherId);
+ assert.equal((await admin.mutate('post',base+'/review/'+ids[1]+'/category',{categoryId,version:1,saveMapping:false})).status,200);
+ assert.equal((await admin.get(base+'/mappings')).body.items[0].category_id,otherId);
+ await db.query("UPDATE discovery_links SET source_category_key=$2 WHERE id=$1",[ids[2],categoryKey(['Outros','Fones'])]);assert.equal((await admin.get(base+'/review')).body.items.find(l=>l.id===ids[2]).suggested_category_id,null);
+ assert.equal((await admin.mutate('delete',base+'/mappings/'+mapping.id,{})).status,200);
+ assert.equal((await admin.get(base+'/review')).body.items.find(l=>l.id===ids[0]).confirmed_category_id,categoryId);
+});
+test('missing origin allows item-only confirmation and permissions/XSRF/limits remain enforced',async()=>{
+ await db.query("UPDATE discovery_links SET source_category_path='{}',source_category_key='' WHERE id=$1",[ids[2]]);
+ const categoryId=(await db.query('SELECT id FROM category_nodes LIMIT 1')).rows[0].id;
+ assert.equal((await admin.mutate('post',base+'/review/'+ids[2]+'/category',{categoryId,version:1,saveMapping:true})).status,400);
+ assert.equal((await admin.mutate('post',base+'/review/'+ids[2]+'/category',{categoryId,version:1})).status,200);
+ assert.equal((await user.get(base+'/review')).status,403);
+ assert.equal((await user.mutate('post',base+'/runs',{marketplaceId:'amazon'})).status,403);
+ assert.equal((await admin.agent.post(base+'/runs').send({marketplaceId:'amazon'})).status,403);
+ assert.equal((await admin.mutate('put',base+'/settings/amazon',{requestIntervalMs:99,categorySeparator:'>'})).status,400);
+ assert.equal((await admin.mutate('post',base+'/runs',{marketplaceId:'amazon',schedule:true})).status,400);
+ assert.equal((await admin.get(base+'/review?pageSize=51')).status,400);
+});
