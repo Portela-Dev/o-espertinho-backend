@@ -1,3 +1,4 @@
+import {urlNormalizationRulesSchema} from './url-normalization.js';
 import type {Express} from 'express';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
@@ -18,10 +19,10 @@ export async function startDiscovery(db:Database,sourceId:string,userId:string,r
   if((await c.query("SELECT id FROM discovery_runs WHERE source_id=$1 AND status IN ('queued','running')",[sourceId])).rows.length){throw new HttpError(409,'Esta seção já possui uma exploração em andamento.');}
   if(source.paused_at&&!resume){throw new HttpError(409,'Esta seção está pausada. Confirme a retomada para explorar novamente.');}
   const profile=(await c.query('SELECT config FROM discovery_profiles WHERE id=$1',[source.profile_id])).rows[0];
-  const market=(await c.query('SELECT allowed_hosts FROM marketplaces WHERE id=$1',[source.marketplace_id])).rows[0];
+  const market=(await c.query('SELECT allowed_hosts,url_normalization_rules FROM marketplaces WHERE id=$1',[source.marketplace_id])).rows[0];
   const config=discoveryConfigSchema.parse(profile.config);
   const runId=randomUUID();
-  const snapshot={config,url:source.url,allowedHosts:market.allowed_hosts,sourceCategoryPath:source.source_category_path};
+  const snapshot={config,url:source.url,allowedHosts:market.allowed_hosts,sourceCategoryPath:source.source_category_path,urlNormalizationRules:urlNormalizationRulesSchema.parse(market.url_normalization_rules)};
   await c.query('INSERT INTO discovery_runs(id,source_id,marketplace_id,created_by,snapshot) VALUES($1,$2,$3,$4,$5)',[runId,sourceId,source.marketplace_id,userId,JSON.stringify(snapshot)]);
   if(resume)await c.query('UPDATE discovery_sources SET paused_at=NULL,pause_reason=NULL,version=version+1,updated_at=clock_timestamp() WHERE id=$1',[sourceId]);
   await audit(c,userId,'discovery.run.started',runId);

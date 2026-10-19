@@ -8,8 +8,10 @@ before(async()=>{({db}=await testDatabase());const app=createApp(db,testConfig()
 after(async()=>db.end());
 async function source(){const config=defaultDiscoveryConfig();config.extraction.itemSelector='.card';config.limits.maxPages=1;const p=await admin.mutate('post','/api/admin/discovery/profiles',{name:randomUUID(),marketplaceId:'amazon',config});assert.equal(p.status,201);const r=await admin.mutate('post','/api/admin/discovery/sources',{name:randomUUID(),marketplaceId:'amazon',profileId:p.body.id,url:'https://www.amazon.com.br/section/'+randomUUID(),enabled:false});assert.equal(r.status,201);return r.body;}
 test('manual queue snapshots config and source, prevents overlap and leaves catalog and schedules untouched',async()=>{
+ const rules=[{type:'remove_path_suffix',marker:'/tracking/'}];await db.query("UPDATE marketplaces SET url_normalization_rules=$1 WHERE id='amazon'",[JSON.stringify(rules)]);
  const s=await source();const r=await admin.mutate('post','/api/admin/discovery/sources/'+s.id+'/run',{});assert.equal(r.status,202);assert.equal(r.body.status,'queued');
- const saved=(await db.query('SELECT snapshot FROM discovery_runs WHERE id=$1',[r.body.id])).rows[0].snapshot;assert.equal(saved.config.limits.maxPages,1);assert.equal(saved.url,s.url);assert.ok(saved.allowedHosts.includes('www.amazon.com.br'));
+ const saved=(await db.query('SELECT snapshot FROM discovery_runs WHERE id=$1',[r.body.id])).rows[0].snapshot;assert.equal(saved.config.limits.maxPages,1);assert.equal(saved.url,s.url);assert.ok(saved.allowedHosts.includes('www.amazon.com.br'));assert.deepEqual(saved.urlNormalizationRules,rules);
+ await db.query("UPDATE marketplaces SET url_normalization_rules='[]' WHERE id='amazon'");assert.deepEqual((await db.query('SELECT snapshot FROM discovery_runs WHERE id=$1',[r.body.id])).rows[0].snapshot.urlNormalizationRules,rules);
  assert.equal((await admin.mutate('post','/api/admin/discovery/sources/'+s.id+'/run',{})).status,409);
  assert.equal((await admin.get('/api/admin/discovery/runs?pageSize=5')).body.items[0].id,r.body.id);
  assert.equal((await admin.get('/api/admin/discovery/runs/'+r.body.id)).body.source_id,s.id);
