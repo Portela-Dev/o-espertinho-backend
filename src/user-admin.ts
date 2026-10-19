@@ -11,12 +11,13 @@ export const accessPermissions=[
  {id:'catalog',name:'Produtos, links e revisão de ofertas'},
  {id:'marketplaces',name:'Marketplaces e integrações'},
  {id:'selectors',name:'Seletores e testes de extração'},
+ {id:'discovery',name:'Configuração de exploração de marketplaces'},
  {id:'updates',name:'Atualizações de preços'},
  {id:'activity',name:'Registro de atividade'},
  {id:'affiliate_links',name:'Gerar links de afiliados pela extensão'},
  {id:'users',name:'Gestão de usuários e perfis (permite conceder acesso administrativo)'}
 ] as const;
-const profileInput=z.object({name:z.string().trim().min(1).max(80),description:z.string().trim().max(400).default(''),permissions:z.array(z.enum(['overview','catalog','marketplaces','selectors','updates','activity','users','affiliate_links'])).max(8).transform(v=>[...new Set(v)])});
+const profileInput=z.object({name:z.string().trim().min(1).max(80),description:z.string().trim().max(400).default(''),permissions:z.array(z.enum(['overview','catalog','marketplaces','selectors','updates','activity','users','affiliate_links','discovery'])).max(9).transform(v=>[...new Set(v)])});
 const userColumns='u.id,u.email,u.name,u.avatar,u.role,u.access_profile_id,u.blocked,u.created_at,p.name AS profile_name';
 export function registerUserAdmin(app:Express,db:Database){
  app.get('/api/admin/access-profiles',async(req,res)=>{
