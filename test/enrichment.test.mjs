@@ -108,3 +108,34 @@ test('existing products are searched within category, preserved and invalidated 
  await db.query("UPDATE discovery_links SET status='archived' WHERE id=$1",[id]);
  assert.equal((await admin.mutate('post',url+'/product',{mode:'existing',version:row.enrichment_version,productId:existing.id})).status,409);
 });
+
+test('targeted retries preserve history, exclude resolved/archived links and reject overlapping runs',async()=>{
+ const actor=(await db.query("SELECT id FROM users WHERE email='arnaldorolimportela@gmail.com'")).rows[0].id;
+ const runId=randomUUID(),links=Array.from({length:5},()=>randomUUID());
+ await db.query("INSERT INTO enrichment_runs(id,marketplace_id,created_by,snapshot,total,status) VALUES($1,'amazon',$2,'{}',4,'completed')",[runId,actor]);
+ for(let i=0;i<links.length;i++){
+  await db.query("INSERT INTO discovery_links(id,marketplace_id,url,status,extraction_status,extraction_error) VALUES($1,'amazon',$2,$3,$4,'incomplete')",[links[i],'https://www.amazon.com.br/product/'+links[i],i===2?'archived':'pending',i===1?'completed':i===3?'pending':'failed']);
+  if(i<4)await db.query("INSERT INTO enrichment_items(run_id,link_id,status,error) VALUES($1,$2,'failed','incomplete')",[runId,links[i]]);
+ }
+ const retry=base+'/runs/'+runId+'/retry';
+ assert.equal((await user.mutate('post',retry,{})).status,403);
+ assert.equal((await admin.agent.post(retry).send({})).status,403);
+ assert.equal((await admin.mutate('post',retry,{marketplaceId:'other'})).status,400);
+ await db.query("UPDATE scraping_profiles SET version=7 WHERE marketplace_id='amazon'");
+ const queued=await admin.mutate('post',retry,{});assert.equal(queued.status,202,JSON.stringify(queued.body));assert.equal(queued.body.total,1);
+ assert.deepEqual((await db.query('SELECT link_id FROM enrichment_items WHERE run_id=$1',[queued.body.id])).rows.map(r=>r.link_id),[links[0]]);
+ assert.equal((await db.query('SELECT snapshot FROM enrichment_runs WHERE id=$1',[queued.body.id])).rows[0].snapshot.profileVersion,7);
+ assert.equal((await admin.mutate('post',retry,{})).status,409);
+ assert.equal((await admin.mutate('post',base+'/review/'+links[4]+'/retry',{})).status,409);
+ assert.equal((await db.query('SELECT count(*)::int n FROM enrichment_items WHERE run_id=$1 AND status=\'failed\'',[runId])).rows[0].n,4);
+ assert.equal((await admin.mutate('post',base+'/runs/'+queued.body.id+'/cancel',{})).status,200);
+ for(const id of [links[1],links[2],links[3]])assert.equal((await admin.mutate('post',base+'/review/'+id+'/retry',{})).status,409);
+ assert.equal((await admin.mutate('post',base+'/review/'+randomUUID()+'/retry',{})).status,404);
+ assert.equal((await admin.mutate('post',base+'/runs/'+randomUUID()+'/retry',{})).status,404);
+ const single=await admin.mutate('post',base+'/review/'+links[4]+'/retry',{});assert.equal(single.status,202);assert.equal(single.body.total,1);
+ assert.deepEqual((await db.query('SELECT link_id FROM enrichment_items WHERE run_id=$1',[single.body.id])).rows.map(r=>r.link_id),[links[4]]);
+ assert.equal((await db.query('SELECT extraction_error FROM discovery_links WHERE id=$1',[links[4]])).rows[0].extraction_error,'incomplete');
+ await admin.mutate('post',base+'/runs/'+single.body.id+'/cancel',{});
+ await db.query("UPDATE discovery_links SET extraction_status='completed' WHERE id=$1",[links[0]]);
+ assert.equal((await admin.mutate('post',retry,{})).status,409);
+});

@@ -27,14 +27,18 @@ const runView=`SELECT r.id,r.marketplace_id,m.name AS marketplace_name,r.status,
  (SELECT count(*)::int FROM enrichment_items i WHERE i.run_id=r.id AND i.status IN ('skipped','cancelled')) AS skipped
  FROM enrichment_runs r JOIN marketplaces m ON m.id=r.marketplace_id`;
 async function transaction<T>(db:Database,work:(c:Pick<Database,'query'>)=>Promise<T>){const c=await db.connect();try{await c.query('BEGIN');const result=await work(c);await c.query('COMMIT');return result;}catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}}
-export async function startEnrichment(db:Database,marketplaceId:string,actor:string,retryFailed=false,limit=100){
+export async function startEnrichment(db:Database,marketplaceId:string,actor:string,retryFailed=false,limit=100,selection?:{linkId?:string;runId?:string}){
  return transaction(db,async c=>{
   const market=(await c.query('SELECT id,allowed_hosts,scraping_enabled FROM marketplaces WHERE id=$1 FOR UPDATE',[marketplaceId])).rows[0];
   const profile=(await c.query('SELECT rules,wait_timeout_ms,version FROM scraping_profiles WHERE marketplace_id=$1',[marketplaceId])).rows[0];
   if(!market?.scraping_enabled||!profile)throw new HttpError(400,'Ative a extração e cadastre os seletores deste marketplace.');
   if((await c.query("SELECT id FROM enrichment_runs WHERE marketplace_id=$1 AND (status IN ('queued','running') OR worker_id IS NOT NULL)",[marketplaceId])).rows.length)throw new HttpError(409,'Este marketplace já tem um enriquecimento em andamento.');
-  const links=(await c.query("SELECT id FROM discovery_links WHERE marketplace_id=$1 AND status='pending' AND (extraction_status='pending' OR ($2 AND extraction_status='failed')) ORDER BY first_seen_at,id LIMIT $3",[marketplaceId,retryFailed,limit])).rows;
-  if(!links.length)throw new HttpError(409,'Não há links pendentes para esta seleção.');
+  const links=(await c.query(`SELECT id FROM discovery_links l WHERE marketplace_id=$1 AND status='pending'
+   AND (extraction_status='pending' OR ($2 AND extraction_status='failed'))
+   AND ($4::uuid IS NULL OR l.id=$4) AND ($5::uuid IS NULL OR EXISTS(SELECT 1 FROM enrichment_items i WHERE i.run_id=$5 AND i.link_id=l.id AND i.status='failed'))
+   AND (($4::uuid IS NULL AND $5::uuid IS NULL) OR extraction_status='failed')
+   ORDER BY first_seen_at,id LIMIT $3`,[marketplaceId,retryFailed,limit,selection?.linkId??null,selection?.runId??null])).rows;
+  if(!links.length)throw new HttpError(409,selection?'Não há links com falha elegíveis para esta nova tentativa. Atualize a lista.':'Não há links pendentes para esta seleção.');
   const config=(await c.query('SELECT * FROM enrichment_settings WHERE marketplace_id=$1',[marketplaceId])).rows[0];
   const id=randomUUID(),snapshot={allowedHosts:market.allowed_hosts,rules:profile.rules,timeoutMs:profile.wait_timeout_ms,profileVersion:profile.version,requestIntervalMs:config?.request_interval_ms??2000,categorySeparator:config?.category_separator??'>'};
   await c.query('INSERT INTO enrichment_runs(id,marketplace_id,created_by,snapshot,total) VALUES($1,$2,$3,$4,$5)',[id,marketplaceId,actor,JSON.stringify(snapshot),links.length]);
@@ -57,6 +61,18 @@ export function registerEnrichmentAdmin(app:Express,db:Database){
  app.get(base+'/runs',async(req,res)=>res.json(await pagedQuery(db,{...req.query,paginate:'true'},runView+" WHERE ($1='' OR r.marketplace_id=$1) ORDER BY r.created_at DESC,r.id",[marketId.or(z.literal('')).default('').parse(req.query.marketplaceId)])));
  app.get(base+'/runs/:id/items',async(req,res)=>res.json(await pagedQuery(db,{...req.query,paginate:'true'},'SELECT i.*,l.url FROM enrichment_items i JOIN discovery_links l ON l.id=i.link_id WHERE run_id=$1 ORDER BY l.url',[uuid.parse(req.params.id)])));
  app.post(base+'/runs/:id/cancel',async(req,res)=>res.json(await cancelEnrichment(db,uuid.parse(req.params.id),req.user!.id)));
+ app.post(base+'/runs/:id/retry',async(req,res)=>{
+  z.strictObject({}).parse(req.body??{});const id=uuid.parse(req.params.id);
+  const run=(await db.query('SELECT marketplace_id FROM enrichment_runs WHERE id=$1',[id])).rows[0];
+  if(!run)throw new HttpError(404,'Execução não encontrada.');
+  res.status(202).json(await startEnrichment(db,run.marketplace_id,req.user!.id,true,10000,{runId:id}));
+ });
+ app.post(base+'/review/:id/retry',async(req,res)=>{
+  z.strictObject({}).parse(req.body??{});const id=uuid.parse(req.params.id);
+  const link=(await db.query('SELECT marketplace_id FROM discovery_links WHERE id=$1',[id])).rows[0];
+  if(!link)throw new HttpError(404,'Link não encontrado.');
+  res.status(202).json(await startEnrichment(db,link.marketplace_id,req.user!.id,true,1,{linkId:id}));
+ });
  app.post(base+'/review/:id/archive',async(req,res)=>{const id=uuid.parse(req.params.id);await transaction(db,async c=>{if(!(await c.query("UPDATE discovery_links SET status='archived' WHERE id=$1 RETURNING id",[id])).rows.length)throw new HttpError(404,'Link não encontrado.');await audit(c,req.user!.id,'discovery.link.archived',id);});res.json({ok:true});});
  app.get(base+'/categories',async(_req,res)=>res.json((await db.query('SELECT id,path FROM category_nodes ORDER BY normalized_path')).rows));
  app.post(base+'/categories',async(req,res)=>{
