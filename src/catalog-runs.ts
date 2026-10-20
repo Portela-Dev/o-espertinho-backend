@@ -69,6 +69,7 @@ export function registerCatalogRuns(router:Router,db:Database,account:(req:any)=
    if(['completed','failed','cancelled'].includes(run.status))throw new HttpError(409,'Esta execução já terminou.');
    const statuses={pause:'paused_by_user',resume:'running',cancel:'cancelled',human:'waiting_for_human',technical:'paused_technical'};
    await c.query("UPDATE extension_catalog_runs SET status=$2,reason=$3,updated_at=clock_timestamp(),expires_at=clock_timestamp()+($4::int*interval '1 millisecond') WHERE id=$1",[id,statuses[v.action],v.reason,v.action==='human'?run.snapshot.settings.humanTimeoutMs:86400000]);
+   if(v.action==='resume')await c.query("UPDATE extension_catalog_items SET status='pending',lease_token=NULL,lease_until=NULL WHERE run_id=$1 AND status='leased'",[id]);
    if(v.action==='cancel')await c.query("UPDATE extension_catalog_items SET lease_until=NULL,status='skipped' WHERE run_id=$1 AND status IN ('pending','leased')",[id]);
    await audit(c,actor.id,'extension_catalog.'+v.action,id);
   });res.json(await runView(db,id));

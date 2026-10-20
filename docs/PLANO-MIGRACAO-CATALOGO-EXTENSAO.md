@@ -407,3 +407,6 @@ Ao concluir uma fase, registrar data, repositórios/commits/PRs, migrations nova
 
 - Fase 7 (implementação): ação Publicar na lista de revisão com confirmação explícita. Backend exige categoria/produto compatíveis, URL de afiliado, observação válida e dados completos; publicação e histórico iniciais são transacionais e idempotentes. Teste SQL e Angular typecheck aprovados. Candidatos publicados saem da revisão. A indicação antiga de gerar link após atribuir produto foi substituída.
 
+
+- Fase 8 e integração do coordenador: quatro botões definitivos, janela exclusiva, login preservado ao migrar storage, progresso, pausa/cancelamento, retomada paginada, heartbeat e buffer de resultado sem sessão. A interface de POC foi substituída (módulos antigos ainda serão removidos na fase 11). Testes do coordenador/background e preço/histórico diário aprovados; TypeScript/HTML aprovados. Retomada explícita invalida leases anteriores antes de reextrair, evitando reserva vencida travada. Apenas o histórico da última observação confirmada é alterado; falhas preservam a vitrine.
+
