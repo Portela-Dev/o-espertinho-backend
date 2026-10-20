@@ -11,7 +11,7 @@ after(async()=>db.end());
 const config=(mode='single')=>{const c=defaultDiscoveryConfig();c.extraction.itemSelector='.product-card';c.pagination.mode=mode;if(['next','load_more'].includes(mode))c.pagination.nextSelector='a.next';if(mode==='url')c.pagination.urlTemplate='https://www.amazon.com.br/s?k=monitor&page={page}';return c;};
 const profileBody=(name,mode)=>({name,marketplaceId:'amazon',config:config(mode)});
 async function profile(name,mode){const r=await admin.mutate('post','/api/admin/discovery/profiles',profileBody(name,mode));assert.equal(r.status,201,JSON.stringify(r.body));return r.body;}
-const sourceBody=(p,name='Monitores')=>({marketplaceId:'amazon',profileId:p.id,name,url:'https://www.amazon.com.br/s?k=monitor&rh=n%3A16364755011#ignored',sourceCategoryPath:['Informática','Monitores'],enabled:true,intervalHours:12,notes:'Página de busca'});
+const sourceBody=(p,name='Monitores')=>({marketplaceId:'amazon',profileId:p.id,name,url:'https://www.amazon.com.br/s?k=monitor&rh=n%3A16364755011#ignored',sourceCategoryPath:['Informática','Monitores'],enabled:true,notes:'Página de busca'});
 
 test('discovery saves and retrieves all five pagination modes, selectors, limits and failure settings without running extraction',async()=>{
  const defaults=await admin.get('/api/admin/discovery/defaults');assert.equal(defaults.status,200);assert.equal(defaults.body.executionAvailable,true);assert.deepEqual(defaults.body.config,defaultDiscoveryConfig());
@@ -25,7 +25,7 @@ test('discovery saves and retrieves all five pagination modes, selectors, limits
 });
 
 test('sources preserve section query parameters, strip fragments, require same-marketplace profile and do not create products',async()=>{
- const p=await profile('Perfil fontes');const r=await admin.mutate('post','/api/admin/discovery/sources',sourceBody(p));assert.equal(r.status,201,JSON.stringify(r.body));assert.equal(r.body.url,'https://www.amazon.com.br/s?k=monitor&rh=n%3A16364755011');assert.deepEqual(r.body.source_category_path,['Informática','Monitores']);assert.equal(r.body.enabled,true);assert.equal(r.body.interval_hours,12);
+ const p=await profile('Perfil fontes');const r=await admin.mutate('post','/api/admin/discovery/sources',sourceBody(p));assert.equal(r.status,201,JSON.stringify(r.body));assert.equal(r.body.url,'https://www.amazon.com.br/s?k=monitor&rh=n%3A16364755011');assert.deepEqual(r.body.source_category_path,['Informática','Monitores']);assert.equal(r.body.enabled,true);assert.equal(r.body.interval_hours,24);
  const get=await admin.get('/api/admin/discovery/sources/'+r.body.id);assert.equal(get.body.profile_id,p.id);assert.equal(get.headers['cache-control'],'no-store');
  const duplicate=await admin.mutate('post','/api/admin/discovery/sources',sourceBody(p,'Duplicada'));assert.equal(duplicate.status,409);
  const mismatch=await admin.mutate('post','/api/admin/discovery/sources',{...sourceBody(p),marketplaceId:'mercadolivre',url:'https://www.mercadolivre.com.br/ofertas'});assert.equal(mismatch.status,409);
@@ -119,4 +119,13 @@ test('links-only migration removes obsolete selectors while preserving source bi
   assert.equal((await legacy.db.query('SELECT version FROM discovery_profiles WHERE id=$1',[untouchedId])).rows[0].version,1);
   await legacy.pg.exec(sql);assert.equal((await legacy.db.query('SELECT version FROM discovery_profiles WHERE id=$1',[profileId])).rows[0].version,2);
  }finally{await legacy.db.end();}
+});
+
+test('retired schedule is rejected and editing a section preserves the historical value',async()=>{
+ const p=await profile('Sem agenda');const body={...sourceBody(p,'Sem agenda'),url:'https://www.amazon.com.br/no-schedule'};
+ assert.equal((await admin.mutate('post','/api/admin/discovery/sources',{...body,intervalHours:12})).status,400);
+ const source=await admin.mutate('post','/api/admin/discovery/sources',body);assert.equal(source.status,201);
+ await db.query('UPDATE discovery_sources SET interval_hours=13 WHERE id=$1',[source.body.id]);
+ const updated=await admin.mutate('put','/api/admin/discovery/sources/'+source.body.id,{...body,version:source.body.version});assert.equal(updated.status,200);
+ assert.equal(updated.body.interval_hours,13);assert.equal(updated.body.enabled,true);
 });

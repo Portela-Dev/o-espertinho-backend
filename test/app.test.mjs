@@ -83,3 +83,10 @@ test('excluir conta remove dados pessoais e invalida a sessão',async()=>{
   const c=client(app);await c.login('delete-me');await c.mutate('put','/api/me/favorites/'+offer);await c.mutate('post','/api/me/collections',{name:'Privado'});
   assert.equal((await c.mutate('delete','/api/me/account')).status,200);assert.equal((await c.get('/api/me/collections')).status,401);assert.equal((await db.query("SELECT id FROM users WHERE email='delete-me@gmail.com'")).rows.length,0);
 });
+
+test('unified offer list contains product and marketplace metadata for every source without changing permissions',async()=>{
+ const id=await seedOffer(db,{title:'Oferta lista unificada',status:'pending'});
+ const result=await admin.get('/api/admin/offers?paginate=true&status=all&pageSize=50');assert.equal(result.status,200);
+ const item=result.body.items.find(row=>row.id===id);assert.ok(item);assert.ok(item.product_name);assert.ok(item.product_sku);assert.equal(item.marketplace_name,'Amazon');
+ assert.equal((await a.get('/api/admin/offers?paginate=true&status=all')).status,403);
+});
