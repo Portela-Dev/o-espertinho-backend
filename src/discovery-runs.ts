@@ -28,7 +28,8 @@ export async function startDiscovery(db:Database,sourceId:string,userId:string,r
   if(resume)await c.query('UPDATE discovery_sources SET paused_at=NULL,pause_reason=NULL,version=version+1,updated_at=clock_timestamp() WHERE id=$1',[sourceId]);
   await audit(c,userId,'discovery.run.started',runId);
   await c.query('COMMIT');return (await db.query(runView+' WHERE r.id=$1',[runId])).rows[0];
- }catch(error){await c.query('ROLLBACK');if((error as {code?:string}).code==='23505')throw new HttpError(409,'Esta seção já possui uma exploração em andamento.');throw error;}finally{c.release();}
+ }catch(error){await c.query('ROLLBACK');if((error as {code?:string}).code==='23505')throw new HttpError(409,'Esta seção já possui uma exploração em andamento.');
+throw error;}finally{c.release();}
 }
 export async function cancelDiscovery(db:Database,runId:string,userId:string){
  const c=await db.connect();

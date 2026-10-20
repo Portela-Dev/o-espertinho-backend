@@ -43,7 +43,8 @@ export async function startEnrichment(db:Database,marketplaceId:string,actor:str
    ORDER BY first_seen_at,id LIMIT $3`,[marketplaceId,retryFailed,limit,selection?.linkId??null,selection?.runId??null,selection?.linkIds??null])).rows;
   if(!links.length)throw new HttpError(409,selection?'Não há links com falha elegíveis para esta nova tentativa. Atualize a lista.':'Não há links pendentes para esta seleção.');
   const config=(await c.query('SELECT * FROM enrichment_settings WHERE marketplace_id=$1',[marketplaceId])).rows[0];
-  const navigationUrls=selection?.navigationUrls?Object.fromEntries(links.map(link=>{const url=selection.navigationUrls![link.id];if(!url)throw new HttpError(400,'Falta o link de navegação de um item selecionado.');return [link.id,marketUrl(url,market.allowed_hosts)];})):undefined;
+  const navigationUrls=selection?.navigationUrls?Object.fromEntries(links.map(link=>{const url=selection.navigationUrls![link.id];if(!url)throw new HttpError(400,'Falta o link de navegação de um item selecionado.');
+return [link.id,marketUrl(url,market.allowed_hosts)];})):undefined;
   const id=randomUUID(),snapshot={allowedHosts:market.allowed_hosts,rules:profile.rules,timeoutMs:profile.wait_timeout_ms,profileVersion:profile.version,requestIntervalMs:navigationUrls?Math.max(20000,config?.request_interval_ms??0):config?.request_interval_ms??2000,categorySeparator:config?.category_separator??'>',...(navigationUrls?{navigationUrls}:{})};
   await c.query('INSERT INTO enrichment_runs(id,marketplace_id,created_by,snapshot,total) VALUES($1,$2,$3,$4,$5)',[id,marketplaceId,actor,JSON.stringify(snapshot),links.length]);
   for(const link of links)await c.query('INSERT INTO enrichment_items(run_id,link_id) VALUES($1,$2)',[id,link.id]);
@@ -60,7 +61,8 @@ export async function cancelEnrichment(db:Database,id:string,actor:string){retur
 export function registerEnrichmentAdmin(app:Express,db:Database){
  const base='/api/admin/discovery/enrichment';
  app.get(base+'/settings/:market',async(req,res)=>{const marketplaceId=marketId.parse(req.params.market);const row=(await db.query('SELECT request_interval_ms,category_separator FROM enrichment_settings WHERE marketplace_id=$1',[marketplaceId])).rows[0];res.json(row??{request_interval_ms:2000,category_separator:'>'});});
- app.put(base+'/settings/:market',async(req,res)=>{const marketplaceId=marketId.parse(req.params.market),v=settings.parse(req.body);await transaction(db,async c=>{if(!(await c.query('SELECT id FROM marketplaces WHERE id=$1',[marketplaceId])).rows.length)throw new HttpError(404,'Marketplace não encontrado.');await c.query('INSERT INTO enrichment_settings(marketplace_id,request_interval_ms,category_separator) VALUES($1,$2,$3) ON CONFLICT(marketplace_id) DO UPDATE SET request_interval_ms=$2,category_separator=$3',[marketplaceId,v.requestIntervalMs,v.categorySeparator]);await audit(c,req.user!.id,'discovery.enrichment.settings',marketplaceId);});res.json({ok:true});});
+ app.put(base+'/settings/:market',async(req,res)=>{const marketplaceId=marketId.parse(req.params.market),v=settings.parse(req.body);await transaction(db,async c=>{if(!(await c.query('SELECT id FROM marketplaces WHERE id=$1',[marketplaceId])).rows.length)throw new HttpError(404,'Marketplace não encontrado.');
+await c.query('INSERT INTO enrichment_settings(marketplace_id,request_interval_ms,category_separator) VALUES($1,$2,$3) ON CONFLICT(marketplace_id) DO UPDATE SET request_interval_ms=$2,category_separator=$3',[marketplaceId,v.requestIntervalMs,v.categorySeparator]);await audit(c,req.user!.id,'discovery.enrichment.settings',marketplaceId);});res.json({ok:true});});
  app.post(base+'/runs',async(req,res)=>{const v=z.strictObject({marketplaceId:marketId,retryFailed:z.boolean().default(false),limit:z.number().int().min(1).max(10000).default(100)}).parse(req.body);res.status(202).json(await startEnrichment(db,v.marketplaceId,req.user!.id,v.retryFailed,v.limit));});
  app.get(base+'/runs',async(req,res)=>res.json(await pagedQuery(db,{...req.query,paginate:'true'},runView+" WHERE ($1='' OR r.marketplace_id=$1) ORDER BY r.created_at DESC,r.id",[marketId.or(z.literal('')).default('').parse(req.query.marketplaceId)])));
  app.get(base+'/runs/:id/items',async(req,res)=>res.json(await pagedQuery(db,{...req.query,paginate:'true'},'SELECT i.*,l.url FROM enrichment_items i JOIN discovery_links l ON l.id=i.link_id WHERE run_id=$1 ORDER BY l.url',[uuid.parse(req.params.id)])));
@@ -83,7 +85,8 @@ export function registerEnrichmentAdmin(app:Express,db:Database){
   }
   res.status(202).json(await startEnrichment(db,link.marketplace_id,req.user!.id,true,1,{linkId:id}));
  });
- app.post(base+'/review/:id/archive',async(req,res)=>{const id=uuid.parse(req.params.id);await transaction(db,async c=>{if(!(await c.query("UPDATE discovery_links SET status='archived' WHERE id=$1 RETURNING id",[id])).rows.length)throw new HttpError(404,'Link não encontrado.');await audit(c,req.user!.id,'discovery.link.archived',id);});res.json({ok:true});});
+ app.post(base+'/review/:id/archive',async(req,res)=>{const id=uuid.parse(req.params.id);await transaction(db,async c=>{if(!(await c.query("UPDATE discovery_links SET status='archived' WHERE id=$1 RETURNING id",[id])).rows.length)throw new HttpError(404,'Link não encontrado.');
+await audit(c,req.user!.id,'discovery.link.archived',id);});res.json({ok:true});});
  app.get(base+'/categories',async(_req,res)=>res.json((await db.query('SELECT id,path FROM category_nodes ORDER BY normalized_path')).rows));
  app.post(base+'/categories',async(req,res)=>{
   const {categoryPath}=z.strictObject({categoryPath:z.array(requiredCategory).min(1).max(10)}).parse(req.body);
@@ -116,7 +119,8 @@ export function registerEnrichmentAdmin(app:Express,db:Database){
    let product;
    if(v.mode==='existing'){
     // NOWAIT avoids a lock cycle with catalog recategorization, which also invalidates assignments.
-    try{product=(await c.query('SELECT * FROM products WHERE id=$1 FOR SHARE NOWAIT',[v.productId])).rows[0];}catch(error){if((error as {code?:string}).code==='55P03')throw new HttpError(409,'O produto está sendo alterado. Tente novamente.');throw error;}
+    try{product=(await c.query('SELECT * FROM products WHERE id=$1 FOR SHARE NOWAIT',[v.productId])).rows[0];}catch(error){if((error as {code?:string}).code==='55P03')throw new HttpError(409,'O produto está sendo alterado. Tente novamente.');
+throw error;}
     if(!product)throw new HttpError(404,'Produto não encontrado.');
     if(!product.category_ids.includes(row.confirmed_category_id))throw new HttpError(409,'Escolha um produto da categoria confirmada ou de suas subcategorias.');
    }else{
@@ -134,7 +138,7 @@ export function registerEnrichmentAdmin(app:Express,db:Database){
   await transaction(db,async c=>{
    // Same lock order as the worker prevents a confirmation/extraction race.
    const row=(await c.query('SELECT * FROM discovery_links WHERE id=$1 FOR UPDATE',[id])).rows[0];
-   if(!row||row.status!=='pending'||row.extraction_status!=='completed')throw new HttpError(409,'Conclua a extração antes de categorizar.');
+   if(row?.status!=='pending'||row.extraction_status!=='completed')throw new HttpError(409,'Conclua a extração antes de categorizar.');
    if(row.enrichment_version!==v.version)throw new HttpError(409,'Os dados foram atualizados. Reabra a revisão.');
    if(!(await c.query('SELECT id FROM category_nodes WHERE id=$1',[v.categoryId])).rows.length)throw new HttpError(400,'Categoria não encontrada.');
    if(v.saveMapping&&!row.source_category_path.length)throw new HttpError(400,'Sem árvore de origem; aplique apenas neste item.');
@@ -144,6 +148,9 @@ export function registerEnrichmentAdmin(app:Express,db:Database){
   });res.json({ok:true});
  });
  app.get(base+'/mappings',async(req,res)=>res.json(await pagedQuery(db,{...req.query,paginate:'true'},`SELECT cm.*,m.name AS marketplace_name,n.path AS category_path FROM category_mappings cm JOIN marketplaces m ON m.id=cm.marketplace_id JOIN category_nodes n ON n.id=cm.category_id WHERE ($1='' OR cm.marketplace_id=$1) ORDER BY cm.updated_at DESC,cm.id`,[marketId.or(z.literal('')).default('').parse(req.query.marketplaceId)])));
- app.put(base+'/mappings/:id',async(req,res)=>{const id=uuid.parse(req.params.id),v=z.strictObject({categoryId:uuid}).parse(req.body);await transaction(db,async c=>{if(!(await c.query('SELECT id FROM category_nodes WHERE id=$1',[v.categoryId])).rows.length)throw new HttpError(400,'Categoria não encontrada.');if(!(await c.query('UPDATE category_mappings SET category_id=$2,updated_by=$3,updated_at=clock_timestamp() WHERE id=$1 RETURNING id',[id,v.categoryId,req.user!.id])).rows.length)throw new HttpError(404,'Mapeamento não encontrado.');await audit(c,req.user!.id,'discovery.mapping.updated',id);});res.json({ok:true});});
- app.delete(base+'/mappings/:id',async(req,res)=>{const id=uuid.parse(req.params.id);await transaction(db,async c=>{if(!(await c.query('DELETE FROM category_mappings WHERE id=$1 RETURNING id',[id])).rows.length)throw new HttpError(404,'Mapeamento não encontrado.');await audit(c,req.user!.id,'discovery.mapping.deleted',id);});res.json({ok:true});});
+ app.put(base+'/mappings/:id',async(req,res)=>{const id=uuid.parse(req.params.id),v=z.strictObject({categoryId:uuid}).parse(req.body);await transaction(db,async c=>{if(!(await c.query('SELECT id FROM category_nodes WHERE id=$1',[v.categoryId])).rows.length)throw new HttpError(400,'Categoria não encontrada.');
+if(!(await c.query('UPDATE category_mappings SET category_id=$2,updated_by=$3,updated_at=clock_timestamp() WHERE id=$1 RETURNING id',[id,v.categoryId,req.user!.id])).rows.length)throw new HttpError(404,'Mapeamento não encontrado.');
+await audit(c,req.user!.id,'discovery.mapping.updated',id);});res.json({ok:true});});
+ app.delete(base+'/mappings/:id',async(req,res)=>{const id=uuid.parse(req.params.id);await transaction(db,async c=>{if(!(await c.query('DELETE FROM category_mappings WHERE id=$1 RETURNING id',[id])).rows.length)throw new HttpError(404,'Mapeamento não encontrado.');
+await audit(c,req.user!.id,'discovery.mapping.deleted',id);});res.json({ok:true});});
 }
