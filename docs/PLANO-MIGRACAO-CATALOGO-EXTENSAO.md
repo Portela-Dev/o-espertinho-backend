@@ -375,7 +375,7 @@ Refatoração estrutural e testes acompanham cada fase. A fase 11 concentra a ex
 | 7 — Revisão/publicação | Validado no Mercado Livre real com confirmação humana e publicação | Vínculo manual e publicação protegida |
 | 8 — Preços | Validado no Mercado Livre real: uma oferta atualizada e histórico diário único | Histórico diário e falhas técnicas preservadas |
 | 9 — Prévia manual | Validado no Mercado Livre real, sem extrator | Cadastro e testes sem extrator |
-| 10 — Corte | Homologação assistida em andamento; Mercado Livre usa extensão, jobs antigos pausados | Executor único e recuperação ensaiada |
+| 10 — Corte | Corte local: Amazon/Mercado Livre na extensão; quatro serviços antigos parados; teste manual de seletores em conferência | Executor único e recuperação ensaiada |
 | 11 — Limpeza | POCs removidas do caminho ativo; infraestrutura aguarda corte | Serviços, POCs e referências retirados |
 | 12 — Homologação final | CI e Quality Gates aprovados; homologação da conta real em andamento | Instalação/migração e CI dos projetos ativos |
 
@@ -464,3 +464,7 @@ Todas foram atualizadas nas mesmas branches; não houve segunda PR no mesmo repo
 
 - Homologação Amazon, revisão/publicação: categoria confirmada 4e5ad3ea-3893-4622-ad8e-250bd0b915aa, produto atribuído 26588982-142b-4933-84ba-a751dad733e3; administrador publicou a oferta 6a8e65af-2399-431e-bf42-4f37418790a7 por R$ 13.049,10.
 - Homologação Amazon, preços: execução bd855905-3c49-43f8-95f3-abf7f18887bc concluída em 20/10/2026 10:41:49 (America/Sao_Paulo), um item sem falhas. A ordem da fila selecionou o pijama existente 049ceb10-3caa-4afa-8102-a4864bb6517c, atualizado para R$ 114,85, refresh_status=updated e histórico diário correspondente confirmado. Não foi o iPhone recém-publicado. Solicitada ao administrador a prévia manual Amazon, sem confirmar cadastro duplicado.
+
+- Homologação Amazon, prévia manual: execução a4d5e486-74fe-451f-b5e2-346d28231d85 concluída em 20/10/2026 10:42:57 (America/Sao_Paulo), item concluído sem erro. Confirmada exatamente uma oferta para o link do iPhone, sem duplicação.
+- Corte operacional local: após quatro passos e prévias reais em Amazon/Mercado Livre, ambos usam executor extension. Extrator manual parado reversivelmente em 20/10/2026; três jobs antigos já estavam parados. Apenas PostgreSQL permanece em Docker; API/frontend continuam com seus ciclos independentes. Containers, volumes e configurações de recuperação preservados. Solicitado teste real de seletores pela extensão com extrator desligado. Corte de produção não foi realizado nem homologado.
+- A fase 11 ainda exige retirar caminhos de compatibilidade, integrações históricas, configurações de executor legado e deploys obsoletos; não confundir serviços parados com limpeza definitiva concluída. A revisão de consumidores foi retomada após os aceites reais.
