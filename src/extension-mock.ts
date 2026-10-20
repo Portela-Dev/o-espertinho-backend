@@ -2,6 +2,8 @@ import express, { type Express, type Request } from "express";
 import { randomBytes, randomUUID } from "node:crypto";
 import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
+import {registerSessionProof} from './extension-session-proof.js';
+import {registerAffiliateProof} from './affiliate-proof.js';
 import type { Database } from "./db.js";
 import type { Config } from "./config.js";
 import {
@@ -40,6 +42,7 @@ export function registerExtensionMock(
   app: Express,
   db: Database,
   config: Config,
+  transport:typeof fetch=fetch,
 ) {
   // The data plane is deliberately unavailable in production. Authentication uses real accounts.
   if (
@@ -134,7 +137,7 @@ export function registerExtensionMock(
     res
       .type("html")
       .send(
-        `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Conectar extensão — O Espertinho</title><script src="/api/extension/auth/connect.js" defer></script></head><body><main><h1>Conectar extensão ao O Espertinho</h1><p>Autorize somente se você iniciou esta conexão na extensão.</p><p id="status" role="status">Verificando sua conta…</p><p><a href="${escape(config.APP_ORIGIN)}" target="_blank" rel="noopener noreferrer">Entrar no O Espertinho com Google</a></p><button type="button" id="reload">Verificar login novamente</button> <button type="button" id="approve" disabled>Autorizar extensão</button><p>A sessão do marketplace não será enviada ao servidor. As ofertas são demonstrativas neste ambiente.</p></main></body></html>`,
+        `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Conectar extensão — O Espertinho</title><script src="/api/extension/auth/connect.js" defer></script></head><body><main><h1>Conectar extensão ao O Espertinho</h1><p>Autorize somente se você iniciou esta conexão na extensão.</p><p id="status" role="status">Verificando sua conta…</p><p><a href="${escape(config.APP_ORIGIN)}" target="_blank" rel="noopener noreferrer">Entrar no O Espertinho com Google</a></p><button type="button" id="reload">Verificar login novamente</button> <button type="button" id="approve" disabled>Autorizar extensão</button><p>As ofertas são demonstrativas. A prova de sessão só envia cookies ao servidor quando você aciona explicitamente a captura na extensão; eles são usados no teste e não são salvos no banco.</p></main></body></html>`,
       );
   });
   router.get("/auth/connect.js", (_req, res) =>
@@ -227,6 +230,8 @@ document.querySelector('#reload').addEventListener('click',check);button.addEven
     requirePermission(user.permissions);
     return user;
   };
+  registerSessionProof(router,db,config,account,transport);
+  registerAffiliateProof(router,db,account);
   router.post("/auth/refresh", async (req, res) => {
     const user = await account(req, true),
       token = secret(),

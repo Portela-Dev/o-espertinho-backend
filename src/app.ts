@@ -33,7 +33,7 @@ const ruleSchema=z.object({marketplaceId:provider,name:text(),keywords:text(160)
 const editSchema=z.object({title:text(300),description:z.string().max(4000).default(''),category:requiredCategory.default('Outros'),subcategory:classificationText.optional(),conditions:z.string().max(1500).default(''),featured:z.boolean().default(false),priceCents:z.number().int().positive().max(100000000).optional(),originalPriceCents:z.number().int().positive().max(100000000).nullable().optional(),expiresAt:z.iso.datetime().optional()});
 const manualSchema=editSchema.extend({productId:uuid,sellerName:z.string().trim().max(200).default(''),marketplaceId:provider,externalId:text(100),productUrl:z.url(),affiliateUrl:z.url(),imageUrl:z.url().nullable().default(null),priceCents:z.number().int().positive().max(100000000),originalPriceCents:z.number().int().positive().max(100000000).nullable().default(null),expiresAt:z.iso.datetime(),authorizedContent:z.literal(true)});
 export interface Identity { sub:string; email:string; emailVerified:boolean; name:string; avatar?:string; authoritative:boolean; nonce?:string }
-export interface AppOptions { extractor?:OfferExtractor; providers?:ProviderService; verifyGoogle?:(token:string)=>Promise<Identity> }
+export interface AppOptions { extractor?:OfferExtractor; providers?:ProviderService; verifyGoogle?:(token:string)=>Promise<Identity>;sessionProofTransport?:typeof fetch }
 export function createApp(db: Database,config: Config,options: AppOptions={}) {
   const app=express(), providers=options.providers??new ProviderService();
   const google=new OAuth2Client(config.GOOGLE_CLIENT_ID);
@@ -66,7 +66,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     res.json({user:req.user??null,autoSignInAllowed:req.cookies[SIGNED_OUT_COOKIE]!=='1'});
   });
   registerMeliCallback(app,config);
-  registerExtensionMock(app,db,config);
+  registerExtensionMock(app,db,config,options.sessionProofTransport);
   app.use('/api',csrfMiddleware(config));
   app.post('/api/auth/google',rateLimit({windowMs:60000,limit:15,skip:()=>config.NODE_ENV==='test',message:{error:'Muitas tentativas de login. Aguarde.'}}),async(req,res)=>{
     if(!config.GOOGLE_CLIENT_ID) throw new HttpError(503,'Login Google não configurado. Defina GOOGLE_CLIENT_ID no backend.');
