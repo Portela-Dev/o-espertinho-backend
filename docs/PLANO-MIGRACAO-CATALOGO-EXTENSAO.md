@@ -413,3 +413,6 @@ Ao concluir uma fase, registrar data, repositórios/commits/PRs, migrations nova
 
 - Fase 9 (implementação): cadastro manual e testes de seletores podem gerar solicitação assíncrona na extensão quando o marketplace usa o novo executor. Frontend acompanha, informa ID/como abrir e permite cancelar; backend verifica propriedade, produto/versionamento e cria prévia idempotente. Teste de ponta a ponta na API (solicitar → reservar → extrair → prévia → confirmar) e Angular typecheck aprovados, sem extrator. Caminho legado permanece apenas enquanto o executor estiver legacy.
 
+
+- Fase 10 (preparação e testes controlados): quatro passos concluídos em Chromium real com servidor HTTPS descartável e API de fixture, incluindo duas páginas de descoberta. Certificado/flags e exposição do runtime existem somente na cópia temporária de teste, nunca no ZIP. API bloqueia novos disparos legados dos marketplaces migrados; job de preços ganhou exclusão compatível com schema antigo e 10 testes aprovados. O agendamento legado dos demais marketplaces é preservado. Testes nativos foram adicionados ao CI. Corte em dados reais, login e desafio reais continuam pendentes de homologação; nenhum container ou conta foi removido.
+

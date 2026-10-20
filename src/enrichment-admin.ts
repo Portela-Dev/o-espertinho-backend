@@ -30,7 +30,8 @@ const runView=`SELECT r.id,r.marketplace_id,m.name AS marketplace_name,r.status,
 async function transaction<T>(db:Database,work:(c:Pick<Database,'query'>)=>Promise<T>){const c=await db.connect();try{await c.query('BEGIN');const result=await work(c);await c.query('COMMIT');return result;}catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}}
 export async function startEnrichment(db:Database,marketplaceId:string,actor:string,retryFailed=false,limit=100,selection?:{linkId?:string;runId?:string;linkIds?:string[];navigationUrls?:Record<string,string>}){
  return transaction(db,async c=>{
-  const market=(await c.query('SELECT id,allowed_hosts,scraping_enabled FROM marketplaces WHERE id=$1 FOR UPDATE',[marketplaceId])).rows[0];
+  const market=(await c.query('SELECT id,allowed_hosts,scraping_enabled,catalog_executor FROM marketplaces WHERE id=$1 FOR UPDATE',[marketplaceId])).rows[0];
+  if(market?.catalog_executor==='extension')throw new HttpError(409,'Execute o enriquecimento pela extensão.');
   const profile=(await c.query('SELECT rules,wait_timeout_ms,version FROM scraping_profiles WHERE marketplace_id=$1',[marketplaceId])).rows[0];
   if(!market?.scraping_enabled||!profile)throw new HttpError(400,'Ative a extração e cadastre os seletores deste marketplace.');
   if((await c.query("SELECT id FROM enrichment_runs WHERE marketplace_id=$1 AND (status IN ('queued','running') OR worker_id IS NOT NULL)",[marketplaceId])).rows.length)throw new HttpError(409,'Este marketplace já tem um enriquecimento em andamento.');

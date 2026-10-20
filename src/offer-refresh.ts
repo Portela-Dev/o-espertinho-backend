@@ -13,7 +13,7 @@ const sameTime=(a:Date|string,b:Date|string)=>new Date(a).getTime()===new Date(b
 async function enqueue(db:Queryable,trigger:'manual'|'scheduled',userId:string|null){
  const id=randomUUID();
  await db.query('INSERT INTO offer_refresh_runs(id,trigger,created_by,next_item_at) VALUES($1,$2,$3,(SELECT GREATEST(now(),COALESCE(max(next_item_at),now())) FROM offer_refresh_runs))',[id,trigger,userId]);
- const offers=(await db.query("SELECT id,marketplace_id,updated_at FROM offers WHERE status='published' AND affiliate_url IS NOT NULL ORDER BY marketplace_id,created_at,id")).rows;
+ const offers=(await db.query("SELECT id,marketplace_id,updated_at FROM offers WHERE status='published' AND affiliate_url IS NOT NULL AND marketplace_id IN (SELECT id FROM marketplaces m WHERE COALESCE(to_jsonb(m)->>'catalog_executor','legacy')='legacy') ORDER BY marketplace_id,created_at,id")).rows;
  for(const offer of offers)await db.query('INSERT INTO offer_refresh_items(id,run_id,offer_id,marketplace_id,expected_updated_at) VALUES($1,$2,$3,$4,$5)',[randomUUID(),id,offer.id,offer.marketplace_id,offer.updated_at]);
  await db.query('UPDATE offer_refresh_runs SET total=$2 WHERE id=$1',[id,offers.length]);
  return (await db.query('SELECT * FROM offer_refresh_runs WHERE id=$1',[id])).rows[0];

@@ -19,7 +19,8 @@ export async function startDiscovery(db:Database,sourceId:string,userId:string,r
   if((await c.query("SELECT id FROM discovery_runs WHERE source_id=$1 AND status IN ('queued','running')",[sourceId])).rows.length){throw new HttpError(409,'Esta seção já possui uma exploração em andamento.');}
   if(source.paused_at&&!resume){throw new HttpError(409,'Esta seção está pausada. Confirme a retomada para explorar novamente.');}
   const profile=(await c.query('SELECT config FROM discovery_profiles WHERE id=$1',[source.profile_id])).rows[0];
-  const market=(await c.query('SELECT allowed_hosts,url_normalization_rules FROM marketplaces WHERE id=$1',[source.marketplace_id])).rows[0];
+  const market=(await c.query('SELECT allowed_hosts,url_normalization_rules,catalog_executor FROM marketplaces WHERE id=$1 FOR UPDATE',[source.marketplace_id])).rows[0];
+  if(market.catalog_executor==='extension')throw new HttpError(409,'Execute a descoberta pela extensão.');
   const config=discoveryConfigSchema.parse(profile.config);
   const runId=randomUUID();
   const snapshot={config,url:source.url,allowedHosts:market.allowed_hosts,sourceCategoryPath:source.source_category_path,urlNormalizationRules:urlNormalizationRulesSchema.parse(market.url_normalization_rules)};
