@@ -9,6 +9,7 @@ import { normalizeProductUrl } from './url-normalization.js';
 import { categoryKey } from './enrichment-admin.js';
 import { recordDailyPrice } from './price-history.js';
 import { catalogTransaction, ownRun, runView, expireRuns } from './catalog-runs.js';
+import {discoveryProgress} from './catalog-discovery-progress.js';
 import type { CatalogActor } from './catalog-contracts.js';
 const uuid = z.uuid();
 const dataSchema = scrapedDataSchema.strict().extend({
@@ -20,12 +21,13 @@ export const catalogResultInput = z.strictObject({
     failureType: z.enum(['navigation', 'timeout', 'emptyPage', 'invalidItem', 'pagination', 'limit']).optional(),
     links: z.array(z.string().max(10000)).max(500).optional(), done: z.boolean().optional(),
     checkpoint: z.strictObject({
-        url: z.string().max(4000), page: z.number().int().min(1).max(1000), seen: z.array(z.string().max(64)).max(1000), found: z.number().int().min(0).max(100000), noProgress: z.number().int().min(0).max(20), advance: z.boolean().optional()
+        url: z.string().max(4000), page: z.number().int().min(1).max(1000), seen: z.array(z.string().max(64)).max(1000), found: z.number().int().min(0).max(100000), noProgress: z.number().int().min(0).max(20), advance: z.boolean().optional(),
+        scroll:z.strictObject({position:z.number().min(0).max(1e9),height:z.number().min(0).max(1e9),viewport:z.number().min(0).max(1e9)}).optional()
     }).optional(),
     affiliateUrl: z.string().max(10000).optional(), data: dataSchema.optional(),
     sourceCategoryPath: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
 });
-type ResultValue = z.infer<typeof catalogResultInput>;
+export type ResultValue = z.infer<typeof catalogResultInput>;
 type Queryable = Pick<Database, 'query'>;
 interface ResultContext {
     c: Queryable;
@@ -50,10 +52,11 @@ async function discoverResult({ c, run, item, market, v }: ResultContext) {
         if (v.checkpoint.found > config.limits.maxItems)
             throw new HttpError(400, 'Limite de itens excedido.');
     }
-    await persistDiscoveredLinks(c, market, source.id, v.links);
+    await discoveryProgress(c,item,market,v);
+    await persistDiscoveredLinks(c, market, source.id, v.links!);
+    await c.query("UPDATE extension_catalog_items SET payload=jsonb_set(payload,'{checkpoint}',$2::jsonb) WHERE id=$1", [item.id, JSON.stringify(v.checkpoint)]);
     if (v.done)
         return 'completed';
-    await c.query("UPDATE extension_catalog_items SET payload=jsonb_set(payload,'{checkpoint}',$2::jsonb) WHERE id=$1", [item.id, JSON.stringify(v.checkpoint)]);
     return 'pending';
 }
 async function persistDiscoveredLinks(c: Queryable, market: any, sourceId: string, links: string[]) {

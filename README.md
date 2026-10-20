@@ -44,6 +44,10 @@ O worker interno executa somente manutenção de sessões, prévias expiradas, a
 
 ## Validação
 
+Na paginação por rolagem, `pagination.scrollStrategy` aceita `step` (distância configurada, padrão compatível com perfis anteriores) ou `bottom` (fim do conteúdo carregado). A extensão informa posição, altura e viewport; o backend só conta uma tentativa sem progresso quando chegou ao fim, a altura permaneceu estável e não surgiram URLs únicas. Os limites de páginas, itens e tentativas continuam obrigatórios.
+
+A migration 032 armazena hashes das URLs normalizadas por item de execução para contar cada destino uma única vez, inclusive após retomadas. Query, fragmento e sufixos configurados não multiplicam a contagem. A exclusão da execução elimina esses hashes. Aplique migrations e publique o backend antes de atualizar frontend/extensão; recarregue a extensão e inicie uma execução nova para usar a estratégia.
+
 `npm run typecheck`, `npm test`, `npm run test:coverage`, `npm run build`. Testes SQL usam PGlite descartável; testes PostgreSQL reais exigem URL explícita de ambiente de teste. Nenhum teste normal usa DATABASE_URL pessoal. O teste de backup restaura uma cópia isolada antes de comparar os dados.
 
 A extensão tem teste adicional em Chromium real com HTTPS e API controlados. Isso não substitui homologar sua sessão real, seletores e um pequeno lote autorizado em cada marketplace. Não há contorno de login/CAPTCHA, perfis ocultos ou exportação de sessão.
