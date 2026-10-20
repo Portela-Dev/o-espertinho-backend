@@ -10,18 +10,7 @@ before(async()=>{({db}=await testDatabase());const app=createApp(db,testConfig()
  for(let i=0;i<3;i++){const id=randomUUID();ids.push(id);await db.query("INSERT INTO discovery_links(id,marketplace_id,url) VALUES($1,'amazon',$2)",[id,'https://www.amazon.com.br/product/'+id]);}
 });
 after(async()=>db.end());
-test('manual runs snapshot settings, prevent overlap, cancel idempotently and preserve data',async()=>{
- assert.equal((await admin.mutate('put',base+'/settings/amazon',{requestIntervalMs:100,categorySeparator:'>'})).status,200);
- const run=await admin.mutate('post',base+'/runs',{marketplaceId:'amazon',limit:2});assert.equal(run.status,202);assert.equal(run.body.total,2);
- assert.equal((await db.query('SELECT snapshot FROM enrichment_runs WHERE id=$1',[run.body.id])).rows[0].snapshot.requestIntervalMs,100);
- assert.equal((await admin.mutate('post',base+'/runs',{marketplaceId:'amazon'})).status,409);
- assert.equal((await admin.get(base+'/runs')).body.items[0].total,2);
- assert.equal((await admin.get(base+'/runs/'+run.body.id+'/items')).body.total,2);
- assert.equal((await admin.mutate('post',base+'/runs/'+run.body.id+'/cancel',{})).status,200);
- assert.equal((await admin.mutate('post',base+'/runs/'+run.body.id+'/cancel',{})).status,200);
- assert.equal((await db.query("SELECT count(*)::int n FROM enrichment_items WHERE run_id=$1 AND status='cancelled'",[run.body.id])).rows[0].n,2);
- assert.equal((await db.query('SELECT count(*)::int n FROM products')).rows[0].n,0);
-});
+
 test('exact marketplace/full-path mappings only suggest; confirmation and mapping mutation are separate',async()=>{
  const path=['Eletrônicos','Áudio','Fones'],key=categoryKey(path);
  const nodes=(await db.query("SELECT * FROM register_category_path(ARRAY['Informática','Acessórios'])")).rows[0];const categoryId=nodes.ids.at(-1),otherId=nodes.ids[0];
@@ -45,8 +34,8 @@ test('missing origin allows item-only confirmation and permissions/XSRF/limits r
  assert.equal((await user.get(base+'/review')).status,403);
  assert.equal((await user.mutate('post',base+'/runs',{marketplaceId:'amazon'})).status,403);
  assert.equal((await admin.agent.post(base+'/runs').send({marketplaceId:'amazon'})).status,403);
- assert.equal((await admin.mutate('put',base+'/settings/amazon',{requestIntervalMs:99,categorySeparator:'>'})).status,400);
- assert.equal((await admin.mutate('post',base+'/runs',{marketplaceId:'amazon',schedule:true})).status,400);
+ assert.equal((await admin.mutate('put',base+'/settings/amazon',{requestIntervalMs:99,categorySeparator:'>'})).status,404);
+ assert.equal((await admin.mutate('post',base+'/runs',{marketplaceId:'amazon',schedule:true})).status,404);
  assert.equal((await admin.get(base+'/review?pageSize=51')).status,400);
 });
 test('review creates reusable category trees up to ten levels without assigning or publishing anything',async()=>{
@@ -107,35 +96,4 @@ test('existing products are searched within category, preserved and invalidated 
  assert.equal((await db.query('SELECT product_id FROM discovery_links WHERE id=$1',[id])).rows[0].product_id,null);
  await db.query("UPDATE discovery_links SET status='archived' WHERE id=$1",[id]);
  assert.equal((await admin.mutate('post',url+'/product',{mode:'existing',version:row.enrichment_version,productId:existing.id})).status,409);
-});
-
-test('targeted retries preserve history, exclude resolved/archived links and reject overlapping runs',async()=>{
- const actor=(await db.query("SELECT id FROM users WHERE email='arnaldorolimportela@gmail.com'")).rows[0].id;
- const runId=randomUUID(),links=Array.from({length:5},()=>randomUUID());
- await db.query("INSERT INTO enrichment_runs(id,marketplace_id,created_by,snapshot,total,status) VALUES($1,'amazon',$2,'{}',4,'completed')",[runId,actor]);
- for(let i=0;i<links.length;i++){
-  await db.query("INSERT INTO discovery_links(id,marketplace_id,url,status,extraction_status,extraction_error) VALUES($1,'amazon',$2,$3,$4,'incomplete')",[links[i],'https://www.amazon.com.br/product/'+links[i],i===2?'archived':'pending',i===1?'completed':i===3?'pending':'failed']);
-  if(i<4)await db.query("INSERT INTO enrichment_items(run_id,link_id,status,error) VALUES($1,$2,'failed','incomplete')",[runId,links[i]]);
- }
- const retry=base+'/runs/'+runId+'/retry';
- assert.equal((await user.mutate('post',retry,{})).status,403);
- assert.equal((await admin.agent.post(retry).send({})).status,403);
- assert.equal((await admin.mutate('post',retry,{marketplaceId:'other'})).status,400);
- await db.query("UPDATE scraping_profiles SET version=7 WHERE marketplace_id='amazon'");
- const queued=await admin.mutate('post',retry,{});assert.equal(queued.status,202,JSON.stringify(queued.body));assert.equal(queued.body.total,1);
- assert.deepEqual((await db.query('SELECT link_id FROM enrichment_items WHERE run_id=$1',[queued.body.id])).rows.map(r=>r.link_id),[links[0]]);
- assert.equal((await db.query('SELECT snapshot FROM enrichment_runs WHERE id=$1',[queued.body.id])).rows[0].snapshot.profileVersion,7);
- assert.equal((await admin.mutate('post',retry,{})).status,409);
- assert.equal((await admin.mutate('post',base+'/review/'+links[4]+'/retry',{})).status,409);
- assert.equal((await db.query('SELECT count(*)::int n FROM enrichment_items WHERE run_id=$1 AND status=\'failed\'',[runId])).rows[0].n,4);
- assert.equal((await admin.mutate('post',base+'/runs/'+queued.body.id+'/cancel',{})).status,200);
- for(const id of [links[1],links[2],links[3]])assert.equal((await admin.mutate('post',base+'/review/'+id+'/retry',{})).status,409);
- assert.equal((await admin.mutate('post',base+'/review/'+randomUUID()+'/retry',{})).status,404);
- assert.equal((await admin.mutate('post',base+'/runs/'+randomUUID()+'/retry',{})).status,404);
- const single=await admin.mutate('post',base+'/review/'+links[4]+'/retry',{});assert.equal(single.status,202);assert.equal(single.body.total,1);
- assert.deepEqual((await db.query('SELECT link_id FROM enrichment_items WHERE run_id=$1',[single.body.id])).rows.map(r=>r.link_id),[links[4]]);
- assert.equal((await db.query('SELECT extraction_error FROM discovery_links WHERE id=$1',[links[4]])).rows[0].extraction_error,'incomplete');
- await admin.mutate('post',base+'/runs/'+single.body.id+'/cancel',{});
- await db.query("UPDATE discovery_links SET extraction_status='completed' WHERE id=$1",[links[0]]);
- assert.equal((await admin.mutate('post',retry,{})).status,409);
 });

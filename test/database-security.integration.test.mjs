@@ -17,6 +17,9 @@ test('PostgreSQL real: provisionamento preserva dados e restringe runtime, DDL e
   await assert.rejects(()=>assertRestrictedDatabase(owner));
   const id=randomUUID();await app.query("INSERT INTO products(id,name,category,category_path) VALUES($1,'Dado preservado','Tecnologia',ARRAY['Tecnologia'])",[id]);
   await app.query("UPDATE products SET name='Atualizado' WHERE id=$1",[id]);
+  for(const table of ['amazon_sitestripe_session','affiliate_proof_recipes','offer_refresh_items','enrichment_items'])await assert.rejects(()=>app.query('SELECT * FROM '+table),error=>error.code==='42501');
+  await assert.rejects(()=>app.query('SELECT credentials_encrypted FROM marketplaces'),error=>error.code==='42501');
+  await app.query("SELECT id,name,allowed_hosts,catalog_executor FROM marketplaces");
   await assert.rejects(()=>app.query('SELECT * FROM schema_migrations'),error=>error.code==='42501');
   await assert.rejects(()=>app.query('CREATE TABLE public.not_allowed(id int)'),error=>error.code==='42501');
   await assert.rejects(()=>app.query('DROP TABLE products CASCADE'),error=>error.code==='42501');

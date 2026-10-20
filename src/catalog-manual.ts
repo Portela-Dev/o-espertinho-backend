@@ -3,7 +3,7 @@ import type { Database } from './db.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { catalogTransaction, expireRuns } from './catalog-runs.js';
-import { getCatalogSettings, legacyBusy } from './catalog-settings.js';
+import { getCatalogSettings } from './catalog-settings.js';
 import { marketUrl, type ScrapingProfile } from './scraping.js';
 import { normalizeProductUrl } from './url-normalization.js';
 import { resolveClassification } from './classifications.js';
@@ -13,12 +13,12 @@ export async function requestManualExtraction(db: Database, actorId: string, mar
     sellerName?: string;
 } = {}) {
     return catalogTransaction(db, async (c) => {
-        const market = (await c.query('SELECT * FROM marketplaces WHERE id=$1 FOR UPDATE', [marketplaceId])).rows[0];
+        const market = (await c.query('SELECT id,name,website_url,logo_url,allowed_hosts,scraping_enabled,url_normalization_rules,catalog_executor,updated_at FROM marketplaces WHERE id=$1 FOR UPDATE', [marketplaceId])).rows[0];
         if (!market?.scraping_enabled || market.catalog_executor !== 'extension')
             throw new HttpError(409, 'Ative a extração pela extensão.');
         marketUrl(url, market.allowed_hosts);
         await expireRuns(c);
-        if (await legacyBusy(c, marketplaceId) || (await c.query("SELECT id FROM extension_catalog_runs WHERE marketplace_id=$1 AND status NOT IN ('completed','failed','cancelled')", [marketplaceId])).rows.length)
+        if ((await c.query("SELECT id FROM extension_catalog_runs WHERE marketplace_id=$1 AND status NOT IN ('completed','failed','cancelled')", [marketplaceId])).rows.length)
             throw new HttpError(409, 'Já existe uma execução para este marketplace. Conclua ou cancele antes de solicitar a prévia.');
         const settings = await getCatalogSettings(c, marketplaceId), id = randomUUID();
         const product = details.productId ? (await c.query('SELECT id,updated_at FROM products WHERE id=$1', [details.productId])).rows[0] : null;
@@ -57,7 +57,7 @@ export function registerCatalogManual(app: Express, db: Database) {
                 };
             const data = item.result.data;
             data.collectedAt = new Date(item.observed_at).toISOString();
-            const market = (await c.query('SELECT * FROM marketplaces WHERE id=$1', [run.marketplace_id])).rows[0];
+            const market = (await c.query('SELECT id,name,website_url,logo_url,allowed_hosts,scraping_enabled,url_normalization_rules,catalog_executor,updated_at FROM marketplaces WHERE id=$1', [run.marketplace_id])).rows[0];
             data.productUrl = normalizeProductUrl(marketUrl(data.productUrl, market.allowed_hosts), market.url_normalization_rules);
             if (run.step === 'selector_test')
                 return {

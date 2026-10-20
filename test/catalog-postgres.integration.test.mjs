@@ -33,6 +33,6 @@ test('PostgreSQL isolado: concorrência, cancelamento e backup/restauração com
   assert.equal(spawnSync('docker',['exec','-i',container,'pg_restore','-U','catalog_test_admin','-d',restoredName,'--no-owner','--no-acl'],{input:dump.stdout,windowsHide:true}).status,0);
   const restoredUrl=new URL(url);restoredUrl.pathname='/'+restoredName;restored=createDatabase(restoredUrl.href);
   assert.equal((await restored.query('SELECT status FROM extension_catalog_runs WHERE id=$1',[run.id])).rows[0].status,'cancelled');await migrate(restored);
-  assert.equal((await restored.query('SELECT count(*)::int AS n FROM schema_migrations')).rows[0].n,30);
+  assert.equal((await restored.query('SELECT count(*)::int AS n FROM schema_migrations')).rows[0].n,31);
  }finally{await restored?.end();await db.end();}
 });

@@ -21,11 +21,6 @@ export async function getCatalogSettings(db: Pick<Database, 'query'>, marketplac
         version: row?.version ?? 0, config: catalogSettings.parse(row?.config ?? {})
     };
 }
-export async function legacyBusy(db: Pick<Database, 'query'>, marketplaceId: string) {
-    return (await db.query(`SELECT 1 FROM discovery_runs WHERE marketplace_id=$1 AND status IN ('queued','running')
- UNION ALL SELECT 1 FROM enrichment_runs WHERE marketplace_id=$1 AND (status IN ('queued','running') OR worker_id IS NOT NULL)
- UNION ALL SELECT 1 FROM offer_refresh_items i JOIN offer_refresh_runs r ON r.id=i.run_id WHERE i.marketplace_id=$1 AND r.status IN ('queued','running') AND i.status<>'done' LIMIT 1`, [marketplaceId])).rows.length > 0;
-}
 export function registerCatalogSettings(app: Express, db: Database) {
     app.post('/api/admin/extension-catalog/sources/:id/resume', async (req, res) => {
         const id = z.uuid().parse(req.params.id);
@@ -47,7 +42,7 @@ export function registerCatalogSettings(app: Express, db: Database) {
     });
     app.put('/api/admin/extension-catalog/settings/:id', async (req, res) => {
         const input = z.strictObject({
-            version: z.number().int().nonnegative(), executor: z.enum(['legacy', 'extension']), config: catalogSettings
+            version: z.number().int().nonnegative(), executor: z.literal('extension'), config: catalogSettings
         }).parse(req.body);
         const c = await db.connect();
         try {
@@ -57,10 +52,6 @@ export function registerCatalogSettings(app: Express, db: Database) {
                 throw new HttpError(404, 'Marketplace não encontrado.');
             if (input.config.recipe)
                 validateRecipe(input.config.recipe, market);
-            if (input.executor !== market.catalog_executor) {
-                if (await legacyBusy(c, market.id) || (await c.query("SELECT id FROM extension_catalog_runs WHERE marketplace_id=$1 AND status NOT IN ('completed','failed','cancelled')", [market.id])).rows.length)
-                    throw new HttpError(409, 'Cancele ou conclua as execuções antes de trocar o executor.');
-            }
             const current = await getCatalogSettings(c, market.id);
             if (current.version !== input.version)
                 throw new HttpError(409, 'Configuração alterada. Recarregue.');

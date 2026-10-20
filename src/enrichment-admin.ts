@@ -6,10 +6,8 @@ import {HttpError} from './security.js';
 import {audit} from './offers.js';
 import {pagedQuery} from './pagination.js';
 import {requiredCategory} from './classifications.js';
-import {marketUrl} from './scraping.js';
 const uuid=z.uuid();
 const marketId=z.string().regex(/^[a-z][a-z0-9_-]{1,39}$/);
-const settings=z.strictObject({requestIntervalMs:z.number().int().min(100).max(600000),categorySeparator:z.string().max(10)});
 const newProduct=z.strictObject({name:z.string().trim().min(1).max(300),description:z.string().max(4000).default(''),brand:z.string().trim().max(120).default(''),imageUrl:z.url().refine(v=>new URL(v).protocol==='https:','A imagem deve usar HTTPS.').nullable().default(null)});
 const assignment=z.discriminatedUnion('mode',[
  z.strictObject({mode:z.literal('existing'),version:z.number().int().nonnegative(),productId:uuid}),
@@ -22,68 +20,17 @@ async function reviewableLink(db:Pick<Database,'query'>,id:string,lock=false){
  return row;
 }
 export const categoryKey=(path:string[])=>JSON.stringify(path.map(s=>s.normalize('NFC').replace(/\s+/gu,' ').trim().toLowerCase()));
-const runView=`SELECT r.id,r.marketplace_id,m.name AS marketplace_name,r.status,r.total,r.error,r.current_link_id,r.created_at,r.started_at,r.finished_at,r.heartbeat_at,
- (SELECT count(*)::int FROM enrichment_items i WHERE i.run_id=r.id AND i.status='completed') AS completed,
- (SELECT count(*)::int FROM enrichment_items i WHERE i.run_id=r.id AND i.status='failed') AS failed,
- (SELECT count(*)::int FROM enrichment_items i WHERE i.run_id=r.id AND i.status IN ('skipped','cancelled')) AS skipped
- FROM enrichment_runs r JOIN marketplaces m ON m.id=r.marketplace_id`;
 async function transaction<T>(db:Database,work:(c:Pick<Database,'query'>)=>Promise<T>){const c=await db.connect();try{await c.query('BEGIN');const result=await work(c);await c.query('COMMIT');return result;}catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}}
-export async function startEnrichment(db:Database,marketplaceId:string,actor:string,retryFailed=false,limit=100,selection?:{linkId?:string;runId?:string;linkIds?:string[];navigationUrls?:Record<string,string>}){
- return transaction(db,async c=>{
-  const market=(await c.query('SELECT id,allowed_hosts,scraping_enabled,catalog_executor FROM marketplaces WHERE id=$1 FOR UPDATE',[marketplaceId])).rows[0];
-  if(market?.catalog_executor==='extension')throw new HttpError(409,'Execute o enriquecimento pela extensão.');
-  const profile=(await c.query('SELECT rules,wait_timeout_ms,version FROM scraping_profiles WHERE marketplace_id=$1',[marketplaceId])).rows[0];
-  if(!market?.scraping_enabled||!profile)throw new HttpError(400,'Ative a extração e cadastre os seletores deste marketplace.');
-  if((await c.query("SELECT id FROM enrichment_runs WHERE marketplace_id=$1 AND (status IN ('queued','running') OR worker_id IS NOT NULL)",[marketplaceId])).rows.length)throw new HttpError(409,'Este marketplace já tem um enriquecimento em andamento.');
-  const links=(await c.query(`SELECT id FROM discovery_links l WHERE marketplace_id=$1 AND status='pending'
-   AND (extraction_status='pending' OR ($2 AND extraction_status='failed'))
-   AND ($4::uuid IS NULL OR l.id=$4) AND ($5::uuid IS NULL OR EXISTS(SELECT 1 FROM enrichment_items i WHERE i.run_id=$5 AND i.link_id=l.id AND i.status='failed'))
-   AND (($4::uuid IS NULL AND $5::uuid IS NULL) OR extraction_status='failed')
-   AND ($6::uuid[] IS NULL OR l.id=ANY($6))
-   ORDER BY first_seen_at,id LIMIT $3`,[marketplaceId,retryFailed,limit,selection?.linkId??null,selection?.runId??null,selection?.linkIds??null])).rows;
-  if(!links.length)throw new HttpError(409,selection?'Não há links com falha elegíveis para esta nova tentativa. Atualize a lista.':'Não há links pendentes para esta seleção.');
-  const config=(await c.query('SELECT * FROM enrichment_settings WHERE marketplace_id=$1',[marketplaceId])).rows[0];
-  const navigationUrls=selection?.navigationUrls?Object.fromEntries(links.map(link=>{const url=selection.navigationUrls![link.id];if(!url)throw new HttpError(400,'Falta o link de navegação de um item selecionado.');
-return [link.id,marketUrl(url,market.allowed_hosts)];})):undefined;
-  const id=randomUUID(),snapshot={allowedHosts:market.allowed_hosts,rules:profile.rules,timeoutMs:profile.wait_timeout_ms,profileVersion:profile.version,requestIntervalMs:navigationUrls?Math.max(20000,config?.request_interval_ms??0):config?.request_interval_ms??2000,categorySeparator:config?.category_separator??'>',...(navigationUrls?{navigationUrls}:{})};
-  await c.query('INSERT INTO enrichment_runs(id,marketplace_id,created_by,snapshot,total) VALUES($1,$2,$3,$4,$5)',[id,marketplaceId,actor,JSON.stringify(snapshot),links.length]);
-  for(const link of links)await c.query('INSERT INTO enrichment_items(run_id,link_id) VALUES($1,$2)',[id,link.id]);
-  await audit(c,actor,'discovery.enrichment.started',id);return {id,status:'queued',total:links.length};
- });
-}
-export async function cancelEnrichment(db:Database,id:string,actor:string){return transaction(db,async c=>{
- const run=(await c.query('SELECT status FROM enrichment_runs WHERE id=$1 FOR UPDATE',[id])).rows[0];if(!run)throw new HttpError(404,'Execução não encontrada.');
- if(!['queued','running','cancelled'].includes(run.status))throw new HttpError(409,'Esta execução já terminou.');
- await c.query("UPDATE enrichment_runs SET status='cancelled',finished_at=clock_timestamp() WHERE id=$1",[id]);
- await c.query("UPDATE enrichment_items SET status='cancelled',finished_at=clock_timestamp() WHERE run_id=$1 AND status IN ('queued','running')",[id]);
- await audit(c,actor,'discovery.enrichment.cancelled',id);return {id,status:'cancelled'};
-});}
 export function registerEnrichmentAdmin(app:Express,db:Database){
  const base='/api/admin/discovery/enrichment';
- app.get(base+'/settings/:market',async(req,res)=>{const marketplaceId=marketId.parse(req.params.market);const row=(await db.query('SELECT request_interval_ms,category_separator FROM enrichment_settings WHERE marketplace_id=$1',[marketplaceId])).rows[0];res.json(row??{request_interval_ms:2000,category_separator:'>'});});
- app.put(base+'/settings/:market',async(req,res)=>{const marketplaceId=marketId.parse(req.params.market),v=settings.parse(req.body);await transaction(db,async c=>{if(!(await c.query('SELECT id FROM marketplaces WHERE id=$1',[marketplaceId])).rows.length)throw new HttpError(404,'Marketplace não encontrado.');
-await c.query('INSERT INTO enrichment_settings(marketplace_id,request_interval_ms,category_separator) VALUES($1,$2,$3) ON CONFLICT(marketplace_id) DO UPDATE SET request_interval_ms=$2,category_separator=$3',[marketplaceId,v.requestIntervalMs,v.categorySeparator]);await audit(c,req.user!.id,'discovery.enrichment.settings',marketplaceId);});res.json({ok:true});});
- app.post(base+'/runs',async(req,res)=>{const v=z.strictObject({marketplaceId:marketId,retryFailed:z.boolean().default(false),limit:z.number().int().min(1).max(10000).default(100)}).parse(req.body);res.status(202).json(await startEnrichment(db,v.marketplaceId,req.user!.id,v.retryFailed,v.limit));});
- app.get(base+'/runs',async(req,res)=>res.json(await pagedQuery(db,{...req.query,paginate:'true'},runView+" WHERE ($1='' OR r.marketplace_id=$1) ORDER BY r.created_at DESC,r.id",[marketId.or(z.literal('')).default('').parse(req.query.marketplaceId)])));
- app.get(base+'/runs/:id/items',async(req,res)=>res.json(await pagedQuery(db,{...req.query,paginate:'true'},'SELECT i.*,l.url FROM enrichment_items i JOIN discovery_links l ON l.id=i.link_id WHERE run_id=$1 ORDER BY l.url',[uuid.parse(req.params.id)])));
- app.post(base+'/runs/:id/cancel',async(req,res)=>res.json(await cancelEnrichment(db,uuid.parse(req.params.id),req.user!.id)));
- app.post(base+'/runs/:id/retry',async(req,res)=>{
-  z.strictObject({}).parse(req.body??{});const id=uuid.parse(req.params.id);
-  const run=(await db.query('SELECT marketplace_id FROM enrichment_runs WHERE id=$1',[id])).rows[0];
-  if(!run)throw new HttpError(404,'Execução não encontrada.');
-  res.status(202).json(await startEnrichment(db,run.marketplace_id,req.user!.id,true,10000,{runId:id}));
- });
  app.post(base+'/review/:id/retry',async(req,res)=>{
   z.strictObject({}).parse(req.body??{});const id=uuid.parse(req.params.id);
   const link=(await db.query('SELECT marketplace_id FROM discovery_links WHERE id=$1',[id])).rows[0];
   if(!link)throw new HttpError(404,'Link não encontrado.');
-  const market=(await db.query('SELECT catalog_executor FROM marketplaces WHERE id=$1',[link.marketplace_id])).rows[0];
-  if(market.catalog_executor==='extension'){
+
    const updated=await db.query("UPDATE discovery_links SET extraction_status='pending',extraction_error=NULL,enrichment_version=enrichment_version+1 WHERE id=$1 AND status='pending' AND extraction_status='failed' AND published_offer_id IS NULL RETURNING id",[id]);
    if(!updated.rows.length)throw new HttpError(409,'Não há falha elegível para retentativa.');
    await audit(db,req.user!.id,'discovery.retry_marked',id);res.status(202).json({id,status:'pending',executor:'extension'});return;
-  }
-  res.status(202).json(await startEnrichment(db,link.marketplace_id,req.user!.id,true,1,{linkId:id}));
  });
  app.post(base+'/review/:id/archive',async(req,res)=>{const id=uuid.parse(req.params.id);await transaction(db,async c=>{if(!(await c.query("UPDATE discovery_links SET status='archived' WHERE id=$1 RETURNING id",[id])).rows.length)throw new HttpError(404,'Link não encontrado.');
 await audit(c,req.user!.id,'discovery.link.archived',id);});res.json({ok:true});});

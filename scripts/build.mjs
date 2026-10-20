@@ -1,0 +1,10 @@
+import {rmSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {dirname,join,resolve} from 'node:path';
+import {spawnSync} from 'node:child_process';
+const root=dirname(dirname(fileURLToPath(import.meta.url))),output=resolve(root,'dist');
+if(dirname(output)!==root||output!==join(root,'dist'))throw new Error('Diretório de build inválido.');
+rmSync(output,{recursive:true,force:true});
+const result=spawnSync(process.execPath,[join(root,'node_modules/typescript/bin/tsc'),'-p','tsconfig.json'],{cwd:root,stdio:'inherit',windowsHide:true});
+if(result.error)throw result.error;
+process.exitCode=result.status??1;

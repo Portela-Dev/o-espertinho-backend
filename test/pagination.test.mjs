@@ -43,14 +43,6 @@ test('administrative collections page without caps and public product range is i
  for(const offer of (await db.query('SELECT id,marketplace_id FROM offers')).rows)await db.query("INSERT INTO click_events(id,offer_id,marketplace_id,placement) VALUES($1,$2,$3,'detail')",[randomUUID(),offer.id,offer.marketplace_id]);
  const stats=await admin.get('/api/admin/stats?paginate=true&topPage=2&pageSize=1');assert.equal(stats.body.top.length,1);assert.equal(stats.body.topTotal,3);assert.equal(stats.body.topPage,2);assert.equal(stats.body.totalClicks,3);
 });
-test('refresh history pagination keeps active run visible and pages all error occurrences',async t=>{
- const {db,admin}=await fixture(t);const active=randomUUID();
- await db.query("INSERT INTO offer_refresh_runs(id,trigger,status,created_at) VALUES($1,'manual','queued',now()-interval '1 day')",[active]);
- const completed=randomUUID();await db.query("INSERT INTO offer_refresh_runs(id,trigger,status,created_at,total) VALUES($1,'manual','completed',now(),2)",[completed]);
- for(let i=0;i<2;i++)await db.query("INSERT INTO offer_refresh_items(id,run_id,marketplace_id,expected_updated_at,status,outcome,error,finished_at) VALUES($1,$2,'amazon',now(),'done','pending','Example',now())",[randomUUID(),completed]);
- const history=await admin.get('/api/admin/offer-refresh?paginate=true&pageSize=1');assert.equal(history.body.runs.length,1);assert.equal(history.body.total,2);assert.equal(history.body.active.id,active);
- const detail=await admin.get('/api/admin/offer-refresh/runs/'+completed+'?paginate=true&pageSize=1&page=2');assert.equal(detail.body.total,2);assert.equal(detail.body.errorTotal,2);assert.equal(detail.body.errors.length,1);assert.equal(detail.body.page,2);
-});
 
 test('users accept selected page size, preserve filters and validate server limits',async t=>{
  const {admin}=await fixture(t);

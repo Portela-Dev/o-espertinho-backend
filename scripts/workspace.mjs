@@ -25,13 +25,6 @@ export function workspaceSteps(command) {
         return [npm('1-backend', 'test'), npm('2-frontend', 'run', 'test:coverage'), npm('o-espertinho-chrome-extension', 'test')];
     if (command?.startsWith('db:'))
         return [npm('1-backend', 'run', command)];
-    const legacy = /^legacy:(extractor|price-job|discovery-job|enrichment-job):(up|down|logs)$/.exec(command ?? '');
-    if (legacy) {
-        const projects = {
-            extractor: 'o-espertinho-extractor', 'price-job': 'o-espertinho-job-update-price', 'discovery-job': 'o-espertinho-job-discovery', 'enrichment-job': 'o-espertinho-job-enrich-links'
-        };
-        return [npm(projects[legacy[1]], 'run', legacy[2])];
-    }
     throw new Error('Comando não reconhecido.');
 }
 export function runWorkspace(command) {
@@ -53,7 +46,7 @@ export function runWorkspace(command) {
         const env = join(root, 'o-espertinho-chrome-extension', '.env');
         if (!existsSync(env) && existsSync(env + '.example'))
             copyFileSync(env + '.example', env);
-        console.log('PostgreSQL pronto em segundo plano. Inicie backend e frontend separadamente. Recarregue a extensão a partir de dist. Os serviços legados não foram iniciados nem interrompidos.');
+        console.log('PostgreSQL pronto em segundo plano. Inicie backend e frontend separadamente. Recarregue a extensão a partir de dist. A extensão executa as operações de navegador; nenhum job/extrator é necessário.');
     }
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))

@@ -12,7 +12,6 @@ import express from 'express';
 import {registerExtension} from './extension-auth.js';
 import {registerUserAdmin} from './user-admin.js';
 import {registerPriceHistory} from './price-history.js';
-import {registerOfferRefreshAdmin} from './offer-refresh.js';
 import {registerApiDocs} from './api-docs.js';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -23,25 +22,18 @@ import {getProduct,registerPublicProducts,registerProductAdmin} from './products
 import { z, ZodError } from 'zod';
 import type { Config } from './config.js';
 import type { Database } from './db.js';
-import { HttpError, sessionMiddleware, csrfMiddleware, newSession, setSignedOut, SIGNED_OUT_COOKIE, hash, requireUser, requireAdmin, requireRecentAdmin, encrypt, decrypt, marketplaceURL, type User } from './security.js';
-import { ProviderService, credentialFields, type ProviderId } from './providers.js';
-import { type OfferExtractor } from './scraping.js';
-import { ManualOfferExtractor } from './manual-extractor.js';
+import { HttpError, sessionMiddleware, csrfMiddleware, newSession, setSignedOut, SIGNED_OUT_COOKIE, hash, requireUser, requireAdmin, requireRecentAdmin, type User } from './security.js';
 import { classificationText,requiredCategory,resolveClassification } from './classifications.js';
 import { registerScrapingAdmin,assertRegisteredLink } from './scraping-admin.js';
-import { registerMeliCallback, registerMeliAdminOAuth, meliRedirectUri } from './mercadolivre-oauth.js';
-import { audit, withMeliCredentials, credentials, refreshOffer, runRule } from './offers.js';
+import { audit } from './offers.js';
 const uuid=z.uuid();
-const provider=z.enum(['amazon','mercadolivre']);
 const text=(max=120)=>z.string().trim().min(1).max(max);
 const filtersSchema=z.object({q:z.string().max(160).default(''),marketplace:z.string().regex(/^(?:[a-z][a-z0-9_-]{1,39})?$/).default(''),category:z.string().max(80).default(''),categoryId:z.union([z.uuid(),z.literal('')]).default(''),maxPrice:z.coerce.number().int().min(0).max(100000000).default(0),sort:z.enum(['recent','price_asc','discount']).default('recent')});
-const ruleSchema=z.object({marketplaceId:provider,name:text(),keywords:text(160),category:text(80),maxPriceCents:z.number().int().positive().max(100000000).nullable().default(null),minDiscount:z.number().int().min(0).max(99).default(0),intervalMinutes:z.number().int().min(60).max(10080).default(360),enabled:z.boolean().default(true)});
 const editSchema=z.object({title:text(300),description:z.string().max(4000).default(''),category:requiredCategory.default('Outros'),subcategory:classificationText.optional(),conditions:z.string().max(1500).default(''),featured:z.boolean().default(false),priceCents:z.number().int().positive().max(100000000).optional(),originalPriceCents:z.number().int().positive().max(100000000).nullable().optional(),expiresAt:z.iso.datetime().optional()});
-const manualSchema=editSchema.extend({productId:uuid,sellerName:z.string().trim().max(200).default(''),marketplaceId:provider,externalId:text(100),productUrl:z.url(),affiliateUrl:z.url(),imageUrl:z.url().nullable().default(null),priceCents:z.number().int().positive().max(100000000),originalPriceCents:z.number().int().positive().max(100000000).nullable().default(null),expiresAt:z.iso.datetime(),authorizedContent:z.literal(true)});
 export interface Identity { sub:string; email:string; emailVerified:boolean; name:string; avatar?:string; authoritative:boolean; nonce?:string }
-export interface AppOptions { extractor?:OfferExtractor; providers?:ProviderService; verifyGoogle?:(token:string)=>Promise<Identity> }
+export interface AppOptions { verifyGoogle?:(token:string)=>Promise<Identity> }
 export function createApp(db: Database,config: Config,options: AppOptions={}) {
-  const app=express(), providers=options.providers??new ProviderService();
+  const app=express();
   const google=new OAuth2Client(config.GOOGLE_CLIENT_ID);
   const verifyIdentity=async(credential:string):Promise<Identity>=>{
     let identity: Identity;
@@ -71,7 +63,6 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     }
     res.json({user:req.user??null,autoSignInAllowed:req.cookies[SIGNED_OUT_COOKIE]!=='1'});
   });
-  registerMeliCallback(app,config);
   registerExtension(app,db,config,(router,account)=>{registerCatalogRuns(router,db,account);registerCatalogResults(router,db,account);});
   app.use('/api',csrfMiddleware(config));
   app.post('/api/auth/google',rateLimit({windowMs:60000,limit:15,skip:()=>config.NODE_ENV==='test',message:{error:'Muitas tentativas de login. Aguarde.'}}),async(req,res)=>{
@@ -188,32 +179,8 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
   registerUserAdmin(app,db);
   registerProductAdmin(app,db);
   registerCatalogSettings(app,db);registerCatalogAdmin(app,db);registerCatalogManual(app,db);
-  registerOfferRefreshAdmin(app,db);
   registerDiscoveryAdmin(app,db);registerDiscoveryRuns(app,db);registerEnrichmentAdmin(app,db);registerCatalogPublication(app,db);
-  registerScrapingAdmin(app,db,options.extractor??(config.MANUAL_EXTRACTOR_URL?new ManualOfferExtractor(config.MANUAL_EXTRACTOR_URL,config.MANUAL_EXTRACTION_SERVICE_TOKEN):{extract:async()=>{throw new HttpError(503,'Configure MANUAL_EXTRACTOR_URL e MANUAL_EXTRACTION_SERVICE_TOKEN e inicie o novo extrator manual.');}}));
-  registerMeliAdminOAuth(app,db,config,providers);
-  app.get('/api/admin/marketplaces',async(_req,res)=>{
-    const {rows}=await db.query('SELECT * FROM marketplaces ORDER BY name');
-    res.json(rows.map(r=>({id:r.id,name:r.name,enabled:r.enabled,configured:!!r.credentials_encrypted,oauthConnected:r.id==='mercadolivre'&&!!(r.credentials_encrypted&&decrypt(r.credentials_encrypted,config.ENCRYPTION_KEY).refreshToken),oauthRedirectUri:r.id==='mercadolivre'?(config.MELI_REDIRECT_URI||new URL('/api/admin/mercadolivre/callback',config.APP_ORIGIN).href):undefined,oauthReady:r.id==='mercadolivre'&&(()=>{try{meliRedirectUri(config);return true;}catch{return false;}})(),fields:credentialFields[r.id as ProviderId]??[],connection_status:r.connection_status,last_checked_at:r.last_checked_at,last_error:r.last_error,automaticDiscovery:r.id==='amazon',documentation:r.id==='amazon'?'https://associados.amazon.com.br/creatorsapi/docs/en-us/introduction':'https://www.mercadolivre.com.br/l/afiliados-home'})));
-  });
-  app.put('/api/admin/marketplaces/:id',async(req,res)=>{
-    const id=provider.parse(req.params.id),v=z.object({enabled:z.boolean(),credentials:z.record(z.string(),z.string().max(10000))}).parse(req.body);
-    const client=await db.connect();try{await client.query('BEGIN');
-    const {rows}=await client.query('SELECT * FROM marketplaces WHERE id=$1 FOR UPDATE',[id]);
-    const secrets=rows[0].credentials_encrypted?decrypt(rows[0].credentials_encrypted,config.ENCRYPTION_KEY):{};
-    if(id==='mercadolivre' && credentialFields[id].some(f=>v.credentials[f.key]?.trim() && v.credentials[f.key].trim()!==secrets[f.key])){delete secrets.refreshToken;delete secrets.accessToken;delete secrets.accessTokenExpiresAt;}
-    for(const f of credentialFields[id]) if(v.credentials[f.key]?.trim()) secrets[f.key]=v.credentials[f.key].trim();
-    if(v.enabled) for(const f of credentialFields[id]) if(f.required&&!secrets[f.key]) throw new HttpError(400,`Preencha ${f.label}.`);
-    await client.query("UPDATE marketplaces SET enabled=$2,credentials_encrypted=$3,connection_status='unverified',last_error=NULL,updated_at=now() WHERE id=$1",[id,v.enabled,Object.keys(secrets).length?encrypt(secrets,config.ENCRYPTION_KEY):null]);
-    await client.query('COMMIT');}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
-    await audit(db,req.user!.id,'marketplace.updated',id);res.json({ok:true});
-  });
-  app.delete('/api/admin/marketplaces/:id/credentials',async(req,res)=>{const id=provider.parse(req.params.id);await db.query("UPDATE marketplaces SET enabled=false,credentials_encrypted=NULL,connection_status='not_configured',last_error=NULL WHERE id=$1",[id]);await audit(db,req.user!.id,'marketplace.credentials_removed',id);res.json({ok:true});});
-  app.post('/api/admin/marketplaces/:id/test',async(req,res)=>{
-    const id=provider.parse(req.params.id);
-    try {const status=id==='mercadolivre'?await withMeliCredentials(db,config,secrets=>providers.check(id,secrets)):await providers.check(id,(await credentials(db,config,id)).secrets);await db.query('UPDATE marketplaces SET connection_status=$2,last_checked_at=now(),last_error=NULL WHERE id=$1',[id,status]);res.json({ok:true,message:status==='catalog_only'?'API geral autenticada. Isso não habilita descoberta nem geração de links de afiliado.':'Consulta oficial executada com sucesso.'});}
-    catch(e){await db.query("UPDATE marketplaces SET connection_status='error',last_checked_at=now(),last_error=$2 WHERE id=$1",[id,e instanceof HttpError?e.message:'Falha de conexão.']);throw e;}
-  });
+  registerScrapingAdmin(app,db);
   app.get('/api/admin/category-options',async(_req,res)=>res.json((await db.query('SELECT category,subcategory FROM offer_category_options ORDER BY lower(category),lower(subcategory)')).rows));
   app.get('/api/admin/offers',async(req,res)=>{
     const status=z.enum(['all','pending','published','rejected','expired']).default('pending').parse(req.query.status);
@@ -222,24 +189,12 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     if(wantsPage(req.query)){res.json(await pagedQuery(db,req.query,`SELECT * FROM offers WHERE ${where} ORDER BY updated_at DESC,id`,args));return;}
     const {rows}=await db.query(`SELECT * FROM offers WHERE ${where} ORDER BY updated_at DESC LIMIT 50 OFFSET $${args.length+1}`,[...args,(page-1)*50]);res.json(rows);
   });
-  app.post('/api/admin/offers',async(req,res)=>{
-    const v=manualSchema.parse(req.body),product=await getProduct(db,v.productId);
-    if(v.marketplaceId==='amazon') throw new HttpError(400,'Cadastre a oferta por link e use os seletores configurados no marketplace.');
-    marketplaceURL(v.productUrl,v.marketplaceId);marketplaceURL(v.affiliateUrl,v.marketplaceId);
-    if(new Date(v.expiresAt)<=new Date()||new Date(v.expiresAt)>new Date(Date.now()+7*86400000)) throw new HttpError(400,'Defina validade futura de até sete dias.');
-    if(v.imageUrl&&!v.imageUrl.startsWith('https://')) throw new HttpError(400,'A imagem deve usar HTTPS.');
-    const classification={category:product.category,subcategory:product.subcategory};
-    const {rows}=await db.query(`INSERT INTO offers(id,marketplace_id,external_id,title,description,category,image_url,product_url,affiliate_url,price_cents,original_price_cents,source,conditions,featured,expires_at,subcategory,product_id,seller_name) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'manual',$12,$13,$14,$15,$16,$17) RETURNING *`,[randomUUID(),v.marketplaceId,v.externalId,v.title,v.description,classification.category,v.imageUrl,v.productUrl,v.affiliateUrl,v.priceCents,v.originalPriceCents,v.conditions,v.featured,v.expiresAt,classification.subcategory,v.productId,v.sellerName]);
-    await audit(db,req.user!.id,'offer.created',rows[0].id);res.status(201).json(rows[0]);
-  });
   const getOffer=async(id:string)=>{const {rows}=await db.query('SELECT * FROM offers WHERE id=$1',[uuid.parse(id)]);if(!rows[0]) throw new HttpError(404,'Oferta não encontrada.');return rows[0];};
   app.patch('/api/admin/offers/:id',async(req,res)=>{
     const offer=await getOffer(String(req.params.id)),v=editSchema.parse(req.body);
-    if(offer.source==='api' && (v.title!==offer.title || v.description!==offer.description || v.conditions!==offer.conditions)) throw new HttpError(400,'Conteúdo recebido da API deve ser preservado.');
-    if(offer.source==='api' && (v.priceCents!==undefined||v.originalPriceCents!==undefined||v.expiresAt!==undefined)) throw new HttpError(400,'Preço e validade de ofertas da API são atualizados pelo conector.');
     if(v.expiresAt && (new Date(v.expiresAt)<=new Date()||new Date(v.expiresAt)>new Date(Date.now()+7*86400000))) throw new HttpError(400,'Defina validade futura de até sete dias.');
     const product=await getProduct(db,offer.product_id),classification={category:product.category,subcategory:product.subcategory};
-    await db.query("UPDATE offers SET title=$2,description=$3,category=$4,conditions=$5,featured=$6,subcategory=$7,status='pending',updated_at=now() WHERE id=$1",[offer.id,v.title,v.description,classification.category,v.conditions,v.featured,classification.subcategory]);if(offer.source!=='api')await db.query(`UPDATE offers SET price_cents=$2,original_price_cents=$3,expires_at=$4,verified_at=now(),data_updated_at=now(),availability_status='available',refresh_status='updated',last_refresh_error=NULL WHERE id=$1`,[offer.id,v.priceCents??offer.price_cents,v.originalPriceCents===undefined?offer.original_price_cents:v.originalPriceCents,v.expiresAt??offer.expires_at]);await audit(db,req.user!.id,'offer.edited',offer.id);res.json({ok:true});
+    await db.query("UPDATE offers SET title=$2,description=$3,category=$4,conditions=$5,featured=$6,subcategory=$7,status='pending',updated_at=now() WHERE id=$1",[offer.id,v.title,v.description,classification.category,v.conditions,v.featured,classification.subcategory]);await db.query(`UPDATE offers SET price_cents=$2,original_price_cents=$3,expires_at=$4,verified_at=now(),data_updated_at=now(),availability_status='available',refresh_status='updated',last_refresh_error=NULL WHERE id=$1`,[offer.id,v.priceCents??offer.price_cents,v.originalPriceCents===undefined?offer.original_price_cents:v.originalPriceCents,v.expiresAt??offer.expires_at]);await audit(db,req.user!.id,'offer.edited',offer.id);res.json({ok:true});
   });
   app.put('/api/admin/offers/:id/classification',async()=>{throw new HttpError(409,'Edite a categoria e a subcategoria na aba Produtos.');});
   app.delete('/api/admin/offers/:id',async(req,res)=>{
@@ -257,31 +212,16 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
     res.json({ok:true});
   });
-  app.post('/api/admin/offers/:id/refresh',async(req,res)=>{
-    const offer=await getOffer(String(req.params.id));if(offer.source!=='api') throw new HttpError(409,'Oferta manual: confira os dados na loja e edite o preço e a validade para uma nova revisão.');
-    res.json(await refreshOffer(db,config,providers,offer));
-  });
   app.post('/api/admin/offers/:id/review',async(req,res)=>{
     const v=z.object({action:z.enum(['publish','reject','expire']),expectedUpdatedAt:z.iso.datetime().optional()}).parse(req.body);let offer=await getOffer(String(req.params.id));
     if(v.action==='publish') {
       if(!v.expectedUpdatedAt || new Date(v.expectedUpdatedAt).getTime()!==new Date(offer.updated_at).getTime()) throw new HttpError(409,'A oferta foi alterada. Atualize a revisão antes de publicar.');
-      const oldPrice=offer.price_cents,oldConditions=offer.conditions,oldTitle=offer.title;
-      if(offer.source==='api') offer=await refreshOffer(db,config,providers,offer);
-      if(offer.price_cents!==oldPrice || offer.conditions!==oldConditions || offer.title!==oldTitle) throw new HttpError(409,'A oferta mudou. Confira os novos dados e aprove novamente.');
       if(!offer.affiliate_url||new Date(offer.expires_at)<=new Date()) throw new HttpError(409,'Oferta sem link válido ou expirada.');
       await assertRegisteredLink(db,offer.marketplace_id,offer.affiliate_url);
     }
     const status={publish:'published',reject:'rejected',expire:'expired'}[v.action];
     await db.query('UPDATE offers SET status=$2,reviewed_by=$3,reviewed_at=now(),published_at=CASE WHEN $2=\'published\' THEN now() ELSE published_at END,updated_at=now() WHERE id=$1',[offer.id,status,req.user!.id]);await audit(db,req.user!.id,`offer.${status}`,offer.id);res.json({ok:true});
   });
-  app.get('/api/admin/rules',async(_req,res)=>{res.json((await db.query('SELECT * FROM search_rules ORDER BY created_at DESC')).rows);});
-  app.post('/api/admin/rules',async()=>{throw new HttpError(409,'Cadastre o produto e vincule os links manualmente. Buscas automáticas não podem escolher o produto.');});
-  app.patch('/api/admin/rules/:id',async(req,res)=>{const v=z.object({enabled:z.literal(false)}).parse(req.body);await db.query('UPDATE search_rules SET enabled=$2 WHERE id=$1',[uuid.parse(req.params.id),v.enabled]);res.json({ok:true});});
-  app.delete('/api/admin/rules/:id',async(req,res)=>{await db.query('DELETE FROM search_rules WHERE id=$1',[uuid.parse(req.params.id)]);res.json({ok:true});});
-  app.post('/api/admin/rules/:id/run',async(req,res)=>{
-    const {rows}=await db.query('SELECT * FROM search_rules WHERE id=$1',[uuid.parse(req.params.id)]);if(!rows[0]) throw new HttpError(404,'Busca não encontrada.');await runRule(db,config,providers,rows[0]);res.json({ok:true});
-  });
-  app.get('/api/admin/runs',async(_req,res)=>{res.json((await db.query('SELECT r.*,s.name AS rule_name FROM sync_runs r LEFT JOIN search_rules s ON s.id=r.rule_id ORDER BY started_at DESC LIMIT 50')).rows);});
   app.get('/api/admin/stats',async(req,res)=>{
     const days=z.coerce.number().int().min(1).max(365).default(30).parse(req.query.days),since=new Date(Date.now()-days*86400000);
     const [counts,clicks,top,daily]=await Promise.all([

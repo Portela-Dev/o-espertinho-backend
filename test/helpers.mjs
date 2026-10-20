@@ -31,3 +31,13 @@ export async function seedOffer(db,changes={}) {
 export {createApp};
 
 export async function seedProduct(db,changes={}){const id=randomUUID(),p={name:'Produto de teste',category:'Tecnologia',subcategory:'',...changes};await db.query('INSERT INTO products(id,name,category,subcategory) VALUES($1,$2,$3,$4)',[id,p.name,p.category,p.subcategory]);return id;}
+
+export async function finishManualFixture(db,runId,data){
+ const [{default:express},{registerCatalogRuns},{registerCatalogResults},{default:request}]=await Promise.all([import('express'),import('../dist/catalog-runs.js'),import('../dist/catalog-results.js'),import('supertest')]);
+ const run=(await db.query('SELECT created_by FROM extension_catalog_runs WHERE id=$1',[runId])).rows[0];
+ const actor={id:run.created_by,extension_id:'a'.repeat(32),permissions:['affiliate_links','catalog','selectors','discovery','updates']};
+ const router=express();router.use(express.json());registerCatalogRuns(router,db,async()=>actor);registerCatalogResults(router,db,async()=>actor);
+ router.use((err,_req,res,_next)=>res.status(err.status??400).json({error:err.message}));
+ const item=(await request(router).post('/catalog/runs/'+runId+'/claim').send({})).body.item;
+ return request(router).post('/catalog/runs/'+runId+'/results').send({itemId:item.id,leaseToken:item.lease_token,outcome:'success',data});
+}
