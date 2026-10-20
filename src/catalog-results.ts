@@ -17,7 +17,7 @@ export const catalogResultInput=z.strictObject({
  reason:z.enum(['incomplete','network','navigation','configuration','stale']).optional(),
  failureType:z.enum(['navigation','timeout','emptyPage','invalidItem','pagination','limit']).optional(),
  links:z.array(z.string().max(10000)).max(500).optional(),done:z.boolean().optional(),
- checkpoint:z.strictObject({url:z.string().max(4000),page:z.number().int().min(1).max(1000),seen:z.array(z.string().max(64)).max(1000),found:z.number().int().min(0).max(100000),noProgress:z.number().int().min(0).max(20)}).optional(),
+ checkpoint:z.strictObject({url:z.string().max(4000),page:z.number().int().min(1).max(1000),seen:z.array(z.string().max(64)).max(1000),found:z.number().int().min(0).max(100000),noProgress:z.number().int().min(0).max(20),advance:z.boolean().optional()}).optional(),
  affiliateUrl:z.string().max(10000).optional(),data:dataSchema.optional(),
  sourceCategoryPath:z.array(z.string().trim().min(1).max(120)).max(30).optional(),
 });
