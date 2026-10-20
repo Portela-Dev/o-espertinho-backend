@@ -101,13 +101,14 @@ async function enrichResult({ c, item, v }: ResultContext, data: z.infer<typeof 
         throw new HttpError(409, 'A categoria de origem mudou; revise o item antes de substituir os dados.');
     await c.query("UPDATE discovery_links SET enrichment_data=$2,source_category_path=$3,source_category_key=$4,extraction_status='completed',extraction_error=NULL,extracted_at=$5,enrichment_version=enrichment_version+1 WHERE id=$1", [link.id, JSON.stringify(data), path, categoryKey(path), data.collectedAt]);
 }
-async function priceResult({ c, item, v }: ResultContext, data: z.infer<typeof dataSchema>) {
+async function priceResult({ c, run, item, v }: ResultContext, data: z.infer<typeof dataSchema>) {
     const offer = (await c.query('SELECT * FROM offers WHERE id=$1 FOR UPDATE', [item.target_id])).rows[0];
     const fresh = offer && new Date(offer.updated_at).getTime() === new Date(item.expected_version).getTime() && new Date(offer.data_updated_at).getTime() <= new Date(item.observed_at).getTime();
     if (!fresh || offer.status !== 'published')
         throw new HttpError(409, 'A oferta foi alterada ou já possui observação mais recente.');
     const available = v.outcome === 'success', price = available ? data.priceCents : null;
-    await c.query("UPDATE offers SET price_cents=COALESCE($2,price_cents),original_price_cents=$3,availability_status=$4,refresh_status='updated',data_updated_at=$5,last_refresh_attempt_at=clock_timestamp(),last_refresh_error=NULL,updated_at=clock_timestamp() WHERE id=$1", [offer.id, price, data.originalPriceCents, available ? 'available' : 'unavailable', data.collectedAt]);
+    const expires=new Date(new Date(data.collectedAt).getTime()+run.snapshot.profile.validity_minutes*60000);
+    await c.query("UPDATE offers SET price_cents=COALESCE($2,price_cents),original_price_cents=$3,availability_status=$4,refresh_status='updated',data_updated_at=$5,expires_at=CASE WHEN $4='available' THEN $6 ELSE expires_at END,last_refresh_attempt_at=clock_timestamp(),last_refresh_error=NULL,updated_at=clock_timestamp() WHERE id=$1", [offer.id, price, data.originalPriceCents, available ? 'available' : 'unavailable', data.collectedAt,expires]);
     await recordDailyPrice(c, offer.id, offer.product_id, price, data.collectedAt);
 }
 async function successfulResult(context: ResultContext) {
