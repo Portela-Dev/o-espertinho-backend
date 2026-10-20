@@ -401,3 +401,6 @@ Ao concluir uma fase, registrar data, repositórios/commits/PRs, migrations nova
 
 - Fase 5 (contratos e executor): conversão independe de categoria/produto; URLs originais ficam separadas dos links de afiliado e seus parâmetros são preservados. Revalidação de receita contra domínios atuais; headers Authorization e valores fixos de sessão recusados. Teste transacional e nove testes do executor aprovados. Não foi usada sessão real de marketplace nesta implementação; a conversão real pequena será parte do aceite operacional.
 
+
+- Fase 6 (implementação): extrator DOM compatível com navegador, sem dependência Node/Playwright no bundle; campos limitados, preço em centavos, imagens, características, breadcrumb ordenado e hidratação. Teste DOM e teste SQL de enriquecimento aprovados; de-para aparece apenas como sugestão, sem categoria confirmada/produto. Campos de sessão não integram o resultado. Falta de preço é inconclusiva, salvo regra explícita de indisponibilidade.
+
