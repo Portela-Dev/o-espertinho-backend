@@ -404,3 +404,6 @@ Ao concluir uma fase, registrar data, repositórios/commits/PRs, migrations nova
 
 - Fase 6 (implementação): extrator DOM compatível com navegador, sem dependência Node/Playwright no bundle; campos limitados, preço em centavos, imagens, características, breadcrumb ordenado e hidratação. Teste DOM e teste SQL de enriquecimento aprovados; de-para aparece apenas como sugestão, sem categoria confirmada/produto. Campos de sessão não integram o resultado. Falta de preço é inconclusiva, salvo regra explícita de indisponibilidade.
 
+
+- Fase 7 (implementação): ação Publicar na lista de revisão com confirmação explícita. Backend exige categoria/produto compatíveis, URL de afiliado, observação válida e dados completos; publicação e histórico iniciais são transacionais e idempotentes. Teste SQL e Angular typecheck aprovados. Candidatos publicados saem da revisão. A indicação antiga de gerar link após atribuir produto foi substituída.
+

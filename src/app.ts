@@ -1,3 +1,4 @@
+import {registerCatalogPublication} from './catalog-publication.js';
 import {registerCatalogResults} from './catalog-results.js';
 import {registerCatalogRuns} from './catalog-runs.js';
 import {registerCatalogSettings} from './catalog-settings.js';
@@ -186,7 +187,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
   registerProductAdmin(app,db);
   registerCatalogSettings(app,db);
   registerOfferRefreshAdmin(app,db);
-  registerDiscoveryAdmin(app,db);registerDiscoveryRuns(app,db);registerEnrichmentAdmin(app,db);
+  registerDiscoveryAdmin(app,db);registerDiscoveryRuns(app,db);registerEnrichmentAdmin(app,db);registerCatalogPublication(app,db);
   registerScrapingAdmin(app,db,options.extractor??(config.MANUAL_EXTRACTOR_URL?new ManualOfferExtractor(config.MANUAL_EXTRACTOR_URL,config.MANUAL_EXTRACTION_SERVICE_TOKEN):{extract:async()=>{throw new HttpError(503,'Configure MANUAL_EXTRACTOR_URL e MANUAL_EXTRACTION_SERVICE_TOKEN e inicie o novo extrator manual.');}}));
   registerMeliAdminOAuth(app,db,config,providers);
   app.get('/api/admin/marketplaces',async(_req,res)=>{
