@@ -21,7 +21,7 @@ test('IA salva apenas sugestões; categoria e produto só mudam com confirmaçã
  const existing=randomUUID();await f.db.query("INSERT INTO products(id,name,brand,category_path) VALUES($1,'Headset Modelo X','Marca',ARRAY['Tecnologia','Áudio'])",[existing]);
  const productContext=await f.call('post','/catalog/ai/context',{id,task:'product'});assert.equal(productContext.status,200,JSON.stringify(productContext.body));assert.equal(productContext.body.products[0].id,existing);
  const p=await f.call('post','/catalog/ai/suggestions',{requestId:productContext.body.requestId,model:'fixture',suggestion:suggestion('Tecnologia > Áudio',{action:'link_existing',productId:existing})});assert.equal(p.status,200,JSON.stringify(p.body));
- link=(await f.db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];assert.equal(link.product_id,null);
+ link=(await f.db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];assert.equal(link.product_id,null);assert.equal((await f.browser.get(base+'/review')).body.items[0].ai_product.matchedProduct.name,'Headset Modelo X');
  confirmation=await f.browser.mutate('post',base+'/review/'+id+'/product',{mode:'existing',version:link.enrichment_version,productId:existing});assert.equal(confirmation.status,200,JSON.stringify(confirmation.body));
  assert.equal((await f.db.query('SELECT product_id FROM discovery_links WHERE id=$1',[id])).rows[0].product_id,existing);
  const config=(await f.call('get','/catalog/ai/config?marketplaceId=amazon')).body;assert.deepEqual(config.category,{completed:1,total:1});assert.deepEqual(config.product,{completed:1,total:1});

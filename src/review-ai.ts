@@ -63,19 +63,20 @@ export async function saveAiSuggestion(db:Database,actor:CatalogActor,input:unkn
   if(!current||current.link_version!==link.enrichment_version||current.settings_version!==revision)throw new HttpError(409,'Os dados ou configurações mudaram. Gere uma nova sugestão.');
   if(current.suggestion)return {ok:true};
   if(new Date(current.expires_at).getTime()<Date.now())throw new HttpError(409,'Solicitação expirada.');
+  let matchedProduct:any=null;
   const s=v.suggestion,path=pathSchema.parse(s.category.split('>').map(p=>p.trim()));
   if(snapshot.task==='product'){
    const cat=(await c.query('SELECT path FROM category_nodes WHERE id=$1',[link.confirmed_category_id])).rows[0];
    if(JSON.stringify(cat.path)!==JSON.stringify(path))throw new HttpError(400,'A IA não pode alterar a categoria confirmada ao catalogar.');
    if(s.action==='link_existing'){
     if(!s.productId||!current.request_context.productIds.includes(s.productId))throw new HttpError(400,'Produto fora dos candidatos desta análise.');
-    const p=(await c.query('SELECT id FROM products WHERE id=$1 AND category_ids @> ARRAY[$2]::uuid[]',[s.productId,link.confirmed_category_id])).rows[0];
-    if(!p)throw new HttpError(409,'O produto candidato foi alterado.');
+    const p=(await c.query('SELECT id,name,brand,category_path,image_url FROM products WHERE id=$1 AND category_ids @> ARRAY[$2]::uuid[]',[s.productId,link.confirmed_category_id])).rows[0];
+    if(!p)throw new HttpError(409,'O produto candidato foi alterado.');matchedProduct=p;
    }
   }else if(s.action!=='needs_review'||s.productId||s.product)throw new HttpError(400,'A categorização não pode atribuir ou criar produtos.');
   if((s.action==='link_existing')!==!!s.productId||(s.action==='create_new')!==!!s.product)throw new HttpError(400,'Sugestão inconsistente.');
   const category=(await c.query('SELECT id FROM category_nodes WHERE normalized_path=$1',[path.map(p=>p.normalize('NFC').replace(/\s+/gu,' ').trim().toLowerCase())])).rows[0];
-  await c.query('UPDATE review_ai_suggestions SET suggestion=$2,updated_at=clock_timestamp() WHERE request_id=$1',[v.requestId,JSON.stringify({...s,category:path.join(' > '),categoryPath:path,categoryId:category?.id??null,categoryExists:!!category,model:v.model})]);
+  await c.query('UPDATE review_ai_suggestions SET suggestion=$2,updated_at=clock_timestamp() WHERE request_id=$1',[v.requestId,JSON.stringify({...s,matchedProduct,category:path.join(' > '),categoryPath:path,categoryId:category?.id??null,categoryExists:!!category,model:v.model})]);
   await audit(c,actor.id,'review_ai.suggested',link.id);return {ok:true};
  });
 }
