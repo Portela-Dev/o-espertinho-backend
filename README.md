@@ -26,6 +26,8 @@ Revisão: categoria de origem e sugestão de mapeamento não equivalem à confir
 
 Prévia manual e teste de seletores retornam 202 com executionId. O admin acompanha a solicitação e permite cancelar; a extensão a processa. Confirmar a prévia continua sujeito ao produto/perfil original e à expiração.
 
+Indisponibilidade explícita exige uma regra unavailable na configuração capturada pela execução. O enriquecimento conclui sem falha e grava availability=unavailable nos dados de revisão; preço ausente por esse motivo não é pendência de hidratação. Na atualização de uma oferta, availability_status passa a unavailable e refresh_status a updated, preservando o último preço como referência e registrando indisponibilidade no histórico diário. Falha técnica continua mantendo o estado anterior e marcando atualização pendente.
+
 Preço e histórico são atualizados na mesma transação: um preço por oferta/dia de America/Sao_Paulo, sobrescrito somente por observação mais recente. Falhas técnicas preservam preço/disponibilidade e marcam Atualização pendente. Indisponibilidade exige indicador explícito. A publicação mantém agregação por produto e árvores de até dez níveis.
 
 Swagger/OpenAPI: `/api/docs/` e `/api/openapi.json`; produção exige autorização administrativa conforme configuração existente. Nenhum endpoint de demonstração, captura de sessão ou prova de conversão permanece registrado.

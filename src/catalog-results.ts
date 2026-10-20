@@ -89,6 +89,11 @@ function validateProductResult({ run, item, market, v }: ResultContext) {
         throw new HttpError(400, 'Extração incompleta não confirma disponibilidade.');
     if (v.outcome === 'unavailable' && !run.snapshot.settings.blockRules.some((r: any) => r.kind === 'unavailable'))
         throw new HttpError(400, 'Configure evidência explícita de indisponibilidade.');
+    if (v.outcome === 'unavailable') {
+        data.priceCents = null;
+        data.originalPriceCents = null;
+        data.missing = data.missing.filter(field => field !== 'price');
+    }
     return data;
 }
 async function enrichResult({ c, item, v }: ResultContext, data: z.infer<typeof dataSchema>) {
@@ -99,7 +104,8 @@ async function enrichResult({ c, item, v }: ResultContext, data: z.infer<typeof 
     const path = v.sourceCategoryPath ?? [];
     if (link.confirmed_category_id && link.source_category_key !== categoryKey(path))
         throw new HttpError(409, 'A categoria de origem mudou; revise o item antes de substituir os dados.');
-    await c.query("UPDATE discovery_links SET enrichment_data=$2,source_category_path=$3,source_category_key=$4,extraction_status='completed',extraction_error=NULL,extracted_at=$5,enrichment_version=enrichment_version+1 WHERE id=$1", [link.id, JSON.stringify(data), path, categoryKey(path), data.collectedAt]);
+    const enriched = {...data, availability: v.outcome === 'unavailable' ? 'unavailable' : 'available'};
+    await c.query("UPDATE discovery_links SET enrichment_data=$2,source_category_path=$3,source_category_key=$4,extraction_status='completed',extraction_error=NULL,extracted_at=$5,enrichment_version=enrichment_version+1 WHERE id=$1", [link.id, JSON.stringify(enriched), path, categoryKey(path), data.collectedAt]);
 }
 async function priceResult({ c, run, item, v }: ResultContext, data: z.infer<typeof dataSchema>) {
     const offer = (await c.query('SELECT * FROM offers WHERE id=$1 FOR UPDATE', [item.target_id])).rows[0];

@@ -15,4 +15,8 @@ test('atualização diária sobrescreve somente a observação confirmada e falh
  await run({outcome:'technical_failure',reason:'incomplete'});
  const offer=(await f.db.query('SELECT * FROM offers WHERE id=$1',[offerId])).rows[0];assert.equal(offer.price_cents,40000);assert.equal(offer.refresh_status,'pending');assert.equal(offer.status,'published');assert.equal(offer.availability_status,'available');
  assert.equal((await f.db.query('SELECT price_cents FROM offer_price_history WHERE offer_id=$1',[offerId])).rows[0].price_cents,40000);
+ await f.db.query("INSERT INTO extension_catalog_settings(marketplace_id,config) VALUES('amazon',$1) ON CONFLICT(marketplace_id) DO UPDATE SET config=extension_catalog_settings.config||EXCLUDED.config",[JSON.stringify({blockRules:[{kind:'unavailable',match:'selector',value:'#stock-unavailable'}]})]);
+ await run({outcome:'unavailable',data:{...data,priceCents:null,missing:['price']}});
+ const unavailable=(await f.db.query('SELECT * FROM offers WHERE id=$1',[offerId])).rows[0];assert.equal(unavailable.availability_status,'unavailable');assert.equal(unavailable.refresh_status,'updated');assert.equal(unavailable.last_refresh_error,null);assert.equal(unavailable.price_cents,40000);
+ assert.equal((await f.db.query('SELECT price_cents FROM offer_price_history WHERE offer_id=$1',[offerId])).rows[0].price_cents,null);
 });
