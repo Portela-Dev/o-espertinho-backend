@@ -46,8 +46,11 @@ await audit(c,req.user!.id,'discovery.link.archived',id);});res.json({ok:true});
  });
  app.get(base+'/review',async(req,res)=>{
   const f=z.object({marketplaceId:marketId.or(z.literal('')).default(''),sourceCategory:z.string().max(1000).default(''),state:z.enum(['','pending','completed','failed']).default('')}).parse(req.query);
-  res.json(await pagedQuery(db,{...req.query,paginate:'true'},`SELECT l.*,p.name AS product_name,p.sku AS product_sku,m.name AS marketplace_name,cm.id AS mapping_id,cm.category_id AS suggested_category_id,n.path AS suggested_category_path,confirmed.path AS confirmed_category_path
-   FROM discovery_links l JOIN marketplaces m ON m.id=l.marketplace_id LEFT JOIN category_mappings cm ON cm.marketplace_id=l.marketplace_id AND cm.source_key=l.source_category_key
+  res.json(await pagedQuery(db,{...req.query,paginate:'true'},`SELECT l.*,p.name AS product_name,p.sku AS product_sku,m.name AS marketplace_name,ac.suggestion AS ai_category,ac.request_id AS ai_category_request,ap.suggestion AS ai_product,ap.request_id AS ai_product_request,cm.id AS mapping_id,cm.category_id AS suggested_category_id,n.path AS suggested_category_path,confirmed.path AS confirmed_category_path
+   FROM discovery_links l
+ LEFT JOIN review_ai_suggestions ac ON ac.link_id=l.id AND ac.task='category' AND ac.link_version=l.enrichment_version AND ac.settings_version=(SELECT category_version FROM review_ai_settings WHERE id=true)
+ LEFT JOIN review_ai_suggestions ap ON ap.link_id=l.id AND ap.task='product' AND ap.link_version=l.enrichment_version AND ap.settings_version=(SELECT product_version FROM review_ai_settings WHERE id=true)
+ JOIN marketplaces m ON m.id=l.marketplace_id LEFT JOIN category_mappings cm ON cm.marketplace_id=l.marketplace_id AND cm.source_key=l.source_category_key
    LEFT JOIN category_nodes n ON n.id=cm.category_id LEFT JOIN category_nodes confirmed ON confirmed.id=l.confirmed_category_id LEFT JOIN products p ON p.id=l.product_id
    WHERE l.status='pending' AND l.published_offer_id IS NULL AND ($1='' OR l.marketplace_id=$1) AND ($2='' OR l.extraction_status=$2) AND ($3='' OR position(lower($3) in lower(array_to_string(l.source_category_path,' > ')))>0) ORDER BY l.first_seen_at,l.id`,[f.marketplaceId,f.state,f.sourceCategory]));
  });

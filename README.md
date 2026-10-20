@@ -57,3 +57,7 @@ A extensão tem teste adicional em Chromium real com HTTPS e API controlados. Is
 A consulta administrativa de ofertas inclui o nome/SKU do produto e o marketplace para a listagem única do frontend, mantendo a permissão catalog. As permissões existentes permanecem com os mesmos IDs; o rótulo updates descreve consulta de execuções e atualização de preços. A centralização visual não altera as verificações de etapa no cancelamento.
 
 O cadastro de fontes não aceita mais intervalHours e não atualiza interval_hours. A coluna histórica permanece preservada no banco, sem consumidor de agendamento; não há migration destrutiva nem mudança nas URLs/perfis de vitrines. Habilitação da fonte, paginação e intervalo entre requisições continuam operacionais.
+
+## Revisão com IA
+
+A revisão possui uma aba Configurações de IA com tarefas e prompts independentes. A extensão gera propostas; o administrador confirma categoria e produto antes de qualquer aplicação. Consulte docs/REVISAO-IA.md no backend.

@@ -1,3 +1,4 @@
+import {reviewAiInput,reviewAiResult} from './review-ai.js';
 import { z } from 'zod';
 import { catalogSettings } from './catalog-settings.js';
 import { startCatalogInput, actionInput } from './catalog-contracts.js';
@@ -10,6 +11,14 @@ export function catalogApiPaths() {
         string,
         any?
     ][] = [
+        ['get','/admin/discovery/enrichment/ai/settings','Consultar configurações independentes de IA'],
+        ['put','/admin/discovery/enrichment/ai/settings','Ativar tarefas e definir prompts; invalida sugestões antigas',reviewAiInput],
+        ['post','/admin/discovery/enrichment/ai/suggestions/{id}/discard','Descartar proposta e permitir nova análise',z.strictObject({})],
+        ['get','/extension/catalog/ai/config','Configurações e contadores de categorias/produtos confirmados'],
+        ['get','/extension/catalog/ai/queue','Fila elegível de categorização ou catalogação'],
+        ['post','/extension/catalog/ai/context','Reservar contexto e obter candidatos sem credenciais OpenAI',z.strictObject({id:z.uuid(),task:z.enum(['category','product'])})],
+        ['post','/extension/catalog/ai/suggestions','Guardar sugestão sem criar categoria/produto nem atribuir vínculo',reviewAiResult],
+        ['post','/extension/catalog/ai/release','Liberar análise cancelada ou com falha',z.strictObject({requestId:z.uuid()})],
         ['get', '/extension/catalog/config', 'Configurações dos marketplaces autorizados'],
         ['get', '/extension/catalog/stats', 'Pendências por marketplace; preços sem verificação bem-sucedida nas últimas 24 horas'],
         ['get', '/extension/catalog/runs', 'Listar execuções próprias com paginação'],
@@ -52,10 +61,11 @@ export function catalogApiPaths() {
                     type: 'string', pattern: '^[a-p]{32}$'
                 }
             });
-        if(path==='/extension/catalog/stats')parameters.push(
+        if(path==='/extension/catalog/stats'||path==='/extension/catalog/ai/config'||path==='/extension/catalog/ai/queue')parameters.push(
             {name:'marketplaceId',in:'query',required:true,schema:{type:'string'}},
             {name:'retryFailed',in:'query',schema:{type:'string',enum:['true','false'],default:'false'}}
         );
+        if(path==='/extension/catalog/ai/queue')parameters.push({name:'task',in:'query',required:true,schema:{type:'string',enum:['category','product']}},{name:'limit',in:'query',schema:{type:'integer',minimum:1,maximum:10000,default:100}});
         let security: any = [{
                 SessionCookie: [], XSRFToken: []
             }];
