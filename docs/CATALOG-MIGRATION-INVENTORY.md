@@ -31,3 +31,13 @@ Não aplicar testes destrutivos ao banco pessoal. Testes usam PostgreSQL isolado
 O corte exige seleção de executor por marketplace e exclusão entre filas antigas e novas. Não parar containers ou revogar contas nesta fase. Arquivamento de GitHub, exclusão de imagens/releases e deploy não estão autorizados por consequência da implementação.
 
 Relatórios ignorados, screenshots e POCs não constituem dependência de produção. Limpeza precisa de busca por rotas, variáveis, imports, storage, OpenAPI, grants, scripts npm, Compose, workflows, testes e documentação. Nunca reescrever migrations já aplicadas.
+
+## Estado após a limpeza definitiva
+
+Backend e frontend retiraram rotas/UI/clientes dos executores anteriores. A extensão é o único navegador operacional. Os quatro containers antigos estão parados com restart desativado; três roles dedicadas de banco estão NOLOGIN e sem grants. O runtime usa espertinho_app, sem acesso às credenciais cifradas antigas. A conta dona permanece separada para migrations.
+
+Migration 031 encerra filas antigas e preserva evidência histórica. offer_refresh_settings/search_rules estão desativadas. Tabelas antigas e colunas cifradas são arquivo deliberado sem consumidor; nenhum produto/link/categoria/preço foi zerado. A chave do arquivo e backups não são versionados. Código compilado removido não permanece em dist, pois o build agora limpa somente esse diretório validado.
+
+Jobs/extrator/extraction-core têm branches/PRs de aposentadoria e workflows desativados; não houve archive/delete de repositório ou pacote. Alterações locais src/contracts.ts e src/interactive-proof.ts do extrator original continuam preservadas e fora da entrega. Os worktrees isolados usados para aposentadoria ficam em .retirement no workspace, sem modificar essa POC.
+
+Recuperação requer backup pré-031 e versões compatíveis; não iniciar consumidores antigos contra as filas atuais. Evidências ignoradas/reports e artefatos históricos não são dependências de execução e foram preservados quando sua exclusão não era necessária ao código.
