@@ -343,17 +343,17 @@ As fases abaixo possuem o estado atualizado na seção 7 e no diário de execuç
 
 Para cada módulo/rota/serviço removido, verificar e registrar:
 
-- [ ] Imports, exports, registro no startup, tipos compartilhados e código compilado.
-- [ ] Consumidores frontend/extensão, comandos, eventos, estados persistidos e migração de storage.
-- [ ] Rotas, clientes HTTP, OpenAPI/Swagger, rate limits e permissões.
-- [ ] SQL, FKs, triggers, índices, views, fixtures, filas, leases e rotina de retenção.
-- [ ] Testes, mocks, snapshots, cobertura e critérios do Sonar.
-- [ ] Dependências, lockfiles, `.npmrc` e acesso a pacotes privados.
-- [ ] `.env.example`, variáveis de CI, secrets, secrets de build e credenciais de serviço.
-- [ ] Scripts npm, setup, Compose, Dockerfiles, healthchecks, workflows e deploys.
-- [ ] READMEs, instruções de instalação, páginas administrativas e links para documentação antiga.
-- [ ] Artefatos locais/ignorados e alterações não commitadas, sem apagar trabalho por engano.
-- [ ] Instalação limpa, migração de instalação existente e ausência de chamadas ao componente aposentado.
+- [x] Imports, exports, registro no startup, tipos compartilhados e código compilado.
+- [x] Consumidores frontend/extensão, comandos, eventos, estados persistidos e migração de storage.
+- [x] Rotas, clientes HTTP, OpenAPI/Swagger, rate limits e permissões.
+- [x] SQL, FKs, triggers, índices, views, fixtures, filas, leases e rotina de retenção.
+- [x] Testes, mocks, snapshots, cobertura e critérios do Sonar.
+- [x] Dependências, lockfiles, `.npmrc` e acesso a pacotes privados.
+- [x] `.env.example`, variáveis de CI, secrets, secrets de build e credenciais de serviço.
+- [x] Scripts npm, setup, Compose, Dockerfiles, healthchecks, workflows e deploys.
+- [x] READMEs, instruções de instalação, páginas administrativas e links para documentação antiga.
+- [x] Artefatos locais/ignorados e alterações não commitadas, sem apagar trabalho por engano.
+- [x] Instalação limpa, migração de instalação existente e ausência de chamadas ao componente aposentado.
 
 A pesquisa deve cobrir nomes, rotas, comandos e variáveis antigos; não apenas nomes de arquivos. Uma referência preservada por razão histórica precisa estar identificada como tal e fora do caminho ativo.
 
@@ -375,8 +375,8 @@ Refatoração estrutural e testes acompanham cada fase. A fase 11 concentra a ex
 | 7 — Revisão/publicação | Validado no Mercado Livre real com confirmação humana e publicação | Vínculo manual e publicação protegida |
 | 8 — Preços | Validado no Mercado Livre real: uma oferta atualizada e histórico diário único | Histórico diário e falhas técnicas preservadas |
 | 9 — Prévia manual | Validado no Mercado Livre real, sem extrator | Cadastro e testes sem extrator |
-| 10 — Corte | Corte local: Amazon/Mercado Livre na extensão; quatro serviços antigos parados; teste manual de seletores concluído | Executor único e recuperação ensaiada |
-| 11 — Limpeza | POCs removidas do caminho ativo; infraestrutura aguarda corte | Serviços, POCs e referências retirados |
+| 10 — Corte | Corte local concluído: extensão exclusiva, migration 031 e conta restrita aplicadas; produção fora deste corte | Executor único e recuperação ensaiada |
+| 11 — Limpeza | Código/rotas/UI/infra legados retirados; dados antigos arquivados sem runtime e serviços desativados | Serviços, POCs e referências retirados |
 | 12 — Homologação final | CI e Quality Gates aprovados; homologação da conta real em andamento | Instalação/migração e CI dos projetos ativos |
 
 Ao concluir uma fase, registrar data, repositórios/commits/PRs, migrations novas, testes executados, limitações e decisão de avanço. Não marcar como concluída com base apenas em implementação compilada ou em teste mockado quando o aceite exigir navegação real.
@@ -481,3 +481,16 @@ Todas foram atualizadas nas mesmas branches; não houve segunda PR no mesmo repo
 - Decisão de retenção: a revisão automática recusou a exclusão de tabelas/colunas persistentes. Em vez de apagar dados, tabelas antigas e credenciais cifradas ficam como arquivo sem consumidor/grants de runtime. A chave do backup é preservada fora do código; nenhuma exclusão de dados persistentes foi executada.
 - Testes A: backend 110 casos, 108 aprovados e 2 opcionais; os dois PostgreSQL reais foram executados depois em container descartável, aprovando grants restritos, concorrência e restauração das 31 migrations. Prévias incompletas são recusadas pelo contrato de resultados; testes anteriores foram migrados para reserva/resultado/finalização reais, sem extrator injetado.
 - PRs: a consulta atual retornou nenhuma PR aberta no backend; PR já encerrada não será reaberta nem duplicada. Criar apenas uma PR de limpeza onde não existir pendente; atualizar a pendente quando houver.
+
+- Etapa B — frontend: removidos componentes de filas/agenda antigos, polling e handlers dos workers, opção de executor legado, tratamento OAuth e aba de buscas automáticas. Exploração e revisão usam CatalogOperations para execuções. Testes de criação de oferta usam prévia → extensão → finalização → confirmação. Typecheck/build, quatro testes Node e 44 jornadas SSR completas aprovados; regressão de paginação passou a cobrir as execuções atuais. PR anterior #15 já estava mesclada; nova PR única de limpeza será usada.
+- Serviços aposentados: branches isoladas preservaram a POC local do extrator. Guards de início/provisionamento/publicação testados nos cinco repositórios; workflows automáticos substituídos por aviso manual sem deploy ou segredos. PRs: extraction-core #3, extractor #4, job-discovery #2, job-enrich-links #3, job-update-price #8. Backend da etapa A: commit dfdda72, PR #14.
+
+- Etapa C — infraestrutura/setup: removidos comandos legacy:* e segredos de navegador dos exemplos/Compose ativos; setup gera contas/senhas distintas e db:migrate usa MIGRATION_DATABASE_URL para provisionar runtime. Testes de primeiro setup e preservação de .env existente aprovados. Reinício automático dos quatro containers antigos desabilitado; cinco workflows de serviços/pacote aposentados desabilitados na API do GitHub, sem arquivar repositórios ou excluir releases.
+- Corte local de banco autorizado: novo dump e cópia privada de .env em C:/Users/arnal/Documents/Codex/backups/espertinho/20261020-catalog-extension; dump restaurado em PostgreSQL temporário, migration 031/grants aplicados à cópia e contagens de produtos, ofertas, links, categorias/mapeamentos, preços e sessões conferidas. Só depois aplicado ao banco local. Conta espertinho_app restrita configurada para runtime; conta dona preservada como migrations; três contas dedicadas de jobs passaram a NOLOGIN e perderam grants. Valores de segredos não foram exibidos nem versionados. Chave dos dados cifrados antigos preservada no backup privado. Nenhum dado comercial, container ou volume foi excluído.
+- PR frontend #16, commit 770d780; backend #14 recebe também a etapa C. As PRs anteriores #13/#15 estavam mescladas quando a limpeza começou. Nos cinco serviços aposentados, as únicas PRs abertas são as de aposentadoria já listadas. Não foi criado outro projeto/pacote de extração; regras atuais continuam genéricas e executadas pelo navegador do administrador.
+
+- Verificação operacional: db:migrate foi separado em migrate-cli.ts para evitar ciclo de imports com provision-database; comando real executado com sucesso e de forma idempotente. API local respondeu 200 em health, marketplaces e products com conexão espertinho_app; roles dos três jobs confirmadas NOLOGIN. CI frontend #39446902293 aprovado. CI backend inicial aprovou validações/testes, mas imagem apontou falta de COPY do novo script de build; Dockerfile corrigido e nova imagem em validação, sem deploy.
+
+- Fechamento da limpeza: mapa de consumidores reavaliado. Código executável legado retirado do backend/frontend; histórico de migrations e de execuções preservado deliberadamente. Nenhuma rota atual chama um serviço aposentado, e build não carrega dist órfão. Checklists de imports, permissões, OpenAPI, SQL/FKs, scripts, env, CI e documentação revisados; artefatos/evidências antigos e POC local preservados em vez de apagados indiscriminadamente. Repositórios/pacote/releases continuam disponíveis como arquivo e seus workflows estão desativados.
+- Smoke de imagem: Dockerfile atualizado para copiar scripts/build.mjs; imagem Linux construída e smoke test com PostgreSQL/conta restrita descartáveis aprovado, sem serviços de navegador. Teste de CLI real acrescentado à suíte PostgreSQL para garantir término idempotente sem ciclo de imports.
+- Produção: nenhum deploy, merge, release, DNS ou segredo de VPS foi alterado. Homologação HTTPS/host permissions em domínio de produção continua sendo um aceite de implantação futura, não impede a conclusão da limpeza do código/local.

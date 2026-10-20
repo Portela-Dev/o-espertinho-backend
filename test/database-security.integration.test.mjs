@@ -1,3 +1,4 @@
+import {spawnSync} from 'node:child_process';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -24,6 +25,7 @@ test('PostgreSQL real: provisionamento preserva dados e restringe runtime, DDL e
   await assert.rejects(()=>app.query('CREATE TABLE public.not_allowed(id int)'),error=>error.code==='42501');
   await assert.rejects(()=>app.query('DROP TABLE products CASCADE'),error=>error.code==='42501');
   await assert.rejects(()=>app.query('CREATE ROLE not_allowed'),error=>error.code==='42501');
+  const cli=spawnSync(process.execPath,['dist/migrate-cli.js'],{env:{...process.env,MIGRATION_DATABASE_URL:ownerUrl.href,DATABASE_URL:appUrl.href,APP_ORIGIN:'http://localhost:4200'},encoding:'utf8',windowsHide:true,timeout:20000});assert.equal(cli.status,0,cli.stderr);assert.match(cli.stdout,/grants/);
   await provisionDatabase(owner,appUrl.href);assert.equal((await app.query('SELECT name FROM products WHERE id=$1',[id])).rows[0].name,'Atualizado');
   await owner.query(`GRANT pg_monitor TO "${role}"`);await assert.rejects(()=>assertRestrictedDatabase(app));await assert.rejects(()=>provisionDatabase(owner,appUrl.href));
  }finally{

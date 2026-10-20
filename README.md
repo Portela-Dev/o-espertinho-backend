@@ -8,11 +8,11 @@ Use Node 24. Na raiz do workspace, `npm run setup` prepara os três projetos ati
 
 Neste repositório: `npm ci`, `npm run setup:env`, `npm run db:migrate`, `npm run dev`. Scripts não imprimem segredos e preservam `.env` existente. Configure GOOGLE_CLIENT_ID; a conta administrativa continua reconhecida após login Google verificado. Não há senha padrão nem bypass de autenticação de produção.
 
-Migrations novas: 029 adiciona filas persistidas e seleção de executor; 030 copia receitas da POC sem apagar registros ou habilitar execução automaticamente. Migrations antigas não foram reescritas. Aplique com a conta de migrations; produção usa DATABASE_URL restrita e separada de MIGRATION_DATABASE_URL. Faça backup do banco e da ENCRYPTION_KEY antes de atualizar ambiente real.
+Migrations novas: 029 adiciona filas persistidas e seleção de executor; 030 copia receitas da POC sem apagar registros ou habilitar execução automaticamente. Migrations antigas não foram reescritas. Aplique com a conta de migrations; produção usa DATABASE_URL restrita e separada de MIGRATION_DATABASE_URL. A migration 031 encerra filas/agendamentos antigos e fixa extension como único executor. Preserve o backup anterior e sua chave de arquivo cifrado; ENCRYPTION_KEY não é usada pelo runtime atual.
 
 ## Configuração e execução
 
-Em Admin → Marketplaces → Execução pela extensão, configure o executor, receita e regras genéricas de login, desafio, acesso negado, limite e indisponibilidade. Cadastre perfis/fontes de exploração e seletores normalmente. O executor começa como legacy para preservar o ambiente anterior; a troca é bloqueada se houver execução antiga ou nova em andamento.
+Em Admin → Marketplaces → Execução pela extensão, configure receita e regras genéricas de login, desafio, acesso negado, limite e indisponibilidade. Cadastre perfis/fontes de exploração e seletores normalmente. Todo marketplace usa a extensão, inclusive novos cadastros; não há opção de reativar workers antigos.
 
 A extensão usa `/api/extension/auth/*` para pareamento com prova de posse, sessão Google e XSRF na aprovação. Recebe token opaco com rotação, verifica a permissão affiliate_links e permissões adicionais de cada etapa. Logout, bloqueio e remoção de acesso invalidam chamadas. Tokens da API não são enviados ao marketplace.
 
@@ -22,7 +22,7 @@ Admin: `/api/admin/extension-catalog/settings/:id`, `/runs`, `/runs/:id/items`, 
 
 Revisão: categoria de origem e sugestão de mapeamento não equivalem à confirmação. Atribuir produto exige categoria confirmada. Publicar exige vínculo compatível, URL e dados válidos, confirmação explícita e observação recente; é idempotente. Produtos podem existir sem ofertas, mas ofertas exigem produto.
 
-Em marketplaces migrados, prévia manual e teste de seletores retornam 202 com executionId. O admin acompanha a solicitação e permite cancelar; a extensão a processa. Confirmar a prévia continua sujeito ao produto/perfil original e à expiração.
+Prévia manual e teste de seletores retornam 202 com executionId. O admin acompanha a solicitação e permite cancelar; a extensão a processa. Confirmar a prévia continua sujeito ao produto/perfil original e à expiração.
 
 Preço e histórico são atualizados na mesma transação: um preço por oferta/dia de America/Sao_Paulo, sobrescrito somente por observação mais recente. Falhas técnicas preservam preço/disponibilidade e marcam Atualização pendente. Indisponibilidade exige indicador explícito. A publicação mantém agregação por produto e árvores de até dez níveis.
 
@@ -32,9 +32,9 @@ Swagger/OpenAPI: `/api/docs/` e `/api/openapi.json`; produção exige autorizaç
 
 Consulte `docs/PLANO-MIGRACAO-CATALOGO-EXTENSAO.md` e `docs/CATALOG-MIGRATION-INVENTORY.md`. O workspace principal mantém o documento sincronizado a cada fase.
 
-O job legado de preços precisa da alteração que exclui marketplaces da extensão. Serviços antigos, contas e tabelas de histórico operacional permanecem temporariamente disponíveis para recuperação até a homologação real. Eles não são iniciados pelo setup normal. Não execute dois consumidores sobre as mesmas filas e não apague volumes.
+Jobs/extrator/pacote Node foram descontinuados. Não há rota, variável de runtime ou dependência de navegador para esses serviços. Históricos antigos e credenciais cifradas são preservados como arquivo, sem acesso pela conta de runtime; somente discovery_runs recebe SELECT para conferir referências ao excluir configurações. Recuperação anterior ao corte exige backup e versões compatíveis; rollback apenas da imagem não desfaz migrations.
 
-O worker interno continua responsável pela manutenção sem navegador. Integrações históricas e seu extrator manual só ficam no caminho de recuperação dos marketplaces ainda não migrados; não são necessários ao novo fluxo. Documentação anterior está em docs/history.
+O worker interno executa somente manutenção de sessões, prévias expiradas, auditoria, cliques e retenção de preços. O setup gera senhas distintas para a conta de migrations e a conta espertinho_app, e db:migrate provisiona os grants restritos. Em ambientes existentes, configurar as duas URLs antes de aplicar migration/provisionamento; não usar a conta dona do banco como runtime. Exemplos não incluem segredos do marketplace.
 
 ## Validação
 

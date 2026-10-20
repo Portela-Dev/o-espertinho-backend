@@ -11,7 +11,7 @@
     "build": "node scripts/build.mjs",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
-    "db:migrate": "tsx src/migrate.ts",
+    "db:migrate": "tsx src/migrate-cli.ts",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose stop postgres",
     "db:config": "docker compose --env-file .env.example config --quiet",
