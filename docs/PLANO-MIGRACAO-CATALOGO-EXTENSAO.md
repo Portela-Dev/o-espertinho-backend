@@ -398,3 +398,6 @@ Ao concluir uma fase, registrar data, repositórios/commits/PRs, migrations nova
 
 - Fase 4 (implementação): captura genérica de cards, resolução de links relativos, avanço/fim de paginação e checkpoint; API valida URLs, normaliza a identidade, preserva arquivados e fontes e trata reenvios. Dois testes de gravação e um teste DOM aprovados. Contratos de gravação de conversão/enriquecimento/preços foram acrescentados no mesmo módulo transacional para manter uma única validação de lease; serão exercitados nas fases seguintes. A navegação real paginada e o coordenador completo ainda serão homologados.
 
+
+- Fase 5 (contratos e executor): conversão independe de categoria/produto; URLs originais ficam separadas dos links de afiliado e seus parâmetros são preservados. Revalidação de receita contra domínios atuais; headers Authorization e valores fixos de sessão recusados. Teste transacional e nove testes do executor aprovados. Não foi usada sessão real de marketplace nesta implementação; a conversão real pequena será parte do aceite operacional.
+

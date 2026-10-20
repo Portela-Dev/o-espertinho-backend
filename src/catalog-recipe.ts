@@ -8,7 +8,7 @@ const step=z.discriminatedUnion('type',[
  z.strictObject({type:z.literal('fill'),selector:z.string().min(1).max(600),value:z.string().max(4000)}),
  z.strictObject({type:z.literal('click'),selector:z.string().min(1).max(600)})
 ]);
-export const affiliateRecipe=z.strictObject({id,name:z.string().min(1).max(100),loginUrl:z.url(),allowedOrigins:z.array(z.url()).min(1).max(10),affiliateOrigins:z.array(z.url()).min(1).max(10),batchSize:z.number().int().min(1).max(50),intervalMs:z.number().int().min(100).max(600000),steps:z.array(step).min(1).max(15)});
+export const affiliateRecipe=z.strictObject({id,name:z.string().min(1).max(100),loginUrl:z.url(),allowedOrigins:z.array(z.url()).min(1).max(10),affiliateOrigins:z.array(z.url()).min(1).max(10),batchSize:z.number().int().min(1).max(10),intervalMs:z.number().int().min(100).max(600000),steps:z.array(step).min(1).max(15)});
 type Recipe=z.infer<typeof affiliateRecipe>;
 export function validateRecipe(recipe:Recipe,market:{id:string;allowed_hosts:string[]}){
  if(recipe.id!==market.id)throw new HttpError(400,'A receita deve pertencer ao marketplace selecionado.');

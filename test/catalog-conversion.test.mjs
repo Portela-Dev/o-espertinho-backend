@@ -1,0 +1,21 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {catalogFixture} from './catalog-helpers.mjs';
+import {catalogSettings} from '../dist/catalog-settings.js';
+import {validateRecipe} from '../dist/catalog-recipe.js';
+test('conversão precede categoria/produto e preserva URL de afiliado sem exportar sessão',async t=>{
+ const f=await catalogFixture(t),id=randomUUID();
+ const recipe={id:'amazon',name:'Fixture',loginUrl:'https://shop.example.com',allowedOrigins:['https://shop.example.com'],affiliateOrigins:['https://links.example.com'],batchSize:1,intervalMs:2000,steps:[{type:'request',url:'https://shop.example.com/convert',method:'POST',body:{url:'{{originalUrl}}'},responsePath:'link'}]};
+ const market={id:'amazon',allowed_hosts:['shop.example.com','links.example.com']};validateRecipe(recipe,market);
+ assert.throws(()=>validateRecipe({...recipe,steps:[{...recipe.steps[0],headers:{'X-CSRF-Token':'FIXED_SECRET'}}]},market));
+ await f.db.query("UPDATE marketplaces SET catalog_executor='extension',scraping_enabled=true,allowed_hosts=$1 WHERE id='amazon'",[market.allowed_hosts]);
+ await f.db.query("INSERT INTO extension_catalog_settings(marketplace_id,config) VALUES('amazon',$1)",[JSON.stringify(catalogSettings.parse({recipe}))]);
+ await f.db.query("INSERT INTO discovery_links(id,marketplace_id,url) VALUES($1,'amazon','https://shop.example.com/p')",[id]);
+ const run=(await f.call('post','/catalog/runs',{marketplaceId:'amazon',step:'convert',requestKey:randomUUID()})).body;
+ const claim=(await f.call('post',`/catalog/runs/${run.id}/claim`,{})).body.item;
+ const converted=await f.call('post',`/catalog/runs/${run.id}/results`,{itemId:claim.id,leaseToken:claim.lease_token,outcome:'success',affiliateUrl:'https://links.example.com/p?affiliate=ours#target'});
+ assert.equal(converted.status,200,JSON.stringify(converted.body));
+ const link=(await f.db.query('SELECT url,affiliate_url,confirmed_category_id,product_id FROM discovery_links WHERE id=$1',[id])).rows[0];
+ assert.equal(link.url,'https://shop.example.com/p');assert.equal(link.affiliate_url,'https://links.example.com/p?affiliate=ours#target');assert.equal(link.product_id,null);assert.equal(link.confirmed_category_id,null);
+});

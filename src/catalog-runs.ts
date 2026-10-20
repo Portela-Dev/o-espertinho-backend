@@ -1,3 +1,4 @@
+import {validateRecipe} from './catalog-recipe.js';
 import type {Router} from 'express';
 import type {Database} from './db.js';
 import {randomUUID} from 'node:crypto';
@@ -37,6 +38,7 @@ export async function startCatalogRun(db:Database,actor:CatalogActor,input:unkno
   await expireRuns(c);
   if(await legacyBusy(c,market.id)||(await c.query("SELECT id FROM extension_catalog_runs WHERE marketplace_id=$1 AND status NOT IN ('completed','failed','cancelled')",[market.id])).rows.length)throw new HttpError(409,'Este marketplace já possui processamento em andamento.');
   const settings=await getCatalogSettings(c,market.id);
+  if(settings.config.recipe)validateRecipe(settings.config.recipe,market);
   const profile=(await c.query('SELECT * FROM scraping_profiles WHERE marketplace_id=$1',[market.id])).rows[0];
   if(v.step==='convert'&&!settings.config.recipe)throw new HttpError(409,'Cadastre a receita de conversão.');
   if(['enrich','prices'].includes(v.step)&&!profile?.rules?.length)throw new HttpError(409,'Cadastre os seletores do produto.');
