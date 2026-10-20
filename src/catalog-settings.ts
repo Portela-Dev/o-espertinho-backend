@@ -23,6 +23,12 @@ export async function legacyBusy(db:Pick<Database,'query'>,marketplaceId:string)
  UNION ALL SELECT 1 FROM offer_refresh_items i JOIN offer_refresh_runs r ON r.id=i.run_id WHERE i.marketplace_id=$1 AND r.status IN ('queued','running') AND i.status<>'done' LIMIT 1`,[marketplaceId])).rows.length>0;
 }
 export function registerCatalogSettings(app:Express,db:Database){
+ app.post('/api/admin/extension-catalog/sources/:id/resume',async(req,res)=>{
+  const id=z.uuid().parse(req.params.id);z.strictObject({}).parse(req.body);
+  if(!(await db.query('UPDATE discovery_sources SET paused_at=NULL,pause_reason=NULL,version=version+1,updated_at=clock_timestamp() WHERE id=$1 RETURNING id',[id])).rows.length)throw new HttpError(404,'Fonte não encontrada.');
+  await audit(db,req.user!.id,'extension_catalog.source_resumed',id);res.json({ok:true});
+ });
+
  app.get('/api/admin/extension-catalog/settings/:id',async(req,res)=>{
   const market=(await db.query('SELECT id,name,catalog_executor FROM marketplaces WHERE id=$1',[req.params.id])).rows[0];
   if(!market)throw new HttpError(404,'Marketplace não encontrado.');res.json({...market,...await getCatalogSettings(db,market.id)});

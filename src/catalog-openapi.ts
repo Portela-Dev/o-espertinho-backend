@@ -14,6 +14,7 @@ export function catalogApiPaths(){
   ['post','/extension/catalog/runs/{id}/heartbeat','Renovar reserva durante extração',z.strictObject({itemId:z.uuid(),leaseToken:z.uuid()})],
   ['post','/extension/catalog/runs/{id}/results','Salvar resultado sem dados de sessão',catalogResultInput],
   ['post','/extension/catalog/runs/{id}/action','Pausar, retomar ou cancelar execução',actionInput],
+  ['post','/admin/extension-catalog/sources/{id}/resume','Retomar fonte pausada sem iniciar extração',z.strictObject({})],
   ['get','/admin/extension-catalog/settings/{id}','Consultar configuração da extensão'],
   ['put','/admin/extension-catalog/settings/{id}','Configurar receita, bloqueios e executor',z.strictObject({version:z.number().int(),executor:z.enum(['legacy','extension']),config:catalogSettings})],
   ['get','/admin/extension-catalog/runs','Acompanhar execuções da extensão'],

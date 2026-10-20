@@ -81,7 +81,7 @@ export function requireAdmin(req: Request,_res: Response,next: NextFunction) {
  else if(resource==='discovery')allowed=p[1]==='enrichment'?['discovery','catalog']:['discovery'];
  else if(resource==='selectors')allowed=['selectors'];
  else if(['marketplaces','mercadolivre'].includes(resource)&&!p.includes('import'))allowed=['marketplaces'];
- else if(resource==='extension-catalog')allowed=p[1]==='manual'?['catalog','selectors']:p[1]==='runs'?['catalog','discovery','updates']:method==='GET'?['catalog','discovery','updates','marketplaces','selectors']:['marketplaces'];
+ else if(resource==='extension-catalog')allowed=p[1]==='sources'?['discovery']:p[1]==='manual'?['catalog','selectors']:p[1]==='runs'?['catalog','discovery','updates']:method==='GET'?['catalog','discovery','updates','marketplaces','selectors']:['marketplaces'];
  else if(resource==='catalog-marketplaces')allowed=method==='GET'?['catalog','selectors','marketplaces','discovery']:['marketplaces'];
  else if(['category-tree','category-options'].includes(resource))allowed=['catalog'];
  else if(['products','offers','link-imports','amazon','mercadolivre'].includes(resource))allowed=['catalog'];

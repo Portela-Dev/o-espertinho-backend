@@ -15,6 +15,7 @@ const dataSchema=scrapedDataSchema.strict().extend({brand:z.string().max(120).de
 export const catalogResultInput=z.strictObject({
  itemId:uuid,leaseToken:uuid,outcome:z.enum(['success','technical_failure','unavailable']),
  reason:z.enum(['incomplete','network','navigation','configuration','stale']).optional(),
+ failureType:z.enum(['navigation','timeout','emptyPage','invalidItem','pagination','limit']).optional(),
  links:z.array(z.string().max(10000)).max(500).optional(),done:z.boolean().optional(),
  checkpoint:z.strictObject({url:z.string().max(4000),page:z.number().int().min(1).max(1000),seen:z.array(z.string().max(64)).max(1000),found:z.number().int().min(0).max(100000),noProgress:z.number().int().min(0).max(20)}).optional(),
  affiliateUrl:z.string().max(10000).optional(),data:dataSchema.optional(),
@@ -76,6 +77,9 @@ export async function acceptCatalogResult(db:Database,actor:CatalogActor,runId:s
      await recordDailyPrice(c,offer.id,offer.product_id,v.outcome==='success'?data.priceCents:null,data.collectedAt);
     }
    }
+  }else if(run.step==='discover'){
+   const policy=v.failureType==='limit'?{action:item.payload.config.failures?.limitReached==='pause_source'?'pause_source':'stop_section'}:item.payload.config.failures?.[v.failureType??'navigation'];
+   if(policy?.action==='pause_source')await c.query("UPDATE discovery_sources SET paused_at=clock_timestamp(),pause_reason=$2 WHERE id=$1 AND version::text=$3",[item.target_id,v.failureType??'navigation',item.expected_version]);
   }else if(run.step==='enrich'){
    await c.query("UPDATE discovery_links SET extraction_status='failed',extraction_error='Falha técnica; tente novamente pela extensão.' WHERE id=$1 AND status='pending' AND enrichment_version::text=$2",[item.target_id,item.expected_version]);
   }else if(run.step==='prices'){

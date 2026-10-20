@@ -81,9 +81,9 @@ export function registerCatalogRuns(router:Router,db:Database,account:(req:any)=
    if(!['queued','running'].includes(run.status))throw new HttpError(409,'A execução não está disponível para processamento.');
    const item=(await c.query("SELECT * FROM extension_catalog_items WHERE run_id=$1 AND (status='pending' OR (status='leased' AND lease_until<clock_timestamp())) ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1",[id])).rows[0];
    if(!item){const busy=(await c.query("SELECT id FROM extension_catalog_items WHERE run_id=$1 AND status='leased'",[id])).rows.length;if(!busy)await c.query("UPDATE extension_catalog_runs SET status='completed',updated_at=clock_timestamp() WHERE id=$1",[id]);return {item:null};}
-   const token=randomUUID();await c.query("UPDATE extension_catalog_items SET status='leased',lease_token=$2,lease_until=clock_timestamp()+interval '3 minutes',observed_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1",[item.id,token]);
+   const token=randomUUID(),payload={...item.payload,startedAt:item.payload.startedAt??new Date().toISOString()};await c.query("UPDATE extension_catalog_items SET status='leased',lease_token=$2,payload=$3,lease_until=clock_timestamp()+interval '3 minutes',observed_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1",[item.id,token,JSON.stringify(payload)]);
    await c.query("UPDATE extension_catalog_runs SET status='running',extension_id=COALESCE(extension_id,$2),updated_at=clock_timestamp() WHERE id=$1",[id,actor.extension_id]);
-   return {item:{...item,status:'leased',lease_token:token,result:undefined,result_hash:undefined},snapshot:run.snapshot,step:run.step};
+   return {item:{...item,payload,status:'leased',lease_token:token,lease_until:new Date(Date.now()+180000).toISOString(),result:undefined,result_hash:undefined},snapshot:run.snapshot,step:run.step};
   });res.json(result);
  });
  router.post('/catalog/runs/:id/heartbeat',async(req,res)=>{

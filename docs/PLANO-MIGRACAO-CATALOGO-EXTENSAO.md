@@ -1,6 +1,6 @@
 # Plano de migração do catálogo para a extensão do Chrome
 
-Documento de execução faseada — 19/10/2026.
+Documento de execução faseada — criado em 19/10/2026; revisão de implementação em 20/10/2026.
 
 Workspace de referência: `F:\OneDrive\Repos\espertinho`, no PC utilizado nesta conversa. Antes de executar alterações em outra máquina, confirmar o destino. Este documento registra o plano; não altera serviços, banco, configurações ou deploys.
 
@@ -113,7 +113,7 @@ Preferir reuso das entidades de descoberta, revisão e ofertas já existentes. A
 
 ## 4. Fases de implementação
 
-Todas as fases abaixo começam pendentes. Cada fase deve produzir uma entrega revisável com evidências de aceite antes da seguinte. Atualizar a PR já aberta em cada repositório; só criar nova PR quando não houver uma pendente. Não fazer merge, release, deploy, arquivamento de repositório ou exclusão de infraestrutura por consequência automática deste documento.
+As fases abaixo possuem o estado atualizado na seção 7 e no diário de execução. Cada fase deve produzir uma entrega revisável com evidências de aceite antes da seguinte. Atualizar a PR já aberta em cada repositório; só criar nova PR quando não houver uma pendente. Não fazer merge, release, deploy, arquivamento de repositório ou exclusão de infraestrutura por consequência automática deste documento.
 
 ### Fase 0 — Inventário verificável e preparação
 
@@ -363,21 +363,21 @@ Ordem recomendada: **0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 →
 
 Refatoração estrutural e testes acompanham cada fase. A fase 11 concentra a exclusão definitiva; não deve servir para adiar toda organização de código até o final. Os serviços antigos ficam como alternativa controlada durante a transição, nunca como consumidores concorrentes.
 
-| Fase | Situação inicial | Evidência a registrar ao concluir |
+| Fase | Situação atual | Evidência a registrar ao concluir |
 |---|---|---|
-| 0 — Inventário | Pendente | Mapa de consumidores, alterações locais e recuperação |
-| 1 — Contratos e autorização | Pendente | Migrations, OpenAPI e concorrência/segurança |
-| 2 — Configurações | Pendente | Perfis e receitas genéricas validadas |
-| 3 — Motor da extensão | Pendente | Navegação, pausa humana e retomada |
-| 4 — Descoberta | Pendente | Fontes com/sem paginação e deduplicação |
-| 5 — Conversão | Pendente | URLs geradas sem exportação de sessão |
-| 6 — Extração | Pendente | Dados e categorias com sugestões não confirmadas |
-| 7 — Revisão/publicação | Pendente | Vínculo manual e publicação protegida |
-| 8 — Preços | Pendente | Histórico diário e falhas técnicas preservadas |
-| 9 — Prévia manual | Pendente | Cadastro e testes sem extrator |
-| 10 — Corte | Pendente | Executor único e recuperação ensaiada |
-| 11 — Limpeza | Pendente | Serviços, POCs e referências retirados |
-| 12 — Homologação final | Pendente | Instalação/migração e CI dos projetos ativos |
+| 0 — Inventário | Validado: inventário e restauração isolada | Mapa de consumidores, alterações locais e recuperação |
+| 1 — Contratos e autorização | Implementado; testes de autorização e concorrência aprovados | Migrations, OpenAPI e concorrência/segurança |
+| 2 — Configurações | Implementado; configuração e E2E aprovados | Perfis e receitas genéricas validadas |
+| 3 — Motor da extensão | Implementado; Chromium controlado aprovado | Navegação, pausa humana e retomada |
+| 4 — Descoberta | Implementado; páginas e deduplicação testadas | Fontes com/sem paginação e deduplicação |
+| 5 — Conversão | Implementado; receita real ainda requer homologação da conta | URLs geradas sem exportação de sessão |
+| 6 — Extração | Implementado; dados/categorias testados | Dados e categorias com sugestões não confirmadas |
+| 7 — Revisão/publicação | Implementado; revisão/publicação testadas | Vínculo manual e publicação protegida |
+| 8 — Preços | Implementado; histórico e falhas testados | Histórico diário e falhas técnicas preservadas |
+| 9 — Prévia manual | Implementado; API e UI assíncronas testadas | Cadastro e testes sem extrator |
+| 10 — Corte | Preparado e testado; corte operacional real pendente | Executor único e recuperação ensaiada |
+| 11 — Limpeza | POCs removidas do caminho ativo; infraestrutura aguarda corte | Serviços, POCs e referências retirados |
+| 12 — Homologação final | Homologação automatizada em andamento; conta real/CI em verificação | Instalação/migração e CI dos projetos ativos |
 
 Ao concluir uma fase, registrar data, repositórios/commits/PRs, migrations novas, testes executados, limitações e decisão de avanço. Não marcar como concluída com base apenas em implementação compilada ou em teste mockado quando o aceite exigir navegação real.
 
@@ -419,3 +419,7 @@ Ao concluir uma fase, registrar data, repositórios/commits/PRs, migrations nova
 
 - Fase 11 (limpeza do caminho ativo): removidos módulos de POC da extensão e backend, permissão cookies, filas demonstrativas, endpoints de captura/exportação e contratos/UI antigos. Receitas são copiadas pela migration 030 sem apagar a tabela histórica. OpenAPI definitivo validado. Setup normal agora prepara backend/frontend/extensão e sobe só PostgreSQL; comandos antigos são explicitamente legacy:. Root README e instruções atuais reconciliados, evidências históricas preservadas. Retenção do histórico foi transferida para manutenção da API sem navegador. Não removidos ainda: containers, contas/grants e estruturas dos serviços legados, biblioteca privada e alterações locais da POC remota; a remoção irreversível permanece condicionada ao corte homologado conforme o plano.
 
+
+- Fase 12 (homologação automatizada): teste com PostgreSQL 17 em container descartável, porta aleatória e tmpfs validou concorrência real, cancelamento e dump/restauração das 30 migrations. O container foi removido; nenhum banco pessoal foi usado. Chromium real validou quatro passos e pausa/continuação em desafio controlado. Três jornadas Angular SSR novas aprovadas. A suíte original do backend teve uma expectativa da ordem antiga atualizada e revalidada; nova rodada completa/CI permanece no acompanhamento desta fase.
+- Ajuste funcional documentado: criação de prévia agora é POST /admin/extension-catalog/manual/:id/finalize com XSRF; GET apenas acompanha e não grava. Liberação de fonte pausada é configuração explícita, sem disparar job. A extensão foi versionada como 0.3.0 sem criar tag/release.
+- Limites de homologação: desafios/login reais e a estabilidade das receitas/seletores nas contas do administrador exigem teste assistido. Não desligar serviços, revogar grants ou apagar estruturas/repositórios por consequência dos testes controlados. Não marcar corte ou retirada de infraestrutura como concluídos antes desses aceites. O plano passou a distinguir implementação/teste automatizado de operação real.
