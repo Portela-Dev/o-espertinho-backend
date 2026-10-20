@@ -19,7 +19,8 @@
     "worker": "tsx src/worker.ts",
     "setup:env": "node scripts/setup-env.mjs",
     "setup:manual-extractor": "node scripts/setup-manual-extractor.mjs",
-    "test:coverage": "npm run build && c8 node --test --test-concurrency=2 test/*.test.mjs"
+    "test:coverage": "npm run build && c8 node --test --test-concurrency=2 test/*.test.mjs",
+    "test:catalog:postgres": "npm run build && node scripts/test-catalog-postgres.mjs"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",

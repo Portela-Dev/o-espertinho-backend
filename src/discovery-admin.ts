@@ -40,7 +40,7 @@ export function registerDiscoveryAdmin(app:Express,db:Database){
    if(kind==='sources'){args.push(f.enabled);where+=" AND ($3='' OR d.enabled=($3='true'))";}
    const joins=kind==='sources'?' JOIN discovery_profiles p ON p.id=d.profile_id':'';
    const extra=kind==='sources'?',p.name AS profile_name':'';
-   res.json(await pagedQuery(db,{...req.query,paginate:'true'},`SELECT d.*,m.name AS marketplace_name${extra} FROM ${table} d JOIN marketplaces m ON m.id=d.marketplace_id${joins}${where} ORDER BY lower(d.name),d.id`,args));
+   res.json(await pagedQuery(db,{...req.query,paginate:'true'},`SELECT d.*,m.name AS marketplace_name,m.catalog_executor${extra} FROM ${table} d JOIN marketplaces m ON m.id=d.marketplace_id${joins}${where} ORDER BY lower(d.name),d.id`,args));
   });
   app.get('/api/admin/discovery/'+kind+'/:id',async(req,res)=>{const id=z.uuid().parse(req.params.id);const row=(await db.query(`SELECT * FROM ${table} WHERE id=$1`,[id])).rows[0];if(!row){throw new HttpError(404,'Configuração não encontrada.');}res.json(row);});
   app.delete('/api/admin/discovery/'+kind+'/:id',async(req,res)=>{

@@ -1,3 +1,4 @@
+import {catalogApiPaths} from './catalog-openapi.js';
 import {urlNormalizationRulesSchema} from './url-normalization.js';
 import {z} from 'zod';
 import {discoveryProfileInput,discoverySourceInput,discoveryConfigSchema} from './discovery-config.js';
@@ -199,7 +200,7 @@ export function createOpenApiDocument(config:Pick<Config,'APP_ORIGIN'>){
  add('post','/admin/discovery/runs/{id}/cancel','Exploração','Cancelar exploração',{result:discoveryRun,description:'Idempotente. Preserva links já persistidos e invalida gravações do worker. O navegador é interrompido assim que o worker recebe o cancelamento; o lock por marketplace evita sobreposição com a próxima execução.'});
  add('get','/admin/discovery/links','Exploração','Listar links descobertos',{parameters:[pageParam,parameter('pageSize',{type:'integer',minimum:1,maximum:50}),parameter('marketplaceId',str()),parameter('sourceId',str()),parameter('runId',str()),parameter('status',enumeration('','pending','archived'))],result:discoveryPage(object({id:uuid,url:url,marketplace_id:str(),marketplace_name:str(),status:enumeration('pending','archived'),first_seen_at:date,last_seen_at:date,sources:array(object({id:uuid,name:str(),categoryPath:array(str())}))}))});
  add('post','/admin/discovery/links/{id}/archive','Exploração','Arquivar um link descoberto',{description:'Preserva a identidade do link. Uma nova descoberta atualiza a última ocorrência, mas não desfaz o arquivamento.'});
- Object.assign(paths,extensionApiPaths());
+ Object.assign(paths,extensionApiPaths(),catalogApiPaths());
  const enrich='/admin/discovery/enrichment';
  const enrichDescription='Exige perfil discovery ou catalog, sessão, XSRF e confirmação recente para escritas. Não agenda nem publica ofertas. Mapeamentos são sugestões; a categoria exige confirmação por item.';
  const enrichPage=[pageParam,parameter('pageSize',{type:'integer',minimum:1,maximum:50})];

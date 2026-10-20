@@ -2,8 +2,8 @@ import express, { type Express, type Request } from "express";
 import { randomBytes, randomUUID } from "node:crypto";
 import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
-import {registerSessionProof} from './extension-session-proof.js';
-import {registerAffiliateProof} from './affiliate-proof.js';
+
+
 import type { Database } from "./db.js";
 import type { Config } from "./config.js";
 import {
@@ -24,37 +24,20 @@ interface Pair {
   userId?: string;
   sessionId?: string;
 }
-interface Item {
-  id: string;
-  title: string;
-  originalUrl: string;
-  state: "pending" | "leased" | "done" | "failed";
-  lease?: string;
-  until?: number;
-  owner?: string;
-  affiliateUrl?: string;
-  error?: string;
-}
 const escape = (s: string) =>
   s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
 
-export function registerExtensionMock(
+export function registerExtension(
   app: Express,
   db: Database,
   config: Config,
-  transport:typeof fetch=fetch,
+  register?: (router: express.Router, account: (req: Request) => Promise<any>) => void,
 ) {
-  // The data plane is deliberately unavailable in production. Authentication uses real accounts.
-  if (
-    config.NODE_ENV === "production" ||
-    config.EXTENSION_MOCK_ENABLED === "false"
-  )
-    return;
   const router = express.Router(),
     base = new URL(config.EXTENSION_BACKEND_URL ?? "http://localhost:3000")
       .origin;
   const pairs = new Map<string, Pair>();
-  const queues = new Map<string, Item[]>();
+
   const sweep = () => {
     for (const [code, p] of pairs)
       if (p.expires < Date.now()) pairs.delete(code);
@@ -83,7 +66,7 @@ export function registerExtensionMock(
   router.use(
     rateLimit({
       windowMs: 60000,
-      limit: 120,
+      limit: 240,
       skip: () => config.NODE_ENV === "test",
       message: { error: "Muitas solicitações da extensão. Aguarde um minuto." },
     }),
@@ -221,7 +204,7 @@ document.querySelector('#reload').addEventListener('click',check);button.addEven
       expiry = refresh ? "refresh_expires_at" : "expires_at";
     const user = (
       await db.query(
-        `SELECT e.id AS extension_session_id,u.id,u.email,u.name,u.avatar,p.permissions FROM extension_sessions e JOIN users u ON u.id=e.user_id JOIN access_profiles p ON p.id=u.access_profile_id JOIN sessions s ON s.id=e.browser_session_id WHERE e.${column}=$1 AND e.extension_id=$2 AND e.${expiry}>clock_timestamp() AND s.expires_at>clock_timestamp() AND u.blocked=false`,
+        `SELECT e.id AS extension_session_id,e.extension_id,u.id,u.email,u.name,u.avatar,p.permissions FROM extension_sessions e JOIN users u ON u.id=e.user_id JOIN access_profiles p ON p.id=u.access_profile_id JOIN sessions s ON s.id=e.browser_session_id WHERE e.${column}=$1 AND e.extension_id=$2 AND e.${expiry}>clock_timestamp() AND s.expires_at>clock_timestamp() AND u.blocked=false`,
         [hash(value), id],
       )
     ).rows[0];
@@ -230,8 +213,7 @@ document.querySelector('#reload').addEventListener('click',check);button.addEven
     requirePermission(user.permissions);
     return user;
   };
-  registerSessionProof(router,db,config,account,transport);
-  registerAffiliateProof(router,db,account);
+  register?.(router, account);
   router.post("/auth/refresh", async (req, res) => {
     const user = await account(req, true),
       token = secret(),
@@ -257,208 +239,8 @@ document.querySelector('#reload').addEventListener('click',check);button.addEven
     res.json({ ok: true });
   });
   router.get("/session", async (req, res) =>
-    res.json({ user: await account(req), mock: true }),
+    res.json({ user: await account(req), mock: false }),
   );
 
-  const queue = (userId: string) => {
-    if (!queues.has(userId))
-      queues.set(
-        userId,
-        Array.from({ length: 5 }, (_, i) => ({
-          id: `demo-${i + 1}`,
-          title: `Produto demonstrativo ${i + 1}`,
-          originalUrl: `${base}/api/extension/demo/product/${i + 1}`,
-          state: "pending",
-        })),
-      );
-    return queues.get(userId)!;
-  };
-  router.get("/config", async (req, res) => {
-    await account(req);
-    res.json({
-      version: 1,
-      mock: true,
-      marketplaces: [
-        {
-          id: "demo",
-          name: "Loja demonstrativa",
-          loginUrl: `${base}/api/extension/demo/store`,
-          allowedOrigins: [base],
-          batchSize: 2,
-          intervalMs: 1000,
-          steps: [
-            {
-              type: "extract",
-              name: "csrf",
-              source: "dom",
-              selector: 'meta[name="demo-csrf"]',
-              attribute: "content",
-            },
-            {
-              type: "request",
-              url: `${base}/api/extension/demo/convert`,
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "X-Demo-CSRF": "{{csrf}}",
-              },
-              body: { url: "{{originalUrl}}" },
-              responsePath: "affiliateUrl",
-            },
-          ],
-          affiliateOrigins: [base],
-        },
-      ],
-    });
-  });
-  router.get("/queue", async (req, res) => {
-    const user = await account(req);
-    res.json({
-      mock: true,
-      items: queue(user.id).map(
-        ({ id, title, state, affiliateUrl, error }) => ({
-          id,
-          title,
-          state,
-          affiliateUrl,
-          error,
-        }),
-      ),
-    });
-  });
-  router.post("/batches/claim", async (req, res) => {
-    const user = await account(req),
-      { marketplaceId } = z
-        .object({ marketplaceId: z.literal("demo") })
-        .parse(req.body),
-      items = queue(user.id);
-    const leaseId = randomUUID();
-    const batch = items
-      .filter(
-        (i) =>
-          i.state === "pending" ||
-          (i.state === "leased" && (i.until ?? 0) < Date.now()),
-      )
-      .slice(0, 2);
-    for (const item of batch)
-      Object.assign(item, {
-        state: "leased",
-        lease: leaseId,
-        until: Date.now() + 120000,
-        owner: user.extension_session_id,
-      });
-    res.json({
-      mock: true,
-      marketplaceId,
-      leaseId,
-      leaseExpiresAt: Date.now() + 120000,
-      remaining: items.filter(
-        (i) => i.state === "pending" || i.state === "leased",
-      ).length,
-      items: batch.map(({ id, title, originalUrl }) => ({
-        id,
-        title,
-        originalUrl,
-      })),
-    });
-  });
-  router.post("/batches/results", async (req, res) => {
-    const user = await account(req),
-      body = z
-        .object({
-          leaseId: z.uuid(),
-          results: z
-            .array(
-              z
-                .object({
-                  id: z.string().max(80),
-                  affiliateUrl: z.url().max(2000).optional(),
-                  error: z.string().max(300).optional(),
-                })
-                .refine((v) => !!v.affiliateUrl !== !!v.error),
-            )
-            .min(1)
-            .max(2)
-            .refine((v) => new Set(v.map((i) => i.id)).size === v.length),
-        })
-        .parse(req.body);
-    const assignments = body.results.map((result) => {
-      const item = queue(user.id).find((i) => i.id === result.id);
-      if (
-        !item ||
-        item.lease !== body.leaseId ||
-        item.owner !== user.extension_session_id ||
-        (item.until ?? 0) < Date.now()
-      )
-        throw new HttpError(
-          409,
-          "Lote expirado ou pertencente a outra sessão.",
-        );
-      if (result.affiliateUrl) {
-        const u = new URL(result.affiliateUrl);
-        if (
-          u.origin !== base ||
-          u.username ||
-          u.password ||
-          u.pathname !== new URL(item.originalUrl).pathname ||
-          u.searchParams.get("affiliate") !== "demo"
-        )
-          throw new HttpError(400, "Link demonstrativo inválido.");
-      }
-      if (
-        ["done", "failed"].includes(item.state) &&
-        (item.affiliateUrl !== result.affiliateUrl ||
-          item.error !== result.error)
-      )
-        throw new HttpError(409, "Este item já possui outro resultado.");
-      return { item, result };
-    });
-    for (const { item, result } of assignments)
-      Object.assign(item, {
-        state: result.error ? "failed" : "done",
-        ...result,
-      });
-    res.json({ mock: true, accepted: assignments.length });
-  });
-  router.post("/queue/reset", async (req, res) => {
-    const user = await account(req);
-    queues.delete(user.id);
-    res.json({ mock: true, items: queue(user.id) });
-  });
-  router.get("/demo/store", (_req, res) =>
-    res
-      .type("html")
-      .send(
-        '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="demo-csrf" content="demonstration-only"><title>Loja demonstrativa</title></head><body><h1>Loja demonstrativa</h1><p>Ambiente local de testes. Nenhuma compra ou comissão real.</p></body></html>',
-      ),
-  );
-  router.get("/demo/product/:id", (_req, res) =>
-    res
-      .type("html")
-      .send(
-        '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Produto demonstrativo</title></head><body><h1>Produto demonstrativo</h1><p>Sem oferta real.</p></body></html>',
-      ),
-  );
-  router.post("/demo/convert", (req, res) => {
-    if (
-      req.get("Origin") !== base ||
-      req.get("X-Demo-CSRF") !== "demonstration-only"
-    )
-      throw new HttpError(
-        403,
-        "Abra a loja demonstrativa antes de gerar os links.",
-      );
-    const { url } = z.object({ url: z.url() }).parse(req.body),
-      u = new URL(url);
-    if (
-      u.origin !== base ||
-      !/^\/api\/extension\/demo\/product\/\d+$/.test(u.pathname)
-    )
-      throw new HttpError(400, "URL demonstrativa inválida.");
-    u.searchParams.set("affiliate", "demo");
-    res.json({ affiliateUrl: u.href });
-  });
-  app.use("/api/extension", router, (_req, _res, next) =>
-    next(new HttpError(404, "Endpoint da extensão não encontrado.")),
-  );
+  app.use("/api/extension", router);
 }

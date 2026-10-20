@@ -70,21 +70,26 @@ export function csrfMiddleware(config: Config) {
   };
 }
 export function requireUser(req: Request,_res: Response,next: NextFunction) { next(req.user ? undefined : new HttpError(401,'Entre com Google para continuar.')); }
+function extensionAdminPermissions(section:string,method:string):string[]{
+ const sections:Record<string,string[]>={sources:['discovery'],manual:['catalog','selectors'],runs:['catalog','discovery','updates']};
+ if(sections[section])return sections[section];
+ return method==='GET'?['catalog','discovery','updates','marketplaces','selectors']:['marketplaces'];
+}
+function adminPermissions(parts:string[],method:string):string[]{
+ const resource=parts[0];
+ const fixed:Record<string,string[]>={users:['users'],'access-profiles':['users'],stats:['overview'],audit:['activity'],'offer-refresh':['updates'],selectors:['selectors'],'category-tree':['catalog'],'category-options':['catalog'],products:['catalog'],offers:['catalog'],'link-imports':['catalog'],amazon:['catalog']};
+ if(fixed[resource])return fixed[resource];
+ if(resource==='extension-catalog')return extensionAdminPermissions(parts[1],method);
+ if(resource==='catalog-marketplaces')return method==='GET'?['catalog','selectors','marketplaces','discovery']:['marketplaces'];
+ if(resource==='discovery')return parts[1]==='enrichment'?['discovery','catalog']:['discovery'];
+ if(['marketplaces','mercadolivre'].includes(resource)&&!parts.includes('import'))return ['marketplaces'];
+ if(resource==='mercadolivre')return ['catalog'];
+ return [];
+}
 export function requireAdmin(req: Request,_res: Response,next: NextFunction) {
  if(req.user?.role==='admin')return next();
- const p=req.path.split('/').filter(Boolean).map(part=>part.toLowerCase()),resource=p[0],method=req.method,granted=req.user?.permissions??[];
- let allowed:string[]=[];
- if(['users','access-profiles'].includes(resource))allowed=['users'];
- else if(resource==='stats')allowed=['overview'];
- else if(resource==='audit')allowed=['activity'];
- else if(resource==='offer-refresh')allowed=['updates'];
- else if(resource==='discovery')allowed=p[1]==='enrichment'?['discovery','catalog']:['discovery'];
- else if(resource==='selectors')allowed=['selectors'];
- else if(['marketplaces','mercadolivre'].includes(resource)&&!p.includes('import'))allowed=['marketplaces'];
- else if(resource==='catalog-marketplaces')allowed=method==='GET'?['catalog','selectors','marketplaces','discovery']:['marketplaces'];
- else if(['category-tree','category-options'].includes(resource))allowed=['catalog'];
- else if(['products','offers','link-imports','amazon','mercadolivre'].includes(resource))allowed=['catalog'];
- // Unknown and legacy admin routes remain administrator-only.
+ const parts=req.path.split('/').filter(Boolean).map(part=>part.toLowerCase());
+ const allowed=adminPermissions(parts,req.method),granted=req.user?.permissions??[];
  next(allowed.some(permission=>granted.includes(permission))?undefined:new HttpError(403,'Seu perfil não tem permissão para esta área administrativa.'));
 }
 export const domains: Record<string,string[]> = { amazon:['amazon.com.br'], mercadolivre:['mercadolivre.com.br','mercadolivre.com','meli.la'] };
@@ -97,7 +102,7 @@ export function marketplaceURL(value: string, marketplace: string) {
 export const ADMIN_VERIFICATION_MS=15*60*1000;
 export function requireRecentAdmin(req:Request,_res:Response,next:NextFunction){
  const resource=req.path.split('/').find(Boolean)?.toLowerCase()??'';
- const sensitive=!['GET','HEAD','OPTIONS'].includes(req.method)&&['users','access-profiles','marketplaces','catalog-marketplaces','selectors','mercadolivre','offer-refresh','discovery'].includes(resource);
+ const sensitive=!['GET','HEAD','OPTIONS'].includes(req.method)&&['users','access-profiles','marketplaces','catalog-marketplaces','selectors','mercadolivre','offer-refresh','discovery','extension-catalog'].includes(resource);
  if(sensitive&&(!req.adminVerifiedAt||Date.now()-req.adminVerifiedAt.getTime()>ADMIN_VERIFICATION_MS))return next(new HttpError(403,'Confirme sua conta Google para concluir esta operação.','ADMIN_REAUTH_REQUIRED'));
  next();
 }

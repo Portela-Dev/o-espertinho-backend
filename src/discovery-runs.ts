@@ -19,7 +19,8 @@ export async function startDiscovery(db:Database,sourceId:string,userId:string,r
   if((await c.query("SELECT id FROM discovery_runs WHERE source_id=$1 AND status IN ('queued','running')",[sourceId])).rows.length){throw new HttpError(409,'Esta seção já possui uma exploração em andamento.');}
   if(source.paused_at&&!resume){throw new HttpError(409,'Esta seção está pausada. Confirme a retomada para explorar novamente.');}
   const profile=(await c.query('SELECT config FROM discovery_profiles WHERE id=$1',[source.profile_id])).rows[0];
-  const market=(await c.query('SELECT allowed_hosts,url_normalization_rules FROM marketplaces WHERE id=$1',[source.marketplace_id])).rows[0];
+  const market=(await c.query('SELECT allowed_hosts,url_normalization_rules,catalog_executor FROM marketplaces WHERE id=$1 FOR UPDATE',[source.marketplace_id])).rows[0];
+  if(market.catalog_executor==='extension')throw new HttpError(409,'Execute a descoberta pela extensão.');
   const config=discoveryConfigSchema.parse(profile.config);
   const runId=randomUUID();
   const snapshot={config,url:source.url,allowedHosts:market.allowed_hosts,sourceCategoryPath:source.source_category_path,urlNormalizationRules:urlNormalizationRulesSchema.parse(market.url_normalization_rules)};
@@ -27,7 +28,8 @@ export async function startDiscovery(db:Database,sourceId:string,userId:string,r
   if(resume)await c.query('UPDATE discovery_sources SET paused_at=NULL,pause_reason=NULL,version=version+1,updated_at=clock_timestamp() WHERE id=$1',[sourceId]);
   await audit(c,userId,'discovery.run.started',runId);
   await c.query('COMMIT');return (await db.query(runView+' WHERE r.id=$1',[runId])).rows[0];
- }catch(error){await c.query('ROLLBACK');if((error as {code?:string}).code==='23505')throw new HttpError(409,'Esta seção já possui uma exploração em andamento.');throw error;}finally{c.release();}
+ }catch(error){await c.query('ROLLBACK');if((error as {code?:string}).code==='23505')throw new HttpError(409,'Esta seção já possui uma exploração em andamento.');
+throw error;}finally{c.release();}
 }
 export async function cancelDiscovery(db:Database,runId:string,userId:string){
  const c=await db.connect();
