@@ -12,7 +12,7 @@ export const accessPermissions=[
  {id:'marketplaces',name:'Marketplaces e integrações'},
  {id:'selectors',name:'Seletores e testes de extração'},
  {id:'discovery',name:'Configuração de exploração de marketplaces'},
- {id:'updates',name:'Atualizações de preços'},
+ {id:'updates',name:'Consultar execuções e atualizar preços'},
  {id:'activity',name:'Registro de atividade'},
  {id:'affiliate_links',name:'Gerar links de afiliados pela extensão'},
  {id:'users',name:'Gestão de usuários e perfis (permite conceder acesso administrativo)'}

@@ -18,11 +18,17 @@ A extensão usa `/api/extension/auth/*` para pareamento com prova de posse, sess
 
 Operações reais: `/api/extension/catalog/config`, `/catalog/runs`, `/catalog/runs/:id`, `/claim`, `/heartbeat`, `/results`, `/action` e `/items`. Uma execução por marketplace, reserva de três minutos, snapshot versionado, prazo de intervenção e gravações idempotentes. Cancelamento recusa respostas tardias. A extensão não acessa o banco diretamente e não envia cookies, storage ou headers do marketplace.
 
+`GET /api/extension/catalog/stats?marketplaceId=...&retryFailed=false` fornece os contadores do painel autenticado (completed conta links com URL de afiliado e extrações concluídas; falhas não contam como conclusão): conversões e extrações pendentes / links descobertos não arquivados; preços sem verificação bem-sucedida nas últimas 24 horas / ofertas publicadas com link de afiliado. Extrações com falha entram nos elegíveis quando retryFailed=true. Campos de extração e preços são nulos sem as permissões catalog e updates, respectivamente. Falhas técnicas não renovam data_updated_at. Os contadores não modificam a seleção das execuções nem seu limite de itens.
+
 Admin: `/api/admin/extension-catalog/settings/:id`, `/runs`, `/runs/:id/items`, `/runs/:id/cancel` e `/manual/:id`. Configuração usa XSRF e confirmação administrativa recente. A API autoriza e valida independentemente da interface.
 
 Revisão: categoria de origem e sugestão de mapeamento não equivalem à confirmação. Atribuir produto exige categoria confirmada. Publicar exige vínculo compatível, URL e dados válidos, confirmação explícita e observação recente; é idempotente. Produtos podem existir sem ofertas, mas ofertas exigem produto.
 
 Prévia manual e teste de seletores retornam 202 com executionId. O admin acompanha a solicitação e permite cancelar; a extensão a processa. Confirmar a prévia continua sujeito ao produto/perfil original e à expiração.
+
+Indisponibilidade explícita exige uma regra unavailable na configuração capturada pela execução. O enriquecimento conclui sem falha e grava availability=unavailable nos dados de revisão; preço ausente por esse motivo não é pendência de hidratação. Na atualização de uma oferta, availability_status passa a unavailable e refresh_status a updated, preservando o último preço como referência e registrando indisponibilidade no histórico diário. Falha técnica continua mantendo o estado anterior e marcando atualização pendente.
+
+Na etapa enrich, o endereço de navegação enviado à extensão é a URL original do produto. O link de afiliado continua armazenado separadamente para publicação e compra; sua geração permanece uma etapa anterior do fluxo. Isso permite ler categorias e indicadores de disponibilidade da página original, sem depender da apresentação intermediária do link de afiliado.
 
 Preço e histórico são atualizados na mesma transação: um preço por oferta/dia de America/Sao_Paulo, sobrescrito somente por observação mais recente. Falhas técnicas preservam preço/disponibilidade e marcam Atualização pendente. Indisponibilidade exige indicador explícito. A publicação mantém agregação por produto e árvores de até dez níveis.
 
@@ -38,6 +44,16 @@ O worker interno executa somente manutenção de sessões, prévias expiradas, a
 
 ## Validação
 
+Na paginação por rolagem, `pagination.scrollStrategy` aceita `step` (distância configurada, padrão compatível com perfis anteriores) ou `bottom` (fim do conteúdo carregado). A extensão informa posição, altura e viewport; o backend só conta uma tentativa sem progresso quando chegou ao fim, a altura permaneceu estável e não surgiram URLs únicas. Os limites de páginas, itens e tentativas continuam obrigatórios.
+
+A migration 032 armazena hashes das URLs normalizadas por item de execução para contar cada destino uma única vez, inclusive após retomadas. Query, fragmento e sufixos configurados não multiplicam a contagem. A exclusão da execução elimina esses hashes. Aplique migrations e publique o backend antes de atualizar frontend/extensão; recarregue a extensão e inicie uma execução nova para usar a estratégia.
+
 `npm run typecheck`, `npm test`, `npm run test:coverage`, `npm run build`. Testes SQL usam PGlite descartável; testes PostgreSQL reais exigem URL explícita de ambiente de teste. Nenhum teste normal usa DATABASE_URL pessoal. O teste de backup restaura uma cópia isolada antes de comparar os dados.
 
 A extensão tem teste adicional em Chromium real com HTTPS e API controlados. Isso não substitui homologar sua sessão real, seletores e um pequeno lote autorizado em cada marketplace. Não há contorno de login/CAPTCHA, perfis ocultos ou exportação de sessão.
+
+## Administração reorganizada
+
+A consulta administrativa de ofertas inclui o nome/SKU do produto e o marketplace para a listagem única do frontend, mantendo a permissão catalog. As permissões existentes permanecem com os mesmos IDs; o rótulo updates descreve consulta de execuções e atualização de preços. A centralização visual não altera as verificações de etapa no cancelamento.
+
+O cadastro de fontes não aceita mais intervalHours e não atualiza interval_hours. A coluna histórica permanece preservada no banco, sem consumidor de agendamento; não há migration destrutiva nem mudança nas URLs/perfis de vitrines. Habilitação da fonte, paginação e intervalo entre requisições continuam operacionais.

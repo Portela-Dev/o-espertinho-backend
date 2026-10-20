@@ -9,6 +9,7 @@ import { normalizeProductUrl } from './url-normalization.js';
 import { categoryKey } from './enrichment-admin.js';
 import { recordDailyPrice } from './price-history.js';
 import { catalogTransaction, ownRun, runView, expireRuns } from './catalog-runs.js';
+import {discoveryProgress} from './catalog-discovery-progress.js';
 import type { CatalogActor } from './catalog-contracts.js';
 const uuid = z.uuid();
 const dataSchema = scrapedDataSchema.strict().extend({
@@ -20,12 +21,13 @@ export const catalogResultInput = z.strictObject({
     failureType: z.enum(['navigation', 'timeout', 'emptyPage', 'invalidItem', 'pagination', 'limit']).optional(),
     links: z.array(z.string().max(10000)).max(500).optional(), done: z.boolean().optional(),
     checkpoint: z.strictObject({
-        url: z.string().max(4000), page: z.number().int().min(1).max(1000), seen: z.array(z.string().max(64)).max(1000), found: z.number().int().min(0).max(100000), noProgress: z.number().int().min(0).max(20), advance: z.boolean().optional()
+        url: z.string().max(4000), page: z.number().int().min(1).max(1000), seen: z.array(z.string().max(64)).max(1000), found: z.number().int().min(0).max(100000), noProgress: z.number().int().min(0).max(20), advance: z.boolean().optional(),
+        scroll:z.strictObject({position:z.number().min(0).max(1e9),height:z.number().min(0).max(1e9),viewport:z.number().min(0).max(1e9)}).optional()
     }).optional(),
     affiliateUrl: z.string().max(10000).optional(), data: dataSchema.optional(),
     sourceCategoryPath: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
 });
-type ResultValue = z.infer<typeof catalogResultInput>;
+export type ResultValue = z.infer<typeof catalogResultInput>;
 type Queryable = Pick<Database, 'query'>;
 interface ResultContext {
     c: Queryable;
@@ -50,10 +52,11 @@ async function discoverResult({ c, run, item, market, v }: ResultContext) {
         if (v.checkpoint.found > config.limits.maxItems)
             throw new HttpError(400, 'Limite de itens excedido.');
     }
-    await persistDiscoveredLinks(c, market, source.id, v.links);
+    await discoveryProgress(c,item,market,v);
+    await persistDiscoveredLinks(c, market, source.id, v.links!);
+    await c.query("UPDATE extension_catalog_items SET payload=jsonb_set(payload,'{checkpoint}',$2::jsonb) WHERE id=$1", [item.id, JSON.stringify(v.checkpoint)]);
     if (v.done)
         return 'completed';
-    await c.query("UPDATE extension_catalog_items SET payload=jsonb_set(payload,'{checkpoint}',$2::jsonb) WHERE id=$1", [item.id, JSON.stringify(v.checkpoint)]);
     return 'pending';
 }
 async function persistDiscoveredLinks(c: Queryable, market: any, sourceId: string, links: string[]) {
@@ -89,6 +92,11 @@ function validateProductResult({ run, item, market, v }: ResultContext) {
         throw new HttpError(400, 'Extração incompleta não confirma disponibilidade.');
     if (v.outcome === 'unavailable' && !run.snapshot.settings.blockRules.some((r: any) => r.kind === 'unavailable'))
         throw new HttpError(400, 'Configure evidência explícita de indisponibilidade.');
+    if (v.outcome === 'unavailable') {
+        data.priceCents = null;
+        data.originalPriceCents = null;
+        data.missing = data.missing.filter(field => field !== 'price');
+    }
     return data;
 }
 async function enrichResult({ c, item, v }: ResultContext, data: z.infer<typeof dataSchema>) {
@@ -99,7 +107,8 @@ async function enrichResult({ c, item, v }: ResultContext, data: z.infer<typeof 
     const path = v.sourceCategoryPath ?? [];
     if (link.confirmed_category_id && link.source_category_key !== categoryKey(path))
         throw new HttpError(409, 'A categoria de origem mudou; revise o item antes de substituir os dados.');
-    await c.query("UPDATE discovery_links SET enrichment_data=$2,source_category_path=$3,source_category_key=$4,extraction_status='completed',extraction_error=NULL,extracted_at=$5,enrichment_version=enrichment_version+1 WHERE id=$1", [link.id, JSON.stringify(data), path, categoryKey(path), data.collectedAt]);
+    const enriched = {...data, availability: v.outcome === 'unavailable' ? 'unavailable' : 'available'};
+    await c.query("UPDATE discovery_links SET enrichment_data=$2,source_category_path=$3,source_category_key=$4,extraction_status='completed',extraction_error=NULL,extracted_at=$5,enrichment_version=enrichment_version+1 WHERE id=$1", [link.id, JSON.stringify(enriched), path, categoryKey(path), data.collectedAt]);
 }
 async function priceResult({ c, run, item, v }: ResultContext, data: z.infer<typeof dataSchema>) {
     const offer = (await c.query('SELECT * FROM offers WHERE id=$1 FOR UPDATE', [item.target_id])).rows[0];

@@ -11,6 +11,7 @@ export function catalogApiPaths() {
         any?
     ][] = [
         ['get', '/extension/catalog/config', 'Configurações dos marketplaces autorizados'],
+        ['get', '/extension/catalog/stats', 'Pendências por marketplace; preços sem verificação bem-sucedida nas últimas 24 horas'],
         ['get', '/extension/catalog/runs', 'Listar execuções próprias com paginação'],
         ['post', '/extension/catalog/runs', 'Iniciar etapa manual, idempotente por requestKey', startCatalogInput],
         ['get', '/extension/catalog/runs/{id}', 'Consultar execução e snapshot'],
@@ -51,6 +52,10 @@ export function catalogApiPaths() {
                     type: 'string', pattern: '^[a-p]{32}$'
                 }
             });
+        if(path==='/extension/catalog/stats')parameters.push(
+            {name:'marketplaceId',in:'query',required:true,schema:{type:'string'}},
+            {name:'retryFailed',in:'query',schema:{type:'string',enum:['true','false'],default:'false'}}
+        );
         let security: any = [{
                 SessionCookie: [], XSRFToken: []
             }];

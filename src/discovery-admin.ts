@@ -67,13 +67,13 @@ export function registerDiscoveryAdmin(app:Express,db:Database){
  });
  app.post('/api/admin/discovery/sources',async(req,res)=>{
   const v=discoverySourceInput.parse(req.body),id=randomUUID();
-  const result=await mutate(db,req.user!.id,'discovery.source.created',async c=>{const url=sectionUrl(v.url,await hosts(c,v.marketplaceId));return (await c.query('INSERT INTO discovery_sources(id,marketplace_id,profile_id,name,url,source_category_path,enabled,interval_hours,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',[id,v.marketplaceId,v.profileId,v.name,url,v.sourceCategoryPath,v.enabled,v.intervalHours,v.notes])).rows[0];});res.status(201).json(result);
+  const result=await mutate(db,req.user!.id,'discovery.source.created',async c=>{const url=sectionUrl(v.url,await hosts(c,v.marketplaceId));return (await c.query('INSERT INTO discovery_sources(id,marketplace_id,profile_id,name,url,source_category_path,enabled,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',[id,v.marketplaceId,v.profileId,v.name,url,v.sourceCategoryPath,v.enabled,v.notes])).rows[0];});res.status(201).json(result);
  });
  app.put('/api/admin/discovery/sources/:id',async(req,res)=>{
   const id=z.uuid().parse(req.params.id),v=discoverySourceInput.extend(version.shape).parse(req.body);
   res.json(await mutate(db,req.user!.id,'discovery.source.updated',async c=>{
    const url=sectionUrl(v.url,await hosts(c,v.marketplaceId));
-   const row=(await c.query('UPDATE discovery_sources SET marketplace_id=$2,profile_id=$3,name=$4,url=$5,source_category_path=$6,enabled=$7,interval_hours=$8,notes=$9,version=version+1,updated_at=clock_timestamp() WHERE id=$1 AND version=$10 RETURNING *',[id,v.marketplaceId,v.profileId,v.name,url,v.sourceCategoryPath,v.enabled,v.intervalHours,v.notes,v.version])).rows[0];
+   const row=(await c.query('UPDATE discovery_sources SET marketplace_id=$2,profile_id=$3,name=$4,url=$5,source_category_path=$6,enabled=$7,notes=$8,version=version+1,updated_at=clock_timestamp() WHERE id=$1 AND version=$9 RETURNING *',[id,v.marketplaceId,v.profileId,v.name,url,v.sourceCategoryPath,v.enabled,v.notes,v.version])).rows[0];
    if(!row){throw new HttpError(409,'Página não encontrada ou alterada. Recarregue antes de salvar.');}return row;
   }));
  });
