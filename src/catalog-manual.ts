@@ -1,4 +1,4 @@
-import type {Express} from 'express';
+import type {Express,Request,Response} from 'express';
 import type {Database} from './db.js';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
@@ -24,7 +24,7 @@ export async function requestManualExtraction(db:Database,actorId:string,marketp
  });
 }
 export function registerCatalogManual(app:Express,db:Database){
- app.get('/api/admin/extension-catalog/manual/:id',async(req,res)=>{
+ const manualResult=async(req:Request,res:Response)=>{
   const id=z.uuid().parse(req.params.id);
   const response=await catalogTransaction(db,async c=>{
    await expireRuns(c);const run=(await c.query("SELECT * FROM extension_catalog_runs WHERE id=$1 AND created_by=$2 AND step IN ('preview','selector_test') FOR UPDATE",[id,req.user!.id])).rows[0];
@@ -37,6 +37,7 @@ export function registerCatalogManual(app:Express,db:Database){
    data.productUrl=normalizeProductUrl(marketUrl(data.productUrl,market.allowed_hosts),market.url_normalization_rules);
    if(run.step==='selector_test')return {executionId:id,status:'completed',data,isTest:true,canConfirm:false,marketplaceName:market.name,affiliateUrl:item.payload.url};
    const existing=(await c.query('SELECT * FROM offer_import_previews WHERE id=$1',[id])).rows[0];
+   if(!existing&&req.method==='GET')return {executionId:id,status:'completed',requiresFinalize:true};
    const product=(await c.query('SELECT * FROM products WHERE id=$1',[item.payload.productId])).rows[0];
    if(!product||new Date(product.updated_at).getTime()!==new Date(item.payload.productUpdatedAt).getTime())throw new HttpError(409,'Produto alterado. Solicite outra prévia.');
    Object.assign(data,await resolveClassification(c,product.category,product.subcategory),{sellerName:item.payload.sellerName??''});
@@ -44,7 +45,9 @@ export function registerCatalogManual(app:Express,db:Database){
    if(!existing)await c.query('INSERT INTO offer_import_previews(id,user_id,marketplace_id,affiliate_url,source_url,result,profile_version,expires_at,product_id,product_updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',[id,run.created_by,market.id,item.payload.url,data.productUrl,JSON.stringify(data),run.snapshot.profile.version,expiresAt,product.id,product.updated_at]);
    return {executionId:id,status:'completed',previewId:id,product,marketplaceId:market.id,marketplaceName:market.name,affiliateUrl:item.payload.url,data,expiresAt,canConfirm:!data.missing.length&&!!data.priceCents};
   });res.json(response);
- });
+ };
+ app.get('/api/admin/extension-catalog/manual/:id',manualResult);
+ app.post('/api/admin/extension-catalog/manual/:id/finalize',manualResult);
  app.post('/api/admin/extension-catalog/manual/:id/cancel',async(req,res)=>{
   const id=z.uuid().parse(req.params.id);const r=await db.query("UPDATE extension_catalog_runs SET status='cancelled',updated_at=clock_timestamp() WHERE id=$1 AND created_by=$2 AND step IN ('preview','selector_test') AND status NOT IN ('completed','cancelled','failed') RETURNING id",[id,req.user!.id]);if(!r.rows.length)throw new HttpError(409,'Solicitação encerrada ou não encontrada.');res.json({ok:true});
  });

@@ -10,7 +10,6 @@ export const envSchema = z.object({
   MELI_REDIRECT_URI: z.string().default(''), MELI_OAUTH_PKCE: z.enum(['true','false']).default('false'),
   MANUAL_EXTRACTOR_URL: z.string().default(''), MANUAL_EXTRACTION_SERVICE_TOKEN: z.string().default(''),
   GOOGLE_CLIENT_ID: z.string().default(''), RUN_WORKER: z.string().default('true'),
-  EXTENSION_MOCK_ENABLED: z.enum(['true','false']).default('true'),
   EXTENSION_BACKEND_URL: z.url().default('http://localhost:3000'),
   WORKER_INTERVAL_SECONDS: z.coerce.number().min(30).default(60)
 });

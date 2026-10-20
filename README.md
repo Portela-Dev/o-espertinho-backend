@@ -1,127 +1,43 @@
-# Backend Espertinho
+# O Espertinho — backend
 
-Node.js + TypeScript + Express, PostgreSQL, migrations SQL versionadas e worker de ofertas.
+API Express/TypeScript e PostgreSQL. A extensão executa navegação; a API autentica, fornece snapshots, reserva itens, valida resultados e mantém revisão/publicação e histórico. Mobile fora do escopo.
 
-Este Ã© o repositÃ³rio `o-espertinho-backend`. Projetos relacionados: [frontend](https://github.com/Portela-Dev/o-espertinho-frontend) e [extrator](https://github.com/Portela-Dev/o-espertinho-extractor).
+## Desenvolvimento
 
-## Primeiro uso
+Use Node 24. Na raiz do workspace, `npm run setup` prepara os três projetos ativos e sobe somente PostgreSQL com detach. Em seguida execute `npm run dev:backend` e `npm run dev:frontend` em terminais separados.
 
-Requisitos: Node.js 22.12+ (preferencialmente 24), npm e Docker com Compose para o PostgreSQL.
+Neste repositório: `npm ci`, `npm run setup:env`, `npm run db:migrate`, `npm run dev`. Scripts não imprimem segredos e preservam `.env` existente. Configure GOOGLE_CLIENT_ID; a conta administrativa continua reconhecida após login Google verificado. Não há senha padrão nem bypass de autenticação de produção.
 
-```powershell
-npm ci
-npm run setup:env
-```
+Migrations novas: 029 adiciona filas persistidas e seleção de executor; 030 copia receitas da POC sem apagar registros ou habilitar execução automaticamente. Migrations antigas não foram reescritas. Aplique com a conta de migrations; produção usa DATABASE_URL restrita e separada de MIGRATION_DATABASE_URL. Faça backup do banco e da ENCRYPTION_KEY antes de atualizar ambiente real.
 
-Configure `GOOGLE_CLIENT_ID` no `.env`. O script gera a senha do PostgreSQL e as chaves locais apenas quando o arquivo nÃ£o existe. Preserve `ENCRYPTION_KEY` para continuar lendo as configuraÃ§Ãµes criptografadas do banco.
+## Configuração e execução
 
-```powershell
-npm run db:up
-npm run db:migrate
-npm run dev
-```
+Em Admin → Marketplaces → Execução pela extensão, configure o executor, receita e regras genéricas de login, desafio, acesso negado, limite e indisponibilidade. Cadastre perfis/fontes de exploração e seletores normalmente. O executor começa como legacy para preservar o ambiente anterior; a troca é bloqueada se houver execução antiga ou nova em andamento.
 
-Aguarde o PostgreSQL ficar saudÃ¡vel antes de executar as migrations. A API escuta em `127.0.0.1:3000`, o banco em `127.0.0.1:5432`, e `APP_ORIGIN` deve corresponder Ã  origem do frontend (por padrÃ£o `http://localhost:4200`). O frontend encaminha `/api` para a API. O login Google usa ID token e nÃ£o exige client secret.
+A extensão usa `/api/extension/auth/*` para pareamento com prova de posse, sessão Google e XSRF na aprovação. Recebe token opaco com rotação, verifica a permissão affiliate_links e permissões adicionais de cada etapa. Logout, bloqueio e remoção de acesso invalidam chamadas. Tokens da API não são enviados ao marketplace.
 
-Para testes de seletores e prévias de cadastro de links, execute o novo projeto `o-espertinho-extractor` e configure `MANUAL_EXTRACTOR_URL` e `MANUAL_EXTRACTION_SERVICE_TOKEN`. No workspace local, execute `npm run setup:manual-extractor` para copiar apenas o segredo do `.env` desse serviço e configurar `http://127.0.0.1:3011`; valores conflitantes existentes são preservados e exigem ajuste explícito.
+Operações reais: `/api/extension/catalog/config`, `/catalog/runs`, `/catalog/runs/:id`, `/claim`, `/heartbeat`, `/results`, `/action` e `/items`. Uma execução por marketplace, reserva de três minutos, snapshot versionado, prazo de intervenção e gravações idempotentes. Cancelamento recusa respostas tardias. A extensão não acessa o banco diretamente e não envia cookies, storage ou headers do marketplace.
 
+Admin: `/api/admin/extension-catalog/settings/:id`, `/runs`, `/runs/:id/items`, `/runs/:id/cancel` e `/manual/:id`. Configuração usa XSRF e confirmação administrativa recente. A API autoriza e valida independentemente da interface.
 
-O novo cliente chama `POST /v1/extractions` com Bearer token, converte os perfis salvos para o contrato da biblioteca e valida o resultado. Falhas técnicas não são tratadas como produto indisponível; prévias incompletas e indisponíveis não podem ser confirmadas. Autenticação, permissões administrativas e XSRF permanecem exigidos nas rotas existentes.
+Revisão: categoria de origem e sugestão de mapeamento não equivalem à confirmação. Atribuir produto exige categoria confirmada. Publicar exige vínculo compatível, URL e dados válidos, confirmação explícita e observação recente; é idempotente. Produtos podem existir sem ofertas, mas ofertas exigem produto.
 
-O administrador continua escolhendo o produto antes de cadastrar o link. O identificador técnico do novo link é um hash da URL e do marketplace, com prefixo `url-v1:`; não identifica o produto do catálogo e não usa identificadores de produto do marketplace. O job independente confere o destino dos links sem derivar identificadores do marketplace.
+Em marketplaces migrados, prévia manual e teste de seletores retornam 202 com executionId. O admin acompanha a solicitação e permite cancelar; a extensão a processa. Confirmar a prévia continua sujeito ao produto/perfil original e à expiração.
 
-Perfis existentes são adaptados somente em memória: atributos vazios são omitidos, características usam seus seletores de pares e regras de preço recebem fallback de partes inteiro/centavos antes da leitura do texto completo. A regra de identificador externo não é enviada ao novo serviço. O atributo proprietário de galeria JSON é substituído por `src`; regras de URL direta já cadastradas mantêm sua prioridade. O limite do serviço é 40 regras após adaptação; perfis que excederem esse limite retornam orientação para reduzir as regras. Nenhum seletor salvo é alterado automaticamente.
+Preço e histórico são atualizados na mesma transação: um preço por oferta/dia de America/Sao_Paulo, sobrescrito somente por observação mais recente. Falhas técnicas preservam preço/disponibilidade e marcam Atualização pendente. Indisponibilidade exige indicador explícito. A publicação mantém agregação por produto e árvores de até dez níveis.
 
-Swagger: `http://localhost:3000/api/docs/`. Para operaÃ§Ãµes autenticadas de escrita, faÃ§a login no frontend e abra `http://localhost:4200/api/docs/`, preservando sessÃ£o, origem e XSRF.
+Swagger/OpenAPI: `/api/docs/` e `/api/openapi.json`; produção exige autorização administrativa conforme configuração existente. Nenhum endpoint de demonstração, captura de sessão ou prova de conversão permanece registrado.
 
-Os arquivos `.env.example`, `docker-compose.yml` e as migrations estÃ£o incluÃ­dos; dados e credenciais locais nÃ£o sÃ£o versionados. Para parar o banco sem apagar o volume, execute `npm run db:down`.
+## Migração e recuperação
 
-Comandos: `npm run setup:env`, `npm run db:up`, `npm run db:migrate`, `npm run dev`, `npm run build`, `npm start`, `npm test`.
+Consulte `docs/PLANO-MIGRACAO-CATALOGO-EXTENSAO.md` e `docs/CATALOG-MIGRATION-INVENTORY.md`. O workspace principal mantém o documento sincronizado a cada fase.
 
-O admin inicial Ã© reservado pela migration para `arnaldorolimportela@gmail.com`; a identidade sÃ³ Ã© vinculada apÃ³s validar login Google. Chaves dos marketplaces sÃ£o configuradas em Admin â†’ Marketplaces. O Client ID do login Google precisa estar no `.env` antes do primeiro acesso.
+O job legado de preços precisa da alteração que exclui marketplaces da extensão. Serviços antigos, contas e tabelas de histórico operacional permanecem temporariamente disponíveis para recuperação até a homologação real. Eles não são iniciados pelo setup normal. Não execute dois consumidores sobre as mesmas filas e não apague volumes.
 
-Nunca versione `.env` nem descarte o volume do PostgreSQL em uma parada rotineira.
+O worker interno continua responsável pela manutenção sem navegador. Integrações históricas e seu extrator manual só ficam no caminho de recuperação dos marketplaces ainda não migrados; não são necessários ao novo fluxo. Documentação anterior está em docs/history.
 
-## CI/CD e deploy em VPS
+## Validação
 
-O workflow de GitHub Actions valida o projeto, gera cobertura para SonarQube e prepara deploy independente com Docker Compose via SSH. Consulte [o guia de CI/CD](deploy/README.md) para secrets/variables, projeto SonarQube, preparação da VPS, runtime e recuperação. O deploy automático começa desativado.
+`npm run typecheck`, `npm test`, `npm run test:coverage`, `npm run build`. Testes SQL usam PGlite descartável; testes PostgreSQL reais exigem URL explícita de ambiente de teste. Nenhum teste normal usa DATABASE_URL pessoal. O teste de backup restaura uma cópia isolada antes de comparar os dados.
 
-
-## Extensão Chrome: autenticação real e API demonstrativa
-
-A migration `019_extension_access.sql` adiciona `affiliate_links` aos perfis e cria `extension_sessions`, armazenando apenas hashes dos tokens. O perfil Administrador recebe a nova permissão; outros perfis podem recebê-la na gestão de perfis existente. A autorização da extensão verifica a permissão exata, não apenas o papel de administrador.
-
-Em desenvolvimento, `EXTENSION_MOCK_ENABLED=true` e `EXTENSION_BACKEND_URL=http://localhost:3000` habilitam `/api/extension`. Em produção essas rotas ficam desativadas independentemente da flag. A extensão precisa da mesma origem base; use localhost no frontend e no backend para compartilhar o cookie na aba de aprovação.
-
-O login usa pareamento de cinco minutos com prova SHA-256: `/auth/start` fornece a URL de autorização; `/auth/connect` abre a página, `/auth/approve` exige sessão real, origem correta e XSRF; `/auth/poll` troca uma autorização de uso único pelos tokens. Não existe usuário fake nem login que ignore a validação Google em runtime. O token de acesso dura 15 minutos; `/auth/refresh` gira os tokens, com limite de sete dias para a renovação. A sessão depende da sessão web original. Logout web, bloqueio ou remoção da permissão impedem o acesso; `/auth/logout` revoga a sessão da extensão.
-
-As demais rotas exigem Bearer token e o header `X-Espertinho-Extension-Id`, vinculado à sessão:
-
-| Rota sob `/api/extension` | Método | Finalidade |
-| --- | --- | --- |
-| `/session` | GET | Conta e permissões atuais |
-| `/config` | GET | Receita declarativa da loja demonstrativa |
-| `/queue` | GET | Cinco itens de teste, separados por usuário |
-| `/batches/claim` | POST | `{ "marketplaceId": "demo" }`, reserva de dois itens por 120 segundos |
-| `/batches/results` | POST | `{ "leaseId": "...", "results": [{ "id": "...", "affiliateUrl": "..." }] }` ou erro por item |
-| `/queue/reset` | POST | Recriar apenas a fila demonstrativa do usuário |
-
-A receita define domínios, página de sessão, intervalo, seletores, headers com variáveis locais e caminho JSON do link retornado. A página `/demo/store` e o endpoint `/demo/convert` simulam o marketplace sem usar credenciais reais. Os resultados só alteram a fila em memória: não criam produtos, categorias ou ofertas e não publicam conteúdo. A fila reinicia com o processo; a autenticação da extensão é persistida no PostgreSQL. Respostas são no-store e as rotas têm limite de chamadas.
-
-Consulte a seção **Extensão Chrome** no Swagger para os contratos. A configuração administrativa das receitas, discovery e publicação reais ainda não foram implementados; este escopo entrega o consumidor genérico e os endpoints mockados.
-
-O processamento agendado e o consumo da fila de atualização de preços pertencem exclusivamente a `Portela-Dev/o-espertinho-job-update-price`. O backend mantém os endpoints administrativos de configuração, disparo e acompanhamento. `RUN_WORKER` controla apenas a manutenção interna da API. Nenhum extrator HTTP legado na porta 3010 é necessário.
-
-
-Admin → Atualizações permite cancelar uma rodada, preservando preços já atualizados e ignorando respostas de tentativas invalidadas. A pausa de proteção após falha técnica aparece explicitamente na tela. O backend oferece `POST /api/admin/offer-refresh/runs/:id/cancel`, com autorização de atualizações, XSRF e confirmação administrativa recente. A migration `020_offer_refresh_cancellation.sql` registra o cancelamento sem apagar execuções, links ou histórico. O job existente já confere o token da tentativa antes de gravar; seu advisory lock continua impedindo extrações simultâneas. Uma nova rodada pode ser enfileirada e aguarda o intervalo de proteção e o término de uma consulta anterior.
-
-## Paginação das coleções
-
-As consultas de listas pessoais e administrativas aceitam `paginate=true`, `page` (a partir de 1) e `pageSize` (20 por padrão; máximo 50). O resultado inclui `total`, `page` e `pageSize`; a lista é retornada em `items`, ou em `offers`, `runs`, `profiles` e `errors` nos detalhes correspondentes. Produtos retornam `offer_count`; ocorrências de execução retornam `errorTotal`. As faixas de preço consideram todas as ofertas, independentemente da página. Páginas além do fim são ajustadas à última disponível. Os contratos sem `paginate` permanecem compatíveis para consultas de seleção e clientes existentes. Não há migration nesta alteração.
-
-A lista de usuários também aceita `pageSize` de 1 a 50, mantendo 25 como padrão para clientes existentes. A interface oferece quantidades de 5, 10, 15, 20, 25 e 50 nas listas paginadas.
-
-### Configuração da descoberta de seções
-
-**Admin → Marketplaces → Normalização dos links descobertos** define regras declarativas por marketplace. Cada regra `remove_path_suffix` contém um marcador literal iniciado por `/`: o marcador e o restante do caminho são removidos. As regras são aplicadas na ordem cadastrada, com distinção entre maiúsculas e minúsculas, antes da deduplicação e da comparação de páginas. Query e fragmento são sempre removidos. A migration 025 adiciona somente a configuração vazia; não exclui nem reescreve links existentes. Não há regras específicas por loja no código. A configuração não afeta links de afiliados, URLs de seção ou paginação. Cada execução usa um snapshot das regras; alterações valem para novos disparos. A prévia `POST /api/admin/catalog-marketplaces/normalize-url` valida domínio e regras sem acessar a rede ou gravar dados.
-
-A área **Admin → Exploração** permite cadastrar perfis reutilizáveis por marketplace e páginas de seção vinculadas a esses perfis. Os endpoints ficam em `/api/admin/discovery` e estão descritos no Swagger. Exigem login, a permissão `discovery` (ou papel admin), XSRF nas escritas e confirmação recente de conta Google. A migration `022_discovery_configuration.sql` cria as tabelas sem alterar produtos, categorias, ofertas ou histórico existentes. Instalações com conta de banco restrita devem executar o provisionamento de permissões após a migration, conforme o procedimento de deploy existente.
-
-A exploração é **manual**, por seção, pelo endpoint `POST /api/admin/discovery/sources/:id/run`. O backend apenas enfileira um snapshot da configuração no PostgreSQL; o serviço independente `o-espertinho-job-discovery` executa a navegação. Não há agendamento, mesmo se a seção estiver habilitada ou possuir intervalo em horas. `executionAvailable: true` indica que os endpoints estão disponíveis, não garante que o worker esteja online.
-
-As execuções e os links são listados com paginação em `/runs` e `/links`. `/runs/:id/events` lista ocorrências e `/runs/:id/cancel` cancela preservando os links já coletados. `/links/:id/archive` preserva a identidade do link para que novas descobertas não o reativem. A migration 024 cria a fila e os links sem alterar produtos, ofertas ou os seletores de extração individual. As URLs de produto são persistidas sem query/hash; a origem da seção permanece vinculada.
-
-Uma seção tem no máximo uma execução ativa. O worker serializa os ciclos do mesmo marketplace com advisory locks, usa lease e invalida gravações após cancelamento ou perda de comunicação. Uma execução interrompida pela perda do worker é marcada como falha, sem retomada automática. A política pause_source registra a pausa e exige `resume: true` num novo disparo manual. Seções com histórico ou links não podem ser excluídas. Os perfis e seções continuam versionados; edições/exclusões desatualizadas retornam 409.
-
-
-Contrato de exploração a ser consumido futuramente:
-
-- `rendering`: evento de carregamento, seletor de prontidão, iframe opcional, timeout e espera extra para hidratação. Seletores são CSS, sem scripts ou acesso a cookies/headers.
-- `extraction`: somente o contêiner de cada item, o seletor do link relativo ao item e o atributo da URL. Título, preço, imagens, marca, descrição e breadcrumb pertencem à extração da página individual do produto, configurada separadamente na aba Seletores. A categoria alternativa cadastrada na página de seção permanece disponível; não há configuração de breadcrumb no perfil nem mapeamento para categorias internas nesta entrega.
-- `pagination.mode`: `single` (uma página), `next` (clicar no próximo), `url` (template HTTPS com `{page}`, início e incremento, incluindo offsets), `load_more` (clicar e aguardar novos itens), `scroll` (rolar janela ou contêiner). Configura seletores de anterior/atual/total, avanço desativado e fim, espera após avanço e limite sem progresso. Anterior é metadado opcional; a exploração avança a partir da página inicial. O seletor de avanço é relativo ao documento do perfil. Os números atual/total devem produzir inteiros legíveis; títulos/localizações diferentes podem exigir ajuste futuro no consumidor. Em scroll/load_more, cada avanço conta como uma página para os limites.
-- Fim normal: seletor de fim encontrado, botão desativado, página atual atingindo total, página repetida, limite de tentativas sem progresso ou ausência de próximo configurada como `finish`. Ausência de próximo configurada como `failure` usa a política de paginação. Uma página sem itens usa a política `emptyPage`. Uma página repetida encerra, nunca cria loop.
-- `limits`: páginas/avanços, itens, duração da seção e intervalo mínimo entre requisições (100 ms a 10 minutos). Deduplicação de links e parada em páginas repetidas são obrigatórias. O limite global de duração prevalece sobre esperas e tentativas. O intervalo não autoriza concorrência de requisições de um mesmo marketplace.
-- `failures`: regras separadas para navegação/HTTP, timeout, bloqueio/CAPTCHA, página vazia, item inválido e paginação. `retries` conta novas tentativas além da original (0–5); a espera inicial é multiplicada por `backoffMultiplier` a cada nova tentativa, limitada pela duração restante da seção. Depois: `stop_section` encerra apenas o ciclo atual; `pause_source` impede ciclos seguintes até revisão; `skip_item` é exclusivo de item inválido; `skip_page` exige paginação por URL. Ao atingir os limites, `finish` conclui com o coletado ou `pause_source` exige revisão. Bloqueios não serão contornados; o padrão é pausar sem repetir. Essas ações são aplicadas pelo worker exclusivamente durante ciclos manuais.
-
-URLs de seção e templates preservam query strings necessárias à pesquisa/paginação. Fragmentos das URLs de seção são removidos; URLs usam somente HTTPS e hosts registrados no marketplace. Isso é distinto da regra existente para URLs finais de **produtos**, que continuam sem parâmetros. O crawler futuro deverá revalidar hosts e destino de cada redirect/iframe/link resolvido, verificar IPs públicos e permissões de navegação; o CRUD atual não realiza nenhuma requisição externa e não prova que a página ou o seletor existe. Estruturas arbitrárias, shadow DOM fechado, CAPTCHA, autenticação e formatos de paginação não convencionais não têm compatibilidade universal garantida.
-
-O cadastro administrativo de ofertas usa o fluxo genérico de links, produto vinculado e seletores configurados por marketplace. A revisão oferece o atalho para esse cadastro, sem formulários de importação por identificadores próprios de uma loja. Novas integrações de cadastro/exploração devem ser declarativas e reutilizáveis entre marketplaces.
-
-A migration `023_discovery_links_only.sql` remove dos perfis de exploração existentes somente os campos de dados de produto e breadcrumb que deixaram de fazer parte deste contrato. Preserva os demais seletores, a navegação e as páginas de seção vinculadas. Incrementa a versão dos perfis alterados para impedir gravações com formulários antigos. Não altera os perfis da aba Seletores nem produtos, ofertas ou histórico.
-
-## Enriquecimento manual e categorias de origem
-
-Migration 026 adiciona a fila consumida pelo repositório independente `o-espertinho-job-enrich-links`. Não existe agendamento nem publicação automática. Na Revisão de ofertas, escolha um marketplace para solicitar um lote, acompanhar resultados por item ou cancelar.
-
-Rotas documentadas no Swagger em `/api/admin/discovery/enrichment`: `GET/PUT /settings/:market`, `POST/GET /runs`, `GET /runs/:id/items`, `POST /runs/:id/cancel`, `GET /review`, `POST /review/:id/category`, `POST /review/:id/archive`, `GET /categories`, `GET /mappings`, `PUT/DELETE /mappings/:id`. Exigem perfil com discovery ou catalog; escritas exigem XSRF e confirmação recente.
-
-A árvore extraída pelos seletores de categoria fica separada da categoria sugerida e da confirmada. A correspondência utiliza o marketplace e o caminho completo normalizado, sem inferir pelo último nível ou categoria pai. Salvar um mapeamento apenas sugere a classificação nos demais itens. Confirmar um item exige sua versão atual; edição/exclusão de mapeamento preserva classificações já confirmadas. Cancelamento impede novas gravações imediatamente e mantém o marketplace reservado até o worker encerrar o navegador ou a lease expirar.
-## Prova local de sessão pela extensão
-
-A nova prova `/api/extension/affiliate-proof/*` converte até três links com falha antes de solicitar o enriquecimento. A migration 028 adiciona `affiliate_proof_recipes`, contendo apenas configuração declarativa (domínios, endpoint, corpo com templates, origem de leitura de headers e caminho JSON de resposta). `GET /config` lista receitas; `POST /recipes/:market` configura; `POST /tests` prepara itens; `POST /tests/:id/results` recebe apenas URLs/erros; `POST /tests/:id/enrich` cria o lote e `GET /tests/:id` acompanha. Exigem administrador e sessão real da extensão com `affiliate_links`, somente fora de produção com mocks habilitados. Não recebem sessão/cookies. O teste expira em 30 minutos e os resultados são vinculados à sessão que o criou. A URL original descoberta permanece intacta; o snapshot do job guarda separadamente `navigationUrls` e o worker preserva a identidade original. Só links convertidos e ainda elegíveis entram no lote; não publica ofertas nem confirma categoria. O intervalo mínimo desse lote é 20 segundos.
-
-`GET /api/extension/session-proof/marketplaces` lista lojas com extração ativa e seletores cadastrados; `POST /api/extension/session-proof/tests` recebe uma captura autorizada para testar um link; `GET /api/extension/session-proof/tests/:id` consulta o resultado privado. Exigem sessão real da extensão, `affiliate_links` e conta administradora. Ficam indisponíveis em produção ou com `EXTENSION_MOCK_ENABLED=false`.
-
-O backend usa o extrator manual configurado em `MANUAL_EXTRACTOR_URL`/`MANUAL_EXTRACTION_SERVICE_TOKEN`. A captura é cifrada durante o processamento e descartada ao terminar, sem guardar cookies/localStorage no banco. Só o resultado sem credenciais fica consultável por cinco minutos no teste individual ou quinze no lote, vinculado à sessão que o criou. A auditoria registra identificador e estado técnico; não registra a captura. Reiniciar o backend descarta resultados pendentes. Limite de duas provas em andamento, uma por sessão; sem fila ou retentativa automática. A integração não altera jobs, produtos ou ofertas e não exige migration.
-
-No POST, `batchFailed:true` dispensa `url` e seleciona até cinco links não arquivados deste marketplace com falha de enriquecimento, ordenados pela extração mais recente e ID. O lote é sequencial com 20 segundos após cada tentativa (inclusive falha), sem retentativas; cada acesso abre um navegador isolado com a mesma captura inicial. O GET retorna `batch.total`, `completed`, `intervalMs` e `items` com resultado técnico por link. Os links permanecem intactos no banco. Os logs do lote incluem apenas identificadores, status, preço e HTTP; nenhuma credencial.
+A extensão tem teste adicional em Chromium real com HTTPS e API controlados. Isso não substitui homologar sua sessão real, seletores e um pequeno lote autorizado em cada marketplace. Não há contorno de login/CAPTCHA, perfis ocultos ou exportação de sessão.
