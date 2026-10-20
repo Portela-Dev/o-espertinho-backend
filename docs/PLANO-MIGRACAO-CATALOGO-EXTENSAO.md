@@ -392,3 +392,6 @@ Ao concluir uma fase, registrar data, repositórios/commits/PRs, migrations nova
 
 - Fase 2 (implementação): formulário em Marketplaces para executor, tempos, separador, regras de login/desafio/acesso/limite/indisponibilidade e receita declarativa. Versionamento e XSRF aprovados; Angular typecheck aprovado. Regras usam trechos literais de URL, texto ou seletores (sem regex executável/JavaScript remoto). Navegação HTTP sem status observável será tratada pelo detector DOM. A configuração não habilita a extensão automaticamente.
 
+
+- Fase 3 (motor base): navegação vinculada aos IDs da janela/aba criadas pela extensão, permissões por origem, detector genérico e tratamento de aba fechada. Dois testes aprovados; tipos e build aprovados. Coordenador e UI definitivos serão integrados junto aos passos 1–4, para não conectar um botão a uma etapa sem gravação transacional.
+
