@@ -8,6 +8,7 @@ import { audit } from './offers.js';
 import { pagedQuery } from './pagination.js';
 import { allowStep, startCatalogInput, actionInput, uuid, type CatalogActor } from './catalog-contracts.js';
 import { getCatalogSettings } from './catalog-settings.js';
+import {catalogStats} from './catalog-stats.js';
 type Query = Pick<Database, 'query'>;
 export async function catalogTransaction<T>(db: Database, work: (c: Query) => Promise<T>): Promise<T> {
     const c = await db.connect();
@@ -94,6 +95,7 @@ export async function startCatalogRun(db: Database, actor: CatalogActor, input: 
     });
 }
 export function registerCatalogRuns(router: Router, db: Database, account: (req: any) => Promise<CatalogActor>) {
+    router.get('/catalog/stats',async(req,res)=>res.json(await catalogStats(db,await account(req),req.query)));
     router.get('/catalog/config', async (req, res) => {
         await account(req);
         const markets = (await db.query("SELECT id,name,website_url,allowed_hosts,catalog_executor FROM marketplaces WHERE scraping_enabled ORDER BY name")).rows;
