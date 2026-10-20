@@ -1,3 +1,4 @@
+import {spawnSync} from 'node:child_process';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -17,10 +18,14 @@ test('PostgreSQL real: provisionamento preserva dados e restringe runtime, DDL e
   await assert.rejects(()=>assertRestrictedDatabase(owner));
   const id=randomUUID();await app.query("INSERT INTO products(id,name,category,category_path) VALUES($1,'Dado preservado','Tecnologia',ARRAY['Tecnologia'])",[id]);
   await app.query("UPDATE products SET name='Atualizado' WHERE id=$1",[id]);
+  for(const table of ['amazon_sitestripe_session','affiliate_proof_recipes','offer_refresh_items','enrichment_items'])await assert.rejects(()=>app.query('SELECT * FROM '+table),error=>error.code==='42501');
+  await assert.rejects(()=>app.query('SELECT credentials_encrypted FROM marketplaces'),error=>error.code==='42501');
+  await app.query("SELECT id,name,allowed_hosts,catalog_executor FROM marketplaces");
   await assert.rejects(()=>app.query('SELECT * FROM schema_migrations'),error=>error.code==='42501');
   await assert.rejects(()=>app.query('CREATE TABLE public.not_allowed(id int)'),error=>error.code==='42501');
   await assert.rejects(()=>app.query('DROP TABLE products CASCADE'),error=>error.code==='42501');
   await assert.rejects(()=>app.query('CREATE ROLE not_allowed'),error=>error.code==='42501');
+  const cli=spawnSync(process.execPath,['dist/migrate-cli.js'],{env:{...process.env,MIGRATION_DATABASE_URL:ownerUrl.href,DATABASE_URL:appUrl.href,APP_ORIGIN:'http://localhost:4200'},encoding:'utf8',windowsHide:true,timeout:20000});assert.equal(cli.status,0,cli.stderr);assert.match(cli.stdout,/grants/);
   await provisionDatabase(owner,appUrl.href);assert.equal((await app.query('SELECT name FROM products WHERE id=$1',[id])).rows[0].name,'Atualizado');
   await owner.query(`GRANT pg_monitor TO "${role}"`);await assert.rejects(()=>assertRestrictedDatabase(app));await assert.rejects(()=>provisionDatabase(owner,appUrl.href));
  }finally{

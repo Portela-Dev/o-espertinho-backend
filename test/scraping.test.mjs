@@ -1,11 +1,11 @@
 import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
-import {testDatabase,testConfig,client,createApp,identity,seedProduct} from './helpers.mjs';
+import {testDatabase,testConfig,client,createApp,identity,seedProduct,finishManualFixture} from './helpers.mjs';
 let db,admin,app,productId;const config=testConfig();let missing=false,calls=0;
 const source='https://www.example.com/produto/123',affiliate=source+'?ref=oespertinho';
 const extracted=()=>({title:'Produto de teste',priceCents:32100,originalPriceCents:44750,description:'Descrição extraída.',category:'',conditions:'Preço com cupom.',externalId:'SKU123',productUrl:source+'?dynamic=123#details',images:['https://images.example.com/item.jpg'],specifications:[{name:'Cor',value:'Preto'}],warnings:[],missing:missing?['price']:[],evidence:[{field:'title',selector:'h1'}],collectedAt:new Date().toISOString()});
 const rules=[{field:'title',selectors:['h1'],mode:'text',required:true},{field:'price',selectors:['.price'],mode:'text',required:true}];
-before(async()=>{({db}=await testDatabase());productId=await seedProduct(db);app=createApp(db,config,{verifyGoogle:async t=>identity(t),extractor:{extract:async()=>{calls++;return extracted();}}});admin=client(app);await admin.login('admin');});
+before(async()=>{({db}=await testDatabase());productId=await seedProduct(db);app=createApp(db,config,{verifyGoogle:async t=>identity(t)});admin=client(app);await admin.login('admin');const mutate=admin.mutate.bind(admin);admin.mutate=async(method,url,body)=>{const r=await mutate(method,url,body);if(r.status!==202||!r.body.executionId)return r;calls++;const result=await finishManualFixture(db,r.body.executionId,extracted());if(result.status!==200){await mutate('post','/api/admin/extension-catalog/manual/'+r.body.executionId+'/cancel',{});return result;}return mutate('post','/api/admin/extension-catalog/manual/'+r.body.executionId+'/finalize',{});};});
 after(async()=>db.end());
 test('cadastro de marketplace e seletores exige admin e XSRF, com controle de versão',async()=>{
  const normal=client(app);await normal.login('alice');assert.equal((await normal.get('/api/admin/catalog-marketplaces')).status,403);assert.equal((await admin.agent.post('/api/admin/catalog-marketplaces').send({})).status,403);
@@ -45,7 +45,7 @@ test('prévia não cadastra oferta; confirmação mantém link original, imagens
 test('confirmação bloqueia duplicação, dados ausentes, prévia expirada e alterações nas regras',async()=>{
  const preview=async()=>{const r=await admin.mutate('post','/api/admin/link-imports/preview',{productId,marketplaceId:'loja-teste',url:affiliate});assert.equal(r.status,200);return r.body;};const confirm=p=>admin.mutate('post','/api/admin/link-imports/confirm',{previewId:p.previewId,authorizedContent:true});
  assert.equal((await confirm(await preview())).status,409);
- missing=true;const invalid=await preview();assert.equal(invalid.canConfirm,false);assert.equal((await confirm(invalid)).status,409);missing=false;
+ missing=true;assert.equal((await admin.mutate('post','/api/admin/link-imports/preview',{productId,marketplaceId:'loja-teste',url:affiliate})).status,400);missing=false;
  const expired=await preview();await db.query('UPDATE offer_import_previews SET expires_at=$2 WHERE id=$1',[expired.previewId,new Date(Date.now()-1000)]);assert.equal((await confirm(expired)).status,409);
  const changed=await preview();await admin.mutate('put','/api/admin/selectors/loja-teste',{version:1,rules,waitTimeoutMs:1000,validityMinutes:60});assert.equal((await confirm(changed)).status,409);
 });

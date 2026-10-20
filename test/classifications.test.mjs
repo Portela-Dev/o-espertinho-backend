@@ -1,9 +1,9 @@
 import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {testDatabase,testConfig,identity,client,seedOffer,seedProduct,createApp} from './helpers.mjs';
+import {testDatabase,testConfig,identity,client,seedOffer,seedProduct,createApp,finishManualFixture} from './helpers.mjs';
 let db,admin,user,app;
-before(async()=>{({db}=await testDatabase());app=createApp(db,testConfig(),{verifyGoogle:async t=>identity(t),extractor:{extract:async url=>({title:'Fone extraído',priceCents:32100,originalPriceCents:null,description:'',category:'Outra',conditions:'',externalId:randomUUID(),productUrl:url,images:[],specifications:[],warnings:[],missing:[],evidence:[],collectedAt:new Date().toISOString()})}});admin=client(app);user=client(app);await admin.login('admin');await user.login('alice');});
+before(async()=>{({db}=await testDatabase());app=createApp(db,testConfig(),{verifyGoogle:async t=>identity(t)});admin=client(app);user=client(app);await admin.login('admin');await user.login('alice');const mutate=admin.mutate.bind(admin);admin.mutate=async(method,url,body)=>{const response=await mutate(method,url,body);if(response.status!==202||!response.body.executionId)return response;const data={title:'Fone extraído',priceCents:32100,originalPriceCents:null,description:'',category:'Outra',conditions:'',externalId:randomUUID(),productUrl:body.url,images:[],specifications:[],warnings:[],missing:[],evidence:[],collectedAt:new Date().toISOString()};const result=await finishManualFixture(db,response.body.executionId,data);if(result.status!==200)return result;return mutate('post','/api/admin/extension-catalog/manual/'+response.body.executionId+'/finalize',{});};});
 after(async()=>db.end());
 const draft={name:'Headset preto H510',brand:'Redragon',model:'H510 preto',category:'Tecnologia',subcategory:'Áudio'};
 const offerBody=productId=>({productId,marketplaceId:'mercadolivre',externalId:randomUUID(),title:'Anúncio',category:'Ignorada',productUrl:'https://www.mercadolivre.com.br/item',affiliateUrl:'https://www.mercadolivre.com.br/sec/'+randomUUID(),priceCents:32100,expiresAt:new Date(Date.now()+3600000).toISOString(),authorizedContent:true});
@@ -15,7 +15,7 @@ test('produto exige admin e XSRF; produto sem links tem página e fica fora da v
  assert.equal((await admin.get('/api/admin/products')).body[0].link_count,0);assert.equal((await admin.get('/api/admin/products')).body[0].sku,r.body.sku);
 });
 test('nenhuma entrada aceita link sem produto existente, incluindo importação e prévia',async()=>{
- const b=offerBody(undefined);assert.equal((await admin.mutate('post','/api/admin/offers',b)).status,400);assert.equal((await admin.mutate('post','/api/admin/offers',{...b,productId:randomUUID()})).status,404);
+ const b=offerBody(undefined);assert.equal((await admin.mutate('post','/api/admin/offers',b)).status,404);assert.equal((await admin.mutate('post','/api/admin/offers',{...b,productId:randomUUID()})).status,404);
  assert.equal((await admin.mutate('post','/api/admin/link-imports/preview',{marketplaceId:'amazon',url:'https://www.amazon.com.br/dp/B012345678'})).status,400);
  assert.equal((await admin.mutate('post','/api/admin/amazon/import',{asin:'B012345678'})).status,404);assert.equal((await admin.mutate('post','/api/admin/mercadolivre/import',{itemId:'MLB12345',affiliateUrl:b.affiliateUrl,authorizedContent:true})).status,404);
  await assert.rejects(()=>db.query("INSERT INTO offers(id,marketplace_id,external_id,title,product_url,price_cents,source,expires_at) VALUES($1,'amazon','missing','X','https://www.amazon.com.br',100,'manual',now())",[randomUUID()]));
@@ -42,10 +42,10 @@ test('classificação é do produto, sugestões são reutilizadas e edição pro
 });
 test('mesmo identificador externo pode ter links diferentes; produto é obrigatório e pode ser corrigido',async()=>{
  const p=await seedProduct(db),other=await seedProduct(db,{category:'Casa'}),b=offerBody(p);b.externalId='MESMO-ITEM';
- const first=await admin.mutate('post','/api/admin/offers',b);assert.equal(first.status,201);const second=await admin.mutate('post','/api/admin/offers',{...b,affiliateUrl:b.affiliateUrl+'-outro'});assert.equal(second.status,201);assert.equal(first.body.category,'Tecnologia');
- assert.equal((await admin.mutate('post','/api/admin/offers',b)).status,409);
+ const firstId=await seedOffer(db,{productId:p,externalId:b.externalId,affiliate:b.affiliateUrl,status:'pending'});await seedOffer(db,{productId:p,externalId:b.externalId,affiliate:b.affiliateUrl+'-outro'});const first={body:(await db.query('SELECT * FROM offers WHERE id=$1',[firstId])).rows[0]};assert.equal(first.body.category,'Tecnologia');
+ await assert.rejects(()=>seedOffer(db,{productId:p,externalId:b.externalId,affiliate:b.affiliateUrl}));
  await assert.rejects(()=>db.query('DELETE FROM products WHERE id=$1',[p]));
- const reassigned=await admin.mutate('put','/api/admin/offers/'+first.body.id+'/product',{productId:other,expectedUpdatedAt:first.body.updated_at});assert.equal(reassigned.status,200);const o=(await db.query('SELECT * FROM offers WHERE id=$1',[first.body.id])).rows[0];assert.equal(o.product_id,other);assert.equal(o.category,'Casa');assert.equal(o.status,'pending');assert.equal(o.affiliate_url,b.affiliateUrl);
+ const reassigned=await admin.mutate('put','/api/admin/offers/'+first.body.id+'/product',{productId:other,expectedUpdatedAt:first.body.updated_at.toISOString()});assert.equal(reassigned.status,200);const o=(await db.query('SELECT * FROM offers WHERE id=$1',[first.body.id])).rows[0];assert.equal(o.product_id,other);assert.equal(o.category,'Casa');assert.equal(o.status,'pending');assert.equal(o.affiliate_url,b.affiliateUrl);
 });
 test('prévia fixa o produto escolhido, herda classificação e exige nova prévia se produto mudar',async()=>{
  const p=(await admin.mutate('post','/api/admin/products',{...draft,name:'Produto prévia'})).body;

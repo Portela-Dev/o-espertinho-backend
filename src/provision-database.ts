@@ -23,7 +23,17 @@ export async function provisionDatabase(db:Database,applicationUrl:string){
   await c.query(`GRANT USAGE ON SCHEMA public TO ${identifier(role)}`);
   await c.query(`REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${identifier(role)}`);
   const tables=(await c.query("SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename<>'schema_migrations'")).rows;
-  for(const table of tables)await c.query(`GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE public.${identifier(table.tablename)} TO ${identifier(role)}`);
+  const archive=new Set(['amazon_sitestripe_session','amazon_browser_session','marketplace_oauth_states','affiliate_proof_recipes','enrichment_settings','offer_refresh_settings','offer_refresh_runs','offer_refresh_items','enrichment_runs','enrichment_items','discovery_runs','discovery_run_links','discovery_run_events','search_rules','sync_runs']);
+  for(const table of tables){
+   if(archive.has(table.tablename))continue;
+   if(table.tablename==='marketplaces'){
+    const columns='id,name,website_url,logo_url,allowed_hosts,scraping_enabled,url_normalization_rules,catalog_executor,updated_at';
+    for(const permission of ['SELECT','INSERT','UPDATE'])await c.query(`GRANT ${permission} (${columns}) ON TABLE public.marketplaces TO ${identifier(role)}`);
+    await c.query(`GRANT DELETE ON TABLE public.marketplaces TO ${identifier(role)}`);
+   }else await c.query(`GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE public.${identifier(table.tablename)} TO ${identifier(role)}`);
+  }
+  // Source/profile deletion checks historical references, without mutating archived rows.
+  await c.query(`GRANT SELECT ON discovery_runs TO ${identifier(role)}`);
   await c.query(`GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO ${identifier(role)}`);
   await c.query('COMMIT');
  }catch(error){await c.query('ROLLBACK');throw error;}finally{c.release();}

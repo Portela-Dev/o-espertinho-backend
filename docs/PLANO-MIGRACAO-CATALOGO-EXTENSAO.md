@@ -343,17 +343,17 @@ As fases abaixo possuem o estado atualizado na seção 7 e no diário de execuç
 
 Para cada módulo/rota/serviço removido, verificar e registrar:
 
-- [ ] Imports, exports, registro no startup, tipos compartilhados e código compilado.
-- [ ] Consumidores frontend/extensão, comandos, eventos, estados persistidos e migração de storage.
-- [ ] Rotas, clientes HTTP, OpenAPI/Swagger, rate limits e permissões.
-- [ ] SQL, FKs, triggers, índices, views, fixtures, filas, leases e rotina de retenção.
-- [ ] Testes, mocks, snapshots, cobertura e critérios do Sonar.
-- [ ] Dependências, lockfiles, `.npmrc` e acesso a pacotes privados.
-- [ ] `.env.example`, variáveis de CI, secrets, secrets de build e credenciais de serviço.
-- [ ] Scripts npm, setup, Compose, Dockerfiles, healthchecks, workflows e deploys.
-- [ ] READMEs, instruções de instalação, páginas administrativas e links para documentação antiga.
-- [ ] Artefatos locais/ignorados e alterações não commitadas, sem apagar trabalho por engano.
-- [ ] Instalação limpa, migração de instalação existente e ausência de chamadas ao componente aposentado.
+- [x] Imports, exports, registro no startup, tipos compartilhados e código compilado.
+- [x] Consumidores frontend/extensão, comandos, eventos, estados persistidos e migração de storage.
+- [x] Rotas, clientes HTTP, OpenAPI/Swagger, rate limits e permissões.
+- [x] SQL, FKs, triggers, índices, views, fixtures, filas, leases e rotina de retenção.
+- [x] Testes, mocks, snapshots, cobertura e critérios do Sonar.
+- [x] Dependências, lockfiles, `.npmrc` e acesso a pacotes privados.
+- [x] `.env.example`, variáveis de CI, secrets, secrets de build e credenciais de serviço.
+- [x] Scripts npm, setup, Compose, Dockerfiles, healthchecks, workflows e deploys.
+- [x] READMEs, instruções de instalação, páginas administrativas e links para documentação antiga.
+- [x] Artefatos locais/ignorados e alterações não commitadas, sem apagar trabalho por engano.
+- [x] Instalação limpa, migração de instalação existente e ausência de chamadas ao componente aposentado.
 
 A pesquisa deve cobrir nomes, rotas, comandos e variáveis antigos; não apenas nomes de arquivos. Uma referência preservada por razão histórica precisa estar identificada como tal e fora do caminho ativo.
 
@@ -375,9 +375,9 @@ Refatoração estrutural e testes acompanham cada fase. A fase 11 concentra a ex
 | 7 — Revisão/publicação | Validado no Mercado Livre real com confirmação humana e publicação | Vínculo manual e publicação protegida |
 | 8 — Preços | Validado no Mercado Livre real: uma oferta atualizada e histórico diário único | Histórico diário e falhas técnicas preservadas |
 | 9 — Prévia manual | Validado no Mercado Livre real, sem extrator | Cadastro e testes sem extrator |
-| 10 — Corte | Corte local: Amazon/Mercado Livre na extensão; quatro serviços antigos parados; teste manual de seletores concluído | Executor único e recuperação ensaiada |
-| 11 — Limpeza | POCs removidas do caminho ativo; infraestrutura aguarda corte | Serviços, POCs e referências retirados |
-| 12 — Homologação final | CI e Quality Gates aprovados; homologação da conta real em andamento | Instalação/migração e CI dos projetos ativos |
+| 10 — Corte | Corte local concluído: extensão exclusiva, migration 031 e conta restrita aplicadas; produção fora deste corte | Executor único e recuperação ensaiada |
+| 11 — Limpeza | Código/rotas/UI/infra legados retirados; dados antigos arquivados sem runtime e serviços desativados | Serviços, POCs e referências retirados |
+| 12 — Homologação final | Fluxos reais locais e limpeza validados; CI/Quality Gates backend/frontend aprovados; implantação futura é separada | Instalação/migração e CI dos projetos ativos |
 
 Ao concluir uma fase, registrar data, repositórios/commits/PRs, migrations novas, testes executados, limitações e decisão de avanço. Não marcar como concluída com base apenas em implementação compilada ou em teste mockado quando o aceite exigir navegação real.
 
@@ -438,7 +438,7 @@ Ao concluir uma fase, registrar data, repositórios/commits/PRs, migrations nova
 
 - Primeira evidência real: execução 1317be2a-77c5-4773-b0d2-be81d51b8fbe, Mercado Livre / discover, concluída em 20/10/2026 13:16:44 UTC, 1 fonte e 3 links aceitos, nenhuma falha. Conversão ainda não registrada; aguardando o texto do painel para conferir a preparação do header local. Não considerar etapa 2 aprovada apenas pelo clique no botão.
 
-## PRs desta implementação
+## PRs da migração inicial (mescladas antes da limpeza)
 
 - Backend: https://github.com/Portela-Dev/o-espertinho-backend/pull/13
 - Frontend: https://github.com/Portela-Dev/o-espertinho-frontend/pull/15
@@ -472,3 +472,47 @@ Todas foram atualizadas nas mesmas branches; não houve segunda PR no mesmo repo
 - Regressão encontrada no teste manual de seletores: fechar a janela deixava IDs persistidos e o comando FOCUS apenas tentava focar a janela removida. Corrigido na extensão: reabertura explícita recria janela própria, verifica vínculo aba/janela, preserva execução e mantém pausa até Continuar. Se a execução estiver ativa, pausa antes da recuperação. Sem reabertura automática durante o lote. Testes de regressão aprovados, cobertura geral 87,68%, typecheck aprovado e Chromium real validou fechar/reabrir/retomar a mesma execução sem enviar resultado durante a pausa. ZIP 0.3.0 regenerado; necessário recarregar extensão para repetir teste real de seletores.
 
 - Homologação real da recuperação: administrador confirmou reabertura da janela e teste de seletores Amazon 0552836b-a819-4895-aafe-0ce7e2ba391f concluído em 20/10/2026 10:56:04 (America/Sao_Paulo), item concluído sem erro, com extrator desligado. Correção da extensão commit 1e03242 na PR #7. Pipeline 39434561271 concluído com sucesso em testes/empacotamento e Chromium real; etapa SonarQube opcional marcada skipped, portanto sem nova aprovação de Quality Gate nessa execução. Permanecem as pendências de limpeza definitiva da fase 11 e validação de produção, sem impedir o uso local pela extensão.
+
+## Limpeza definitiva — 20/10/2026
+
+- Etapa A — backend: removidos conectores fixos, OAuth, importação manual antiga, cliente HTTP do extrator, produtores/rotas de jobs e schemas Swagger correspondentes. Prévias/testes usam somente fila persistida da extensão. A manutenção sem navegador preserva sessões, auditoria, cliques e retenção diária; também remove prévias expiradas não confirmadas. Build limpa apenas dist validado antes de compilar, evitando JavaScript órfão dos clientes apagados.
+- Migration 031 preparada: encerra reservas antigas, desativa agendamentos e torna extension o único executor/default para qualquer marketplace. Preserva produtos, links, preços, categorias, origens, arquivamentos e resultados aceitos. Não foi aplicada ao banco pessoal nesta etapa.
+- Ajuste de segurança autorizado explicitamente pelo usuário: runtime sem grants de leitura das credenciais históricas e sem acesso às tabelas operacionais aposentadas; discovery_runs permanece SELECT para validar referências históricas ao excluir fontes/perfis. Conta de migrations preservada. Consultas de marketplace enumeram somente colunas ativas.
+- Decisão de retenção: a revisão automática recusou a exclusão de tabelas/colunas persistentes. Em vez de apagar dados, tabelas antigas e credenciais cifradas ficam como arquivo sem consumidor/grants de runtime. A chave do backup é preservada fora do código; nenhuma exclusão de dados persistentes foi executada.
+- Testes A: backend 110 casos, 108 aprovados e 2 opcionais; os dois PostgreSQL reais foram executados depois em container descartável, aprovando grants restritos, concorrência e restauração das 31 migrations. Prévias incompletas são recusadas pelo contrato de resultados; testes anteriores foram migrados para reserva/resultado/finalização reais, sem extrator injetado.
+- PRs: a consulta atual retornou nenhuma PR aberta no backend; PR já encerrada não será reaberta nem duplicada. Criar apenas uma PR de limpeza onde não existir pendente; atualizar a pendente quando houver.
+
+- Etapa B — frontend: removidos componentes de filas/agenda antigos, polling e handlers dos workers, opção de executor legado, tratamento OAuth e aba de buscas automáticas. Exploração e revisão usam CatalogOperations para execuções. Testes de criação de oferta usam prévia → extensão → finalização → confirmação. Typecheck/build, quatro testes Node e 44 jornadas SSR completas aprovados; regressão de paginação passou a cobrir as execuções atuais. PR anterior #15 já estava mesclada; nova PR única de limpeza será usada.
+- Serviços aposentados: branches isoladas preservaram a POC local do extrator. Guards de início/provisionamento/publicação testados nos cinco repositórios; workflows automáticos substituídos por aviso manual sem deploy ou segredos. PRs: extraction-core #3, extractor #4, job-discovery #2, job-enrich-links #3, job-update-price #8. Backend da etapa A: commit dfdda72, PR #14.
+
+- Etapa C — infraestrutura/setup: removidos comandos legacy:* e segredos de navegador dos exemplos/Compose ativos; setup gera contas/senhas distintas e db:migrate usa MIGRATION_DATABASE_URL para provisionar runtime. Testes de primeiro setup e preservação de .env existente aprovados. Reinício automático dos quatro containers antigos desabilitado; cinco workflows de serviços/pacote aposentados desabilitados na API do GitHub, sem arquivar repositórios ou excluir releases.
+- Corte local de banco autorizado: novo dump e cópia privada de .env em C:/Users/arnal/Documents/Codex/backups/espertinho/20261020-catalog-extension; dump restaurado em PostgreSQL temporário, migration 031/grants aplicados à cópia e contagens de produtos, ofertas, links, categorias/mapeamentos, preços e sessões conferidas. Só depois aplicado ao banco local. Conta espertinho_app restrita configurada para runtime; conta dona preservada como migrations; três contas dedicadas de jobs passaram a NOLOGIN e perderam grants. Valores de segredos não foram exibidos nem versionados. Chave dos dados cifrados antigos preservada no backup privado. Nenhum dado comercial, container ou volume foi excluído.
+- PR frontend #16, commit 770d780; backend #14 recebe também a etapa C. As PRs anteriores #13/#15 estavam mescladas quando a limpeza começou. Nos cinco serviços aposentados, as únicas PRs abertas são as de aposentadoria já listadas. Não foi criado outro projeto/pacote de extração; regras atuais continuam genéricas e executadas pelo navegador do administrador.
+
+- Verificação operacional: db:migrate foi separado em migrate-cli.ts para evitar ciclo de imports com provision-database; comando real executado com sucesso e de forma idempotente. API local respondeu 200 em health, marketplaces e products com conexão espertinho_app; roles dos três jobs confirmadas NOLOGIN. CI frontend #39446902293 aprovado. CI backend inicial aprovou validações/testes, mas imagem apontou falta de COPY do novo script de build; Dockerfile corrigido e nova imagem em validação, sem deploy.
+
+- Fechamento da limpeza: mapa de consumidores reavaliado. Código executável legado retirado do backend/frontend; histórico de migrations e de execuções preservado deliberadamente. Nenhuma rota atual chama um serviço aposentado, e build não carrega dist órfão. Checklists de imports, permissões, OpenAPI, SQL/FKs, scripts, env, CI e documentação revisados; artefatos/evidências antigos e POC local preservados em vez de apagados indiscriminadamente. Repositórios/pacote/releases continuam disponíveis como arquivo e seus workflows estão desativados.
+- Smoke de imagem: Dockerfile atualizado para copiar scripts/build.mjs; imagem Linux construída e smoke test com PostgreSQL/conta restrita descartáveis aprovado, sem serviços de navegador. Teste de CLI real acrescentado à suíte PostgreSQL para garantir término idempotente sem ciclo de imports.
+- Produção: nenhum deploy, merge, release, DNS ou segredo de VPS foi alterado. Homologação HTTPS/host permissions em domínio de produção continua sendo um aceite de implantação futura, não impede a conclusão da limpeza do código/local.
+
+## PRs da limpeza definitiva
+
+- Backend: https://github.com/Portela-Dev/o-espertinho-backend/pull/14
+- Frontend: https://github.com/Portela-Dev/o-espertinho-frontend/pull/16
+- Extrator: https://github.com/Portela-Dev/o-espertinho-extractor/pull/4
+- Descoberta: https://github.com/Portela-Dev/o-espertinho-job-discovery/pull/2
+- Enriquecimento: https://github.com/Portela-Dev/o-espertinho-job-enrich-links/pull/3
+- Preços: https://github.com/Portela-Dev/o-espertinho-job-update-price/pull/8
+- Pacote Node descontinuado: https://github.com/Portela-Dev/o-espertinho-extraction-core/pull/3
+
+A consulta inicial desta limpeza retornou zero PRs abertas nos repositórios alterados; as anteriores já estavam mescladas. Depois de abertas estas PRs únicas, todas as correções e evidências foram enviadas às mesmas branches, sem segunda PR pendente no mesmo projeto.
+
+- Regressões finais do CI: imagem backend precisava copiar o novo script de build; corrigido e smoke aprovado. Sonar identificou condicionais com escopo visual ambíguo e dois schemas sem consumidor; removidos os schemas, adicionadas chaves explícitas e testes de prévia/revisão aprovados. Modal administrativa passou a dialog nativo; 13 jornadas do catálogo aprovadas. Duas leituras frágeis de corpo de resposta no Chromium foram substituídas por conferência de dados persistidos após ação da UI. Teste de menu em mobile aguarda o evento toggle antes de medir limites, mantendo a exigência de caber em 390 px. Quatro jornadas de revisão passaram no Chromium local. Nenhuma regra do Quality Gate foi relaxada nem testes foram simplesmente ignorados.
+
+## Encerramento da limpeza
+
+- Backend: commit de código 82a6ece; pipeline https://github.com/Portela-Dev/o-espertinho-backend/actions/runs/39450187676 concluído com validação/cobertura, PostgreSQL isolado, imagem e SonarQube/Quality Gate aprovados. Deploy não executado.
+- Frontend: commit 704092b; pipeline https://github.com/Portela-Dev/o-espertinho-frontend/actions/runs/39450541367 concluído com 44 jornadas de navegador, validação/cobertura, imagem e SonarQube/Quality Gate aprovados. Deploy não executado. Modal nativa e persistência/revisão foram revalidadas; escopo das verificações não foi reduzido.
+- Código sem consumidor retirado; nenhum módulo providers/OAuth/manual-extractor/offer-refresh antigo existe em src ou dist do backend. Só PostgreSQL permanece como container em execução. Backend/frontend seguem processos independentes e operações de navegador ficam na extensão. Conta restrita e migrations separadas verificadas; três contas de jobs sem login; nenhuma sessão comercial/catalogação foi zerada.
+- Plano raiz e cópia versionada sincronizados; PRs abertas permanecem únicas por repositório. Commits realizados por etapa e correção. Repositórios, pacote, releases, imagens antigas solicitadas pelo usuário e POC não commitada foram preservados como histórico; não são dependência operacional. Dados cifrados e execução antiga permanecem arquivo protegido sem grants de runtime.
+- Limpeza definitiva do código/local concluída. Publicação em VPS, merge de PRs, promoção para main e release não foram executados por consequência desta tarefa.

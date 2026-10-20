@@ -24,7 +24,7 @@ export function catalogApiPaths() {
         ['post', '/admin/extension-catalog/sources/{id}/resume', 'Retomar fonte pausada sem iniciar extração', z.strictObject({})],
         ['get', '/admin/extension-catalog/settings/{id}', 'Consultar configuração da extensão'],
         ['put', '/admin/extension-catalog/settings/{id}', 'Configurar receita, bloqueios e executor', z.strictObject({
-                version: z.number().int(), executor: z.enum(['legacy', 'extension']), config: catalogSettings
+                version: z.number().int(), executor: z.literal('extension'), config: catalogSettings
             })],
         ['get', '/admin/extension-catalog/runs', 'Acompanhar execuções da extensão'],
         ['get', '/admin/extension-catalog/runs/{id}/items', 'Consultar itens da execução'],

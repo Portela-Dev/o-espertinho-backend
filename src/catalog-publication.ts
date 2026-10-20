@@ -17,7 +17,7 @@ export function registerCatalogPublication(app:Express,db:Database){
    if(link.status!=='pending'||link.enrichment_version!==input.version||link.extraction_status!=='completed'||!link.confirmed_category_id||!link.product_id||!link.affiliate_url)throw new HttpError(409,'Confirme categoria, produto e informações antes de publicar.');
    const product=(await c.query('SELECT * FROM products WHERE id=$1 FOR SHARE NOWAIT',[link.product_id])).rows[0];
    if(!product?.category_ids.includes(link.confirmed_category_id))throw new HttpError(409,'O produto não pertence à categoria confirmada.');
-   const market=(await c.query('SELECT * FROM marketplaces WHERE id=$1 FOR SHARE',[link.marketplace_id])).rows[0];
+   const market=(await c.query('SELECT id,name,website_url,logo_url,allowed_hosts,scraping_enabled,url_normalization_rules,catalog_executor,updated_at FROM marketplaces WHERE id=$1 FOR SHARE',[link.marketplace_id])).rows[0];
    if(!market.scraping_enabled)throw new HttpError(409,'Marketplace desativado.');
    marketUrl(link.affiliate_url,market.allowed_hosts);marketUrl(link.url,market.allowed_hosts);
    const profile=(await c.query('SELECT * FROM scraping_profiles WHERE marketplace_id=$1',[market.id])).rows[0],data=link.enrichment_data;

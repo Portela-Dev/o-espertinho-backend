@@ -163,7 +163,7 @@ export async function acceptCatalogResult(db: Database, actor: CatalogActor, run
             return {
                 accepted: true, duplicate: true
             };
-        const market = (await c.query('SELECT * FROM marketplaces WHERE id=$1 FOR SHARE', [run.marketplace_id])).rows[0];
+        const market = (await c.query('SELECT id,name,website_url,logo_url,allowed_hosts,scraping_enabled,url_normalization_rules,catalog_executor,updated_at FROM marketplaces WHERE id=$1 FOR SHARE', [run.marketplace_id])).rows[0];
         if (market.catalog_executor !== 'extension' || !market.scraping_enabled)
             throw new HttpError(409, 'O executor foi desativado.');
         const context = {

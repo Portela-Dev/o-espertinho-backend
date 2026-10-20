@@ -5,6 +5,6 @@ test('setup prepara apenas os três projetos ativos e sobe só PostgreSQL com de
  const steps=workspaceSteps('setup');assert.equal(steps.some(s=>/job-|extractor/.test(s.project)),false);
  const docker=steps.find(s=>s.docker&&s.args.includes('compose'));assert.ok(docker.args.includes('-d'));assert.equal(docker.args.at(-1),'postgres');
  assert.equal(steps.some(s=>s.args.includes('db:provision')),false);assert.ok(steps.some(s=>s.project==='o-espertinho-chrome-extension'&&s.args.includes('package')));
- assert.equal(workspaceSteps('legacy:price-job:up')[0].project,'o-espertinho-job-update-price');
+ assert.throws(()=>workspaceSteps('legacy:price-job:up'));
  assert.throws(()=>workspaceSteps('all:up'));
 });

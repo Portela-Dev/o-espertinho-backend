@@ -1,20 +1,10 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
 import type { Database } from './db.js';
 import type { Config } from './config.js';
 export class HttpError extends Error { constructor(public status: number, message: string, public code?: string) { super(message); } }
 export const hash = (s: string) => createHash('sha256').update(s).digest('hex');
 export function equal(a: string, b: string) { const x=Buffer.from(a), y=Buffer.from(b); return x.length===y.length && timingSafeEqual(x,y); }
-export function encrypt(value: unknown, key: string) {
-  const iv=randomBytes(12), cipher=createCipheriv('aes-256-gcm',Buffer.from(key,'base64'),iv);
-  const encrypted=Buffer.concat([cipher.update(JSON.stringify(value),'utf8'),cipher.final()]);
-  return [iv,cipher.getAuthTag(),encrypted].map(v=>v.toString('base64')).join('.');
-}
-export function decrypt(value: string, key: string): Record<string,string> {
-  const [iv,tag,data]=value.split('.').map(v=>Buffer.from(v,'base64'));
-  const decipher=createDecipheriv('aes-256-gcm',Buffer.from(key,'base64'),iv); decipher.setAuthTag(tag);
-  return JSON.parse(Buffer.concat([decipher.update(data),decipher.final()]).toString('utf8'));
-}
 export interface User { id: string; email: string; name: string; avatar: string|null; role: 'user'|'admin'; access_profile_id?:string; permissions?:string[] }
 declare global { namespace Express { interface Request { sessionId?: string; user?: User; csrfHash?: string; adminVerifiedAt?: Date } } }
 export const AUTH_SESSION_MS=30*86400000;
@@ -77,13 +67,11 @@ function extensionAdminPermissions(section:string,method:string):string[]{
 }
 function adminPermissions(parts:string[],method:string):string[]{
  const resource=parts[0];
- const fixed:Record<string,string[]>={users:['users'],'access-profiles':['users'],stats:['overview'],audit:['activity'],'offer-refresh':['updates'],selectors:['selectors'],'category-tree':['catalog'],'category-options':['catalog'],products:['catalog'],offers:['catalog'],'link-imports':['catalog'],amazon:['catalog']};
+ const fixed:Record<string,string[]>={users:['users'],'access-profiles':['users'],stats:['overview'],audit:['activity'],selectors:['selectors'],'category-tree':['catalog'],'category-options':['catalog'],products:['catalog'],offers:['catalog'],'link-imports':['catalog']};
  if(fixed[resource])return fixed[resource];
  if(resource==='extension-catalog')return extensionAdminPermissions(parts[1],method);
  if(resource==='catalog-marketplaces')return method==='GET'?['catalog','selectors','marketplaces','discovery']:['marketplaces'];
  if(resource==='discovery')return parts[1]==='enrichment'?['discovery','catalog']:['discovery'];
- if(['marketplaces','mercadolivre'].includes(resource)&&!parts.includes('import'))return ['marketplaces'];
- if(resource==='mercadolivre')return ['catalog'];
  return [];
 }
 export function requireAdmin(req: Request,_res: Response,next: NextFunction) {
@@ -92,17 +80,10 @@ export function requireAdmin(req: Request,_res: Response,next: NextFunction) {
  const allowed=adminPermissions(parts,req.method),granted=req.user?.permissions??[];
  next(allowed.some(permission=>granted.includes(permission))?undefined:new HttpError(403,'Seu perfil não tem permissão para esta área administrativa.'));
 }
-export const domains: Record<string,string[]> = { amazon:['amazon.com.br'], mercadolivre:['mercadolivre.com.br','mercadolivre.com','meli.la'] };
-export function marketplaceURL(value: string, marketplace: string) {
-  let url: URL; try { url=new URL(value); } catch { throw new HttpError(400,'URL inválida.'); }
-  if(url.protocol!=='https:' || url.username || url.password || url.port || !domains[marketplace]?.some(d=>url.hostname===d || url.hostname.endsWith('.'+d))) throw new HttpError(400,'Use um endereço HTTPS oficial do marketplace.');
-  return value;
-}
-
 export const ADMIN_VERIFICATION_MS=15*60*1000;
 export function requireRecentAdmin(req:Request,_res:Response,next:NextFunction){
  const resource=req.path.split('/').find(Boolean)?.toLowerCase()??'';
- const sensitive=!['GET','HEAD','OPTIONS'].includes(req.method)&&['users','access-profiles','marketplaces','catalog-marketplaces','selectors','mercadolivre','offer-refresh','discovery','extension-catalog'].includes(resource);
+ const sensitive=!['GET','HEAD','OPTIONS'].includes(req.method)&&['users','access-profiles','catalog-marketplaces','selectors','discovery','extension-catalog'].includes(resource);
  if(sensitive&&(!req.adminVerifiedAt||Date.now()-req.adminVerifiedAt.getTime()>ADMIN_VERIFICATION_MS))return next(new HttpError(403,'Confirme sua conta Google para concluir esta operação.','ADMIN_REAUTH_REQUIRED'));
  next();
 }

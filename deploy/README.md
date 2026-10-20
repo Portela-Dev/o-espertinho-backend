@@ -57,9 +57,7 @@ O relatório LCOV vem dos testes reais do mesmo commit, via artefato do job vali
 5. Obtenha a chave pública SSH do host e confira a impressão digital pelo console da VPS (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`). Só depois cadastre a linha trusted em `VPS_KNOWN_HOSTS`. Em porta diferente de 22, o nome é `[host]:porta`. `ssh-keyscan` sozinho não autentica o host.
 6. Libere acesso SSH para o runner, aponte o DNS e configure Nginx/HTTPS para o frontend. Há exemplo de Nginx no repositório do frontend. As portas do banco, backend e extrator não são publicadas.
 
-O primeiro deploy cria a rede Docker externa compartilhada `espertinho-internal`. Ordem inicial recomendada: **jobs → backend → frontend**. Depois os deploys são independentes. O backend usa `http://espertinho-extractor:3010`; frontend/proxy SSR usa `http://espertinho-backend:3000`. O agendamento dos jobs continua no backend e não foi duplicado no extrator.
 
-As extrações manuais agora usam um serviço separado. Antes de habilitar testes de seletores/prévias, disponibilize `o-espertinho-extractor` na mesma rede e configure `MANUAL_EXTRACTOR_URL=http://espertinho-manual-extractor:3011` e `MANUAL_EXTRACTION_SERVICE_TOKEN` com o segredo desse novo serviço. Não reutilize a URL/token do job para essa configuração. A ausência de configuração manual desativa somente os fluxos manuais, sem mudar o job. O script `setup:manual-extractor` é destinado ao workspace local; em produção configure os valores no `.env` da VPS.
 
 O site usa um único domínio: Nginx encaminha ao frontend em `127.0.0.1:4200`; o frontend encaminha `/api` internamente preservando o caminho e a origem. Configure o domínio em `APP_ORIGIN`, `ALLOWED_HOSTS` e nas origens JavaScript do login Google. O proxy Nginx do exemplo sobrescreve os cabeçalhos encaminhados; o backend só confia em loopback e redes privadas na configuração de produção.
 
@@ -91,4 +89,8 @@ A migration `018_admin_reauthentication.sql` apenas adiciona campos às sessões
 
 Em produção (`NODE_ENV=production`), Swagger, assets e `/api/openapi.json` exigem sessão de administrador. Faça login pelo site antes de abrir `/api/docs/`.
 
-O processamento agendado e o consumo da fila de atualização de preços pertencem exclusivamente a `Portela-Dev/o-espertinho-job-update-price`. O backend mantém os endpoints administrativos de configuração, disparo e acompanhamento. `RUN_WORKER` controla apenas a manutenção interna da API. Nenhum extrator HTTP legado na porta 3010 é necessário.
+
+
+## Operação atual
+
+Somente backend/PostgreSQL e frontend são implantados na VPS. O navegador roda na extensão do administrador; não há extrator, job, porta de navegador ou segredo de serviço. RUN_WORKER controla somente manutenção interna sem navegador. Configure DATABASE_URL restrita e MIGRATION_DATABASE_URL separada; o provisionamento retira acesso às credenciais arquivadas. Prévia e teste de seletores aguardam solicitação processada pela extensão. Faça backup antes da migration 031; o arquivo histórico é preservado e nenhuma exclusão de dados é exigida.

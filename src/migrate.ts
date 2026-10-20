@@ -1,9 +1,8 @@
+import {resolve} from 'node:path';
 import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { resolve } from 'node:path';
-import { loadConfig } from './config.js';
-import { createDatabase, type Database } from './db.js';
+import type { Database } from './db.js';
 const digest=(sql:string)=>createHash('sha256').update(sql).digest('hex');
 export function migrationChecksums(sql:string){const lf=sql.replaceAll('\r\n','\n');return {canonical:digest(lf),compatible:[digest(sql),digest(lf),digest(lf.replaceAll('\n','\r\n'))]};}
 export async function migrate(db: Database) {
@@ -26,8 +25,4 @@ export async function migrate(db: Database) {
       console.log(`Migration aplicada: ${name}`);
     }
   } finally { await client.query('SELECT pg_advisory_unlock(73914201)'); client.release(); }
-}
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const db = createDatabase(loadConfig().DATABASE_URL);
-  try { await migrate(db); } finally { await db.end(); }
 }

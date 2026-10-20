@@ -1,10 +1,9 @@
-import {seedProduct} from './helpers.mjs';
+import {seedProduct,finishManualFixture} from './helpers.mjs';
 // Isolated integration-test server. Never imported by src/server.ts.
 // No authentication bypass exists in the production application.
 import express from 'express';
 import {randomUUID} from 'node:crypto';
 import {testDatabase,testConfig,identity,createApp} from './helpers.mjs';
-import {ProviderService} from '../dist/providers.js';
 if(process.env.E2E_TEST_SERVER!=='1')throw new Error('Use somente com E2E_TEST_SERVER=1.');
 const {db}=await testDatabase(),config={...testConfig(),APP_ORIGIN:process.env.E2E_APP_ORIGIN||'http://localhost:4200',MELI_REDIRECT_URI:'https://callback.example/api/admin/mercadolivre/callback',MELI_OAUTH_PKCE:'false'};
 const previews=[
@@ -28,8 +27,9 @@ for(const [id,title] of [['6ef4f2a1-912f-463a-a6e8-43c505976781','Link para prod
 await db.query(`INSERT INTO offer_price_history(offer_id,product_id,day,price_cents,observed_at)
  SELECT o.id,o.product_id,dates.day,o.price_cents+((g%9)-4)*100,(dates.day+time '15:00') AT TIME ZONE 'UTC'
  FROM offers o CROSS JOIN generate_series(0,364) g CROSS JOIN LATERAL (SELECT (clock_timestamp() AT TIME ZONE 'America/Sao_Paulo')::date-g AS day) dates WHERE o.status='published'`);
-const fakeProvider=new ProviderService(async(url)=>new Response(JSON.stringify(url.endsWith('/oauth/token')?{access_token:'e2e-meli-access',refresh_token:'e2e-meli-refresh',expires_in:21600}:url.includes('/auth/o2/')?{access_token:'e2e-only',expires_in:3600}:{searchResult:{items:[]}}),{status:200,headers:{'Content-Type':'application/json'}}));
 const app=express();app.get('/api/test-image/:name',(req,res)=>res.type('svg').send(`<svg xmlns="http://www.w3.org/2000/svg" width="240" height="190" viewBox="0 0 240 190">${images[req.params.name]||images.monitor}</svg>`));
-app.use(createApp(db,config,{extractor:{extract:async(url,market)=>({title:'Oferta de teste '+market.name,priceCents:32100,originalPriceCents:44750,description:'Descrição extraída em ambiente de teste.',category:'Tecnologia',conditions:'Confira as condições da oferta de teste.',externalId:'extracted-'+market.id,productUrl:url,images:[config.APP_ORIGIN+'/api/test-image/headphones'],specifications:[{name:'Cor',value:'Preto'}],warnings:['Dados fictícios usados somente em testes.'],missing:[],evidence:[{field:'title',selector:'#productTitle'}],collectedAt:new Date().toISOString()})},verifyGoogle:async t=>identity(t),providers:fakeProvider}));
+app.use(createApp(db,config,{verifyGoogle:async t=>identity(t)}));
+let fixtureBusy=false;
+const fixtureTimer=setInterval(async()=>{if(fixtureBusy)return;fixtureBusy=true;try{const runs=(await db.query("SELECT r.id,r.marketplace_id,m.name AS marketplace_name,i.payload FROM extension_catalog_runs r JOIN marketplaces m ON m.id=r.marketplace_id JOIN extension_catalog_items i ON i.run_id=r.id WHERE r.status='queued' AND r.step IN ('preview','selector_test')")).rows;for(const run of runs){const data={title:'Oferta de teste '+run.marketplace_name,priceCents:Number(/faixa-e2e-(\d+)/.exec(run.payload.url)?.[1]??32100),originalPriceCents:44750,description:'Descrição extraída em ambiente de teste.',category:'Tecnologia',conditions:'Confira as condições da oferta de teste.',externalId:'extracted-'+run.marketplace_id,productUrl:run.payload.url,images:[],specifications:[{name:'Cor',value:'Preto'}],warnings:['Dados fictícios usados somente em testes.'],missing:[],evidence:[{field:'title',selector:'#productTitle'}],collectedAt:new Date().toISOString()};await finishManualFixture(db,run.id,data);}}finally{fixtureBusy=false;}},250);
 const server=app.listen(Number(process.env.E2E_PORT||3000),'127.0.0.1',(error)=>{if(error){console.error('E2E server failed to bind');process.exit(1);}console.log('E2E_TEST_SERVER_READY');});
-for(const sig of ['SIGINT','SIGTERM'])process.on(sig,()=>server.close(async()=>{await db.end();process.exit();}));
+for(const sig of ['SIGINT','SIGTERM'])process.on(sig,()=>{clearInterval(fixtureTimer);server.close(async()=>{await db.end();process.exit();});});

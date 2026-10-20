@@ -18,18 +18,6 @@
     "db:down": "node scripts/project.mjs db:down",
     "db:migrate": "node scripts/project.mjs db:migrate",
     "db:config": "node scripts/project.mjs db:config",
-    "legacy:extractor:up": "node scripts/project.mjs legacy:extractor:up",
-    "legacy:extractor:down": "node scripts/project.mjs legacy:extractor:down",
-    "legacy:extractor:logs": "node scripts/project.mjs legacy:extractor:logs",
-    "legacy:price-job:up": "node scripts/project.mjs legacy:price-job:up",
-    "legacy:price-job:down": "node scripts/project.mjs legacy:price-job:down",
-    "legacy:price-job:logs": "node scripts/project.mjs legacy:price-job:logs",
-    "legacy:discovery-job:up": "node scripts/project.mjs legacy:discovery-job:up",
-    "legacy:discovery-job:down": "node scripts/project.mjs legacy:discovery-job:down",
-    "legacy:discovery-job:logs": "node scripts/project.mjs legacy:discovery-job:logs",
-    "legacy:enrichment-job:up": "node scripts/project.mjs legacy:enrichment-job:up",
-    "legacy:enrichment-job:down": "node scripts/project.mjs legacy:enrichment-job:down",
-    "legacy:enrichment-job:logs": "node scripts/project.mjs legacy:enrichment-job:logs",
     "extension:package": "npm --prefix o-espertinho-chrome-extension run package"
   }
 }

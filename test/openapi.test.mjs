@@ -10,14 +10,14 @@ after(async()=>db.end());
 test('OpenAPI é válido e descreve todas as rotas existentes',async()=>{
  await SwaggerParser.validate(structuredClone(spec));assert.equal(spec.openapi,'3.0.3');assert.equal(spec.servers[0].url,'/api');
  const ids=new Set();for(const path of Object.values(spec.paths))for(const op of Object.values(path)){assert.ok(!ids.has(op.operationId),'operationId duplicado');ids.add(op.operationId);}
- for(const file of ['app.ts','products.ts','scraping-admin.ts','mercadolivre-oauth.ts','offer-refresh.ts','price-history.ts','user-admin.ts','catalog-settings.ts','catalog-admin.ts','catalog-manual.ts','catalog-publication.ts']){
+ for(const file of ['app.ts','products.ts','scraping-admin.ts','price-history.ts','user-admin.ts','catalog-settings.ts','catalog-admin.ts','catalog-manual.ts','catalog-publication.ts']){
   const source=await readFile(new URL('../src/'+file,import.meta.url),'utf8');
   for(const match of source.matchAll(/app\.(get|post|put|patch|delete)\('([^']+)'/g)){
    const path=match[2].replace(/^\/api/,'').replace(/:([A-Za-z]+)/g,'{$1}');assert.ok(spec.paths[path]?.[match[1]],'Rota sem documentação: '+match[1]+' '+path);
   }
  }
  for(const path of ['/admin/amazon/import','/admin/mercadolivre/import'])assert.equal(spec.paths[path],undefined,'Importação específica removida');
- for(const path of ['/admin/mercadolivre/callback','/admin/mercadolivre/oauth/complete'])assert.ok(spec.paths[path].get);
+ for(const path of ['/admin/mercadolivre/callback','/admin/mercadolivre/oauth/complete'])assert.equal(spec.paths[path],undefined);
  assert.equal(spec.paths['/admin/link-imports/preview'].post.requestBody.content['application/json'].schema.required.includes('productId'),true);
 });
 
@@ -34,9 +34,9 @@ test('documentação descreve permissões, versões e rotas legadas sem expor co
  assert.ok(spec.paths['/admin/products'].post.security[0].SessionCookie);assert.ok(spec.paths['/admin/products'].post.security[0].XSRFToken);
  assert.match(spec.paths['/admin/products'].post.description,/admin/);
  assert.equal(spec.components.schemas.ProductUpdate.allOf[1].required[0],'expectedUpdatedAt');
- assert.equal(spec.paths['/admin/rules'].post.deprecated,true);assert.ok(spec.paths['/admin/rules'].post.responses['409']);
+ assert.equal(spec.paths['/admin/rules'],undefined);
  const text=JSON.stringify(spec);for(const forbidden of ['ENCRYPTION_KEY','DATABASE_URL','credentials_encrypted','cookie_encrypted'])assert.ok(!text.includes(forbidden));
- assert.equal(spec.components.schemas.ManualOffer.required.includes('productId'),true);
+
 });
 
 test('Swagger não altera exigências de login, origem ou token XSRF das operações reais',async()=>{

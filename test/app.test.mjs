@@ -56,18 +56,12 @@ test('filtros salvos persistem critérios, sem compartilhamento entre contas',as
   await b.mutate('delete','/api/me/filters/'+r.body.id);assert.equal((await a.get('/api/me/filters')).body.length,1);
   await a.mutate('delete','/api/me/filters/'+r.body.id);assert.equal((await a.get('/api/me/filters')).body.length,0);
 });
-test('admin salva chaves criptografadas e não as expõe na resposta ou auditoria',async()=>{
-  const secret='only-test-secret',r=await admin.mutate('put','/api/admin/marketplaces/amazon',{enabled:true,credentials:{clientId:'test-client',clientSecret:secret,version:'3.1',partnerTag:'test-20'}});assert.equal(r.status,200);
-  const row=(await db.query("SELECT credentials_encrypted FROM marketplaces WHERE id='amazon'")).rows[0];assert.ok(!row.credentials_encrypted.includes(secret));
-  const list=await admin.get('/api/admin/marketplaces');assert.ok(!JSON.stringify(list.body).includes(secret));assert.ok(!JSON.stringify(list.body).includes('credentials_encrypted'));assert.equal(list.body.find(m=>m.id==='amazon').configured,true);
-  assert.ok(!JSON.stringify((await admin.get('/api/admin/audit')).body).includes(secret));
-  await admin.mutate('put','/api/admin/marketplaces/amazon',{enabled:false,credentials:{}});assert.equal((await admin.get('/api/admin/marketplaces')).body.find(m=>m.id==='amazon').configured,true);
-});
+
 test('oferta manual passa por revisão, rejeita URL externa e gera métricas anônimas',async()=>{
   const body={productId:await seedProduct(db,{category:'Casa'}),marketplaceId:'mercadolivre',externalId:'MLB12345',title:'Produto autorizado',category:'Casa',productUrl:'https://www.mercadolivre.com.br/produto',affiliateUrl:'https://www.mercadolivre.com.br/sec/exemplo',imageUrl:null,priceCents:19990,originalPriceCents:29990,expiresAt:new Date(Date.now()+3600000).toISOString(),authorizedContent:true};
-  assert.equal((await admin.mutate('post','/api/admin/offers',{...body,affiliateUrl:'https://mercadolivre.com.br.evil.example/product'})).status,400);
-  const r=await admin.mutate('post','/api/admin/offers',body);assert.equal(r.status,201);const id=r.body.id;assert.equal((await a.get('/api/offers/'+id)).status,404);
-  assert.equal((await admin.mutate('post',`/api/admin/offers/${id}/review`,{action:'publish',expectedUpdatedAt:r.body.updated_at})).status,200);assert.equal((await a.get('/api/offers/'+id)).status,200);
+  assert.equal((await admin.mutate('post','/api/admin/offers',body)).status,404);
+  const id=await seedOffer(db,{marketplace:'mercadolivre',title:body.title,status:'pending',price:body.priceCents,affiliate:body.affiliateUrl,productId:body.productId});const r={body:(await db.query('SELECT * FROM offers WHERE id=$1',[id])).rows[0]};assert.equal((await a.get('/api/offers/'+id)).status,404);
+  assert.equal((await admin.mutate('post',`/api/admin/offers/${id}/review`,{action:'publish',expectedUpdatedAt:r.body.updated_at.toISOString()})).status,200);assert.equal((await a.get('/api/offers/'+id)).status,200);
   assert.equal((await a.mutate('post',`/api/offers/${id}/click`,{placement:'detail',userId:'ignored'})).status,200);
   const click=(await db.query('SELECT * FROM click_events WHERE offer_id=$1',[id])).rows[0];assert.ok(!('user_id'in click));assert.ok(!('session_id'in click));
   const stats=await admin.get('/api/admin/stats');assert.equal(stats.status,200);assert.equal(stats.body.totalClicks,1);
@@ -76,24 +70,15 @@ test('oferta manual passa por revisão, rejeita URL externa e gera métricas an�
   const current=(await db.query('SELECT * FROM offers WHERE id=$1',[id])).rows[0];assert.equal(current.status,'pending');assert.equal(current.price_cents,18990);
   assert.equal((await admin.mutate('post',`/api/admin/offers/${id}/review`,{action:'publish',expectedUpdatedAt:current.updated_at.toISOString()})).status,200);
 });
-test('Amazon não permite cadastrar preços manualmente; Mercado Livre não promete busca automática',async()=>{
-  const r=await admin.mutate('post','/api/admin/rules',{marketplaceId:'mercadolivre',name:'Busca',keywords:'monitor',category:'Tecnologia'});assert.equal(r.status,409);
-  const manual=await admin.mutate('post','/api/admin/offers',{marketplaceId:'amazon',externalId:'B012345678',title:'Manual',category:'Casa',productUrl:'https://www.amazon.com.br/dp/B012345678',affiliateUrl:'https://www.amazon.com.br/dp/B012345678?tag=test-20',priceCents:1000,expiresAt:new Date(Date.now()+3600000).toISOString(),authorizedContent:true});assert.equal(manual.status,400);
-});
-test('buscas não importam sem escolha explícita de produto pelo admin',async()=>{
- const created=await admin.mutate('post','/api/admin/rules',{marketplaceId:'amazon',name:'Busca',keywords:'monitor',category:'Tecnologia'});assert.equal(created.status,409);
- await seedOffer(db,{externalId:'B012345679',source:'api',status:'pending',title:'Oferta da API'});
+
+
+test('publicação exige revisar a versão atual sem consultar conector',async()=>{
+ const id=await seedOffer(db,{source:'api',status:'pending'});const row=(await db.query('SELECT * FROM offers WHERE id=$1',[id])).rows[0];
+ assert.equal((await admin.mutate('post',`/api/admin/offers/${id}/review`,{action:'publish',expectedUpdatedAt:new Date(0).toISOString()})).status,409);
+ assert.equal((await admin.mutate('post',`/api/admin/offers/${id}/review`,{action:'publish',expectedUpdatedAt:row.updated_at.toISOString()})).status,200);
+ assert.equal((await db.query('SELECT price_cents FROM offers WHERE id=$1',[id])).rows[0].price_cents,row.price_cents);
 });
 
-test('publicação bloqueia mudanças na API e exige revisar a versão atual',async()=>{
-  const fake={refresh:async()=>({externalId:'B012345679',title:'Oferta da API',description:'',imageUrl:null,productUrl:'https://www.amazon.com.br/dp/B012345679?tag=test-20',affiliateUrl:'https://www.amazon.com.br/dp/B012345679?tag=test-20',priceCents:15000,originalPriceCents:20000,conditions:'Condições oficiais',expiresAt:new Date(Date.now()+3600000)})};
-  const isolated=createApp(db,config,{verifyGoogle:async t=>identity(t),providers:fake}),c=client(isolated);await c.login('admin');
-  let row=(await db.query("SELECT * FROM offers WHERE external_id='B012345679'")).rows[0];
-  assert.equal((await c.mutate('post',`/api/admin/offers/${row.id}/review`,{action:'publish',expectedUpdatedAt:row.updated_at.toISOString()})).status,409);
-  row=(await db.query('SELECT * FROM offers WHERE id=$1',[row.id])).rows[0];assert.equal(row.status,'pending');assert.equal(row.price_cents,15000);
-  assert.equal((await c.mutate('post',`/api/admin/offers/${row.id}/review`,{action:'publish',expectedUpdatedAt:row.updated_at.toISOString()})).status,200);
-  assert.equal((await c.get('/api/offers/'+row.id)).body.price_cents,15000);
-});
 test('excluir conta remove dados pessoais e invalida a sessão',async()=>{
   const c=client(app);await c.login('delete-me');await c.mutate('put','/api/me/favorites/'+offer);await c.mutate('post','/api/me/collections',{name:'Privado'});
   assert.equal((await c.mutate('delete','/api/me/account')).status,200);assert.equal((await c.get('/api/me/collections')).status,401);assert.equal((await db.query("SELECT id FROM users WHERE email='delete-me@gmail.com'")).rows.length,0);

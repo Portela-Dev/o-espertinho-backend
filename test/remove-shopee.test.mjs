@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {testDatabase,seedOffer,testConfig,client,createApp} from './helpers.mjs';
-import {startOfferRefresh} from '../dist/offer-refresh.js';
 
 test('migration remove marketplace retirado e dependências, preserva outras lojas, produtos e fila mista',async t=>{
  const {db,pg}=await testDatabase({through:'011_offer_refresh_milliseconds.sql'});t.after(()=>db.end());
@@ -15,7 +14,7 @@ test('migration remove marketplace retirado e dependências, preserva outras loj
  await db.query("INSERT INTO click_events(id,offer_id,marketplace_id,placement) VALUES($1,$2,'shopee','detail')",[randomUUID(),retired]);
  await db.query("INSERT INTO saved_filters(id,user_id,name,filters) VALUES($1,$2,'Filtro','{\"marketplace\":\"shopee\"}')",[randomUUID(),admin]);
  await db.query("INSERT INTO audit_logs(id,action,entity_id) VALUES($1,'offer.created',$2)",[randomUUID(),retired]);
- const run=await startOfferRefresh(db,admin);await db.query("UPDATE offer_refresh_items SET status='done',outcome='updated' WHERE offer_id=$1",[retired]);
+ const run={id:randomUUID()};await db.query("INSERT INTO offer_refresh_runs(id,trigger,created_by,total) VALUES($1,'manual',$2,2)",[run.id,admin]);for(const id of [retired,kept])await db.query('INSERT INTO offer_refresh_items(id,run_id,offer_id,marketplace_id,expected_updated_at) SELECT $1,$2,id,marketplace_id,updated_at FROM offers WHERE id=$3',[randomUUID(),run.id,id]);await db.query("UPDATE offer_refresh_items SET status='done',outcome='updated' WHERE offer_id=$1",[retired]);
  await pg.exec(await readFile(new URL('../migrations/012_remove_shopee.sql',import.meta.url),'utf8'));
  assert.equal((await db.query("SELECT count(*)::int n FROM marketplaces WHERE id='shopee'")).rows[0].n,0);
  assert.equal((await db.query('SELECT count(*)::int n FROM offers')).rows[0].n,1);assert.equal((await db.query('SELECT id FROM offers')).rows[0].id,kept);

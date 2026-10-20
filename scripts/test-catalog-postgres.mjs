@@ -32,9 +32,9 @@ try {
     if (!ready)
         throw new Error('PostgreSQL de teste não ficou pronto.');
     const port = docker(['port', name, '5432/tcp']).split(':').at(-1), url = `postgresql://catalog_test_admin:${password}@127.0.0.1:${port}/${database}`;
-    const result = spawnSync(process.execPath, ['--test', 'test/catalog-postgres.integration.test.mjs'], {
+    const result = spawnSync(process.execPath, ['--test', 'test/catalog-postgres.integration.test.mjs', 'test/database-security.integration.test.mjs'], {
         stdio: 'inherit', windowsHide: true, env: {
-            ...process.env, CATALOG_TEST_PG_URL: url, CATALOG_TEST_CONTAINER: name
+            ...process.env, CATALOG_TEST_PG_URL: url, CATALOG_TEST_CONTAINER: name, TEST_DATABASE_ADMIN_URL: url
         }
     });
     if (result.error)

@@ -7,7 +7,7 @@ import { HttpError } from './security.js';
 import { audit } from './offers.js';
 import { pagedQuery } from './pagination.js';
 import { allowStep, startCatalogInput, actionInput, uuid, type CatalogActor } from './catalog-contracts.js';
-import { getCatalogSettings, legacyBusy } from './catalog-settings.js';
+import { getCatalogSettings } from './catalog-settings.js';
 type Query = Pick<Database, 'query'>;
 export async function catalogTransaction<T>(db: Database, work: (c: Query) => Promise<T>): Promise<T> {
     const c = await db.connect();
@@ -47,7 +47,7 @@ export async function startCatalogRun(db: Database, actor: CatalogActor, input: 
     const v = startCatalogInput.parse(input);
     allowStep(actor, v.step);
     return catalogTransaction(db, async (c) => {
-        const market = (await c.query('SELECT * FROM marketplaces WHERE id=$1 FOR UPDATE', [v.marketplaceId])).rows[0];
+        const market = (await c.query('SELECT id,name,website_url,logo_url,allowed_hosts,scraping_enabled,url_normalization_rules,catalog_executor,updated_at FROM marketplaces WHERE id=$1 FOR UPDATE', [v.marketplaceId])).rows[0];
         if (!market?.scraping_enabled || market.catalog_executor !== 'extension')
             throw new HttpError(409, 'Ative o executor da extensão nas configurações deste marketplace.');
         const prior = (await c.query('SELECT * FROM extension_catalog_runs WHERE created_by=$1 AND request_key=$2', [actor.id, v.requestKey])).rows[0];
@@ -58,7 +58,7 @@ export async function startCatalogRun(db: Database, actor: CatalogActor, input: 
             return runView(c, prior.id);
         }
         await expireRuns(c);
-        if (await legacyBusy(c, market.id) || (await c.query("SELECT id FROM extension_catalog_runs WHERE marketplace_id=$1 AND status NOT IN ('completed','failed','cancelled')", [market.id])).rows.length)
+        if ((await c.query("SELECT id FROM extension_catalog_runs WHERE marketplace_id=$1 AND status NOT IN ('completed','failed','cancelled')", [market.id])).rows.length)
             throw new HttpError(409, 'Este marketplace já possui processamento em andamento.');
         const settings = await getCatalogSettings(c, market.id);
         if (settings.config.recipe)
