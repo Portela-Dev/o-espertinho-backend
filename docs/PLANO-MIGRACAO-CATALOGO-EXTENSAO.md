@@ -386,3 +386,6 @@ Ao concluir uma fase, registrar data, repositórios/commits/PRs, migrations nova
 - Fase 0: inventário registrado em 1-backend/docs/CATALOG-MIGRATION-INVENTORY.md. Backup/restauração em PGlite descartável aprovado (1 teste). Branches feat/catalog-extension-pipeline em backend, frontend e extensão; PRs anteriores encerradas. Alterações locais da POC remota preservadas. O plano é versionado também em 1-backend/docs porque a raiz não possui Git.
 - Ajuste de execução: o corte operacional e a remoção definitiva dependem dos aceites reais. Não marcar homologação de login/CAPTCHA em marketplace como concluída com base em simulações. Nenhum banco pessoal foi alterado.
 
+
+- Fase 1 (implementação base): autenticação separada da POC; migration 029; permissões por etapa; execuções/itens persistidos, snapshot, reserva com expiração, heartbeat, idempotência de início, pausa humana, cancelamento e exclusão por marketplace. Build e 4 testes isolados aprovados. OpenAPI consolidado e concorrência real PostgreSQL serão verificados na homologação; não há corte operacional neste commit.
+

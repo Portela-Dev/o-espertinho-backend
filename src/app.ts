@@ -1,9 +1,11 @@
+import {registerCatalogRuns} from './catalog-runs.js';
+import {registerCatalogSettings} from './catalog-settings.js';
 import {registerEnrichmentAdmin} from './enrichment-admin.js';
 import {registerDiscoveryRuns} from './discovery-runs.js';
 import {registerDiscoveryAdmin} from './discovery-admin.js';
 import {pagedQuery,wantsPage} from './pagination.js';
 import express from 'express';
-import {registerExtensionMock} from './extension-mock.js';
+import {registerExtension} from './extension-auth.js';
 import {registerUserAdmin} from './user-admin.js';
 import {registerPriceHistory} from './price-history.js';
 import {registerOfferRefreshAdmin} from './offer-refresh.js';
@@ -66,7 +68,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     res.json({user:req.user??null,autoSignInAllowed:req.cookies[SIGNED_OUT_COOKIE]!=='1'});
   });
   registerMeliCallback(app,config);
-  registerExtensionMock(app,db,config,options.sessionProofTransport);
+  registerExtension(app,db,config,(router,account)=>registerCatalogRuns(router,db,account));
   app.use('/api',csrfMiddleware(config));
   app.post('/api/auth/google',rateLimit({windowMs:60000,limit:15,skip:()=>config.NODE_ENV==='test',message:{error:'Muitas tentativas de login. Aguarde.'}}),async(req,res)=>{
     if(!config.GOOGLE_CLIENT_ID) throw new HttpError(503,'Login Google não configurado. Defina GOOGLE_CLIENT_ID no backend.');
@@ -181,6 +183,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
   app.use('/api/admin',requireUser,requireAdmin,requireRecentAdmin,(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
   registerUserAdmin(app,db);
   registerProductAdmin(app,db);
+  registerCatalogSettings(app,db);
   registerOfferRefreshAdmin(app,db);
   registerDiscoveryAdmin(app,db);registerDiscoveryRuns(app,db);registerEnrichmentAdmin(app,db);
   registerScrapingAdmin(app,db,options.extractor??(config.MANUAL_EXTRACTOR_URL?new ManualOfferExtractor(config.MANUAL_EXTRACTOR_URL,config.MANUAL_EXTRACTION_SERVICE_TOKEN):{extract:async()=>{throw new HttpError(503,'Configure MANUAL_EXTRACTOR_URL e MANUAL_EXTRACTION_SERVICE_TOKEN e inicie o novo extrator manual.');}}));

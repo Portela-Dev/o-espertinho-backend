@@ -81,6 +81,7 @@ export function requireAdmin(req: Request,_res: Response,next: NextFunction) {
  else if(resource==='discovery')allowed=p[1]==='enrichment'?['discovery','catalog']:['discovery'];
  else if(resource==='selectors')allowed=['selectors'];
  else if(['marketplaces','mercadolivre'].includes(resource)&&!p.includes('import'))allowed=['marketplaces'];
+ else if(resource==='extension-catalog')allowed=method==='GET'?['catalog','discovery','updates','marketplaces']:['marketplaces'];
  else if(resource==='catalog-marketplaces')allowed=method==='GET'?['catalog','selectors','marketplaces','discovery']:['marketplaces'];
  else if(['category-tree','category-options'].includes(resource))allowed=['catalog'];
  else if(['products','offers','link-imports','amazon','mercadolivre'].includes(resource))allowed=['catalog'];
@@ -97,7 +98,7 @@ export function marketplaceURL(value: string, marketplace: string) {
 export const ADMIN_VERIFICATION_MS=15*60*1000;
 export function requireRecentAdmin(req:Request,_res:Response,next:NextFunction){
  const resource=req.path.split('/').find(Boolean)?.toLowerCase()??'';
- const sensitive=!['GET','HEAD','OPTIONS'].includes(req.method)&&['users','access-profiles','marketplaces','catalog-marketplaces','selectors','mercadolivre','offer-refresh','discovery'].includes(resource);
+ const sensitive=!['GET','HEAD','OPTIONS'].includes(req.method)&&['users','access-profiles','marketplaces','catalog-marketplaces','selectors','mercadolivre','offer-refresh','discovery','extension-catalog'].includes(resource);
  if(sensitive&&(!req.adminVerifiedAt||Date.now()-req.adminVerifiedAt.getTime()>ADMIN_VERIFICATION_MS))return next(new HttpError(403,'Confirme sua conta Google para concluir esta operação.','ADMIN_REAUTH_REQUIRED'));
  next();
 }
