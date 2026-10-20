@@ -11,11 +11,13 @@ test('enriquecimento persiste árvore e observação sem confirmar mapeamento ou
  await f.db.query("INSERT INTO category_mappings(id,marketplace_id,source_path,source_key,category_id) VALUES($1,'amazon',$2,$3,$4)",[randomUUID(),path,categoryKey(path),category]);
  const run=(await f.call('post','/catalog/runs',{marketplaceId:'amazon',step:'enrich',requestKey:randomUUID()})).body;
  const item=(await f.call('post',`/catalog/runs/${run.id}/claim`,{})).body.item;
+ assert.equal(item.payload.url,'https://shop.example.com/p');assert.equal(item.payload.originalUrl,item.payload.url);
  const result=await f.call('post',`/catalog/runs/${run.id}/results`,{itemId:item.id,leaseToken:item.lease_token,outcome:'success',data,sourceCategoryPath:path});
  assert.equal(result.status,200,JSON.stringify(result.body));
  const link=(await f.db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];assert.deepEqual(link.source_category_path,path);assert.equal(link.confirmed_category_id,null);assert.equal(link.product_id,null);assert.equal(link.enrichment_data.productUrl,link.url);
  const review=await f.browser.get('/api/admin/discovery/enrichment/review');assert.equal(review.body.items[0].suggested_category_id,category);assert.equal(review.body.items[0].confirmed_category_id,null);
  assert.equal(link.enrichment_data.availability,'available');
+ assert.equal(link.affiliate_url,'https://shop.example.com/p?affiliate=yes');
 });
 
 test('indisponibilidade explícita conclui enriquecimento sem falha e persiste estado para revisão',async t=>{

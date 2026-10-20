@@ -74,7 +74,7 @@ export async function startCatalogRun(db: Database, actor: CatalogActor, input: 
             items = (await c.query(`SELECT s.id AS target_id,jsonb_build_object('url',s.url,'config',p.config,'sourceId',s.id,'sourceVersion',s.version,'profileVersion',p.version) AS payload,s.version::text AS expected_version
    FROM discovery_sources s JOIN discovery_profiles p ON p.id=s.profile_id WHERE s.marketplace_id=$1 AND s.enabled AND s.paused_at IS NULL ORDER BY s.id LIMIT $2`, [market.id, v.limit])).rows;
         if (['convert', 'enrich'].includes(v.step))
-            items = (await c.query(`SELECT id AS target_id,jsonb_build_object('url',CASE WHEN $2='convert' THEN url ELSE affiliate_url END,'originalUrl',url,'title',COALESCE(enrichment_data->>'title',url)) AS payload,enrichment_version::text AS expected_version
+            items = (await c.query(`SELECT id AS target_id,jsonb_build_object('url',url,'originalUrl',url,'title',COALESCE(enrichment_data->>'title',url)) AS payload,enrichment_version::text AS expected_version
    FROM discovery_links WHERE marketplace_id=$1 AND status='pending' AND published_offer_id IS NULL AND
    (($2='convert' AND affiliate_url IS NULL) OR ($2='enrich' AND affiliate_url IS NOT NULL AND (extraction_status='pending' OR ($3 AND extraction_status='failed')))) ORDER BY first_seen_at,id LIMIT $4`, [market.id, v.step, v.retryFailed, v.limit])).rows;
         if (v.step === 'prices')
