@@ -12,10 +12,11 @@ test('conversão precede categoria/produto e preserva URL de afiliado sem export
  await f.db.query("UPDATE marketplaces SET catalog_executor='extension',scraping_enabled=true,allowed_hosts=$1 WHERE id='amazon'",[market.allowed_hosts]);
  await f.db.query("INSERT INTO extension_catalog_settings(marketplace_id,config) VALUES('amazon',$1)",[JSON.stringify(catalogSettings.parse({recipe}))]);
  await f.db.query("INSERT INTO discovery_links(id,marketplace_id,url) VALUES($1,'amazon','https://shop.example.com/p')",[id]);
+ await f.db.query("UPDATE discovery_links SET extraction_status='completed',enrichment_data=$2 WHERE id=$1",[id,JSON.stringify({title:'Dados anteriores à conversão'})]);
  const run=(await f.call('post','/catalog/runs',{marketplaceId:'amazon',step:'convert',requestKey:randomUUID()})).body;
  const claim=(await f.call('post',`/catalog/runs/${run.id}/claim`,{})).body.item;
  const converted=await f.call('post',`/catalog/runs/${run.id}/results`,{itemId:claim.id,leaseToken:claim.lease_token,outcome:'success',affiliateUrl:'https://links.example.com/p?affiliate=ours#target'});
  assert.equal(converted.status,200,JSON.stringify(converted.body));
- const link=(await f.db.query('SELECT url,affiliate_url,confirmed_category_id,product_id FROM discovery_links WHERE id=$1',[id])).rows[0];
- assert.equal(link.url,'https://shop.example.com/p');assert.equal(link.affiliate_url,'https://links.example.com/p?affiliate=ours#target');assert.equal(link.product_id,null);assert.equal(link.confirmed_category_id,null);
+ const link=(await f.db.query('SELECT url,affiliate_url,confirmed_category_id,product_id,extraction_status,enrichment_data FROM discovery_links WHERE id=$1',[id])).rows[0];
+ assert.equal(link.extraction_status,'pending');assert.equal(link.enrichment_data.title,'Dados anteriores à conversão');assert.equal(link.url,'https://shop.example.com/p');assert.equal(link.affiliate_url,'https://links.example.com/p?affiliate=ours#target');assert.equal(link.product_id,null);assert.equal(link.confirmed_category_id,null);
 });

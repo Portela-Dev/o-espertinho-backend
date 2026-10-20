@@ -69,7 +69,7 @@ async function convertResult({ c, run, item, market, v }: ResultContext) {
     marketUrl(v.affiliateUrl, market.allowed_hosts);
     if (!run.snapshot.settings.recipe.affiliateOrigins.includes(new URL(v.affiliateUrl).origin))
         throw new HttpError(400, 'Domínio de afiliado não autorizado.');
-    const updated = await c.query("UPDATE discovery_links SET affiliate_url=$2,converted_at=clock_timestamp(),enrichment_version=enrichment_version+1 WHERE id=$1 AND status='pending' AND enrichment_version::text=$3 AND published_offer_id IS NULL RETURNING id", [item.target_id, v.affiliateUrl, item.expected_version]);
+    const updated = await c.query("UPDATE discovery_links SET affiliate_url=$2,converted_at=clock_timestamp(),extraction_status='pending',extraction_error=NULL,enrichment_version=enrichment_version+1 WHERE id=$1 AND status='pending' AND enrichment_version::text=$3 AND published_offer_id IS NULL RETURNING id", [item.target_id, v.affiliateUrl, item.expected_version]);
     if (!updated.rows.length)
         throw new HttpError(409, 'O candidato foi alterado ou arquivado.');
     return 'completed';
