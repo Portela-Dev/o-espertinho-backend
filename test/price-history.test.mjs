@@ -46,10 +46,14 @@ test('reassociação não move o histórico antigo para outro produto; exclusão
  await db.query('DELETE FROM offers WHERE id=$1',[a]);assert.equal((await db.query('SELECT * FROM offer_price_history WHERE offer_id=$1',[a])).rows.length,0);
 });
 
-test('migration usa somente a última observação; retenção pertence ao job independente',async()=>{
+test('migration usa somente a última observação; manutenção atual retém 365 dias',async()=>{
  const {db:old,pg}=await testDatabase({through:'015_zz'});try{const id=await seedOffer(old),pending=await seedOffer(old,{status:'pending'});await pg.exec(await readFile(new URL('../migrations/016_daily_price_history.sql',import.meta.url),'utf8'));assert.equal((await old.query('SELECT * FROM offer_price_history WHERE offer_id=$1',[id])).rows.length,1);assert.equal((await old.query('SELECT * FROM offer_price_history WHERE offer_id=$1',[pending])).rows.length,0);
  const p=(await old.query('SELECT product_id FROM offers WHERE id=$1',[id])).rows[0].product_id,now=(await old.query("SELECT to_char(clock_timestamp() AT TIME ZONE 'America/Sao_Paulo','YYYY-MM-DD') AS day")).rows[0].day;
- await recordDailyPrice(old,id,p,10000,offset(now,-365)+'T15:00:00Z');await recordDailyPrice(old,id,p,11000,offset(now,-364)+'T15:00:00Z');await workerTick(old,config,{});assert.equal((await old.query('SELECT * FROM offer_price_history WHERE offer_id=$1',[id])).rows.length,3);
+ await recordDailyPrice(old,id,p,10000,offset(now,-365)+'T15:00:00Z');await recordDailyPrice(old,id,p,11000,offset(now,-364)+'T15:00:00Z');assert.equal((await old.query('SELECT * FROM offer_price_history WHERE offer_id=$1',[id])).rows.length,3);
+ // Maintenance runs against the current schema, after all migrations, never the historical fixture.
+ const current=await seedOffer(db),product=(await db.query('SELECT product_id FROM offers WHERE id=$1',[current])).rows[0].product_id;
+ await recordDailyPrice(db,current,product,10000,offset(now,-365)+'T15:00:00Z');await recordDailyPrice(db,current,product,11000,offset(now,-364)+'T15:00:00Z');await workerTick(db,config,{});
+ const retained=(await db.query('SELECT price_cents FROM offer_price_history WHERE offer_id=$1',[current])).rows;assert.deepEqual(retained.map(r=>r.price_cents),[11000]);
  }finally{await old.end();}
 });
 

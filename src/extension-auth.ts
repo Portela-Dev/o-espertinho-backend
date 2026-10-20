@@ -66,7 +66,7 @@ export function registerExtension(
   router.use(
     rateLimit({
       windowMs: 60000,
-      limit: 120,
+      limit: 240,
       skip: () => config.NODE_ENV === "test",
       message: { error: "Muitas solicitações da extensão. Aguarde um minuto." },
     }),
