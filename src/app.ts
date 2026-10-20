@@ -1,3 +1,4 @@
+import {registerCatalogManual} from './catalog-manual.js';
 import {registerCatalogPublication} from './catalog-publication.js';
 import {registerCatalogResults} from './catalog-results.js';
 import {registerCatalogRuns} from './catalog-runs.js';
@@ -185,7 +186,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
   app.use('/api/admin',requireUser,requireAdmin,requireRecentAdmin,(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
   registerUserAdmin(app,db);
   registerProductAdmin(app,db);
-  registerCatalogSettings(app,db);
+  registerCatalogSettings(app,db);registerCatalogManual(app,db);
   registerOfferRefreshAdmin(app,db);
   registerDiscoveryAdmin(app,db);registerDiscoveryRuns(app,db);registerEnrichmentAdmin(app,db);registerCatalogPublication(app,db);
   registerScrapingAdmin(app,db,options.extractor??(config.MANUAL_EXTRACTOR_URL?new ManualOfferExtractor(config.MANUAL_EXTRACTOR_URL,config.MANUAL_EXTRACTION_SERVICE_TOKEN):{extract:async()=>{throw new HttpError(503,'Configure MANUAL_EXTRACTOR_URL e MANUAL_EXTRACTION_SERVICE_TOKEN e inicie o novo extrator manual.');}}));

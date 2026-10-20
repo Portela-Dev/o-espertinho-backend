@@ -1,3 +1,4 @@
+import {requestManualExtraction} from './catalog-manual.js';
 import {urlNormalizationRulesSchema,normalizeProductUrl} from './url-normalization.js';
 import {pagedQuery} from './pagination.js';
 import {productUrl} from './product-url.js';
@@ -24,7 +25,7 @@ export function registerScrapingAdmin(app:Express,db:Database,extractor:OfferExt
  });
  app.delete('/api/admin/catalog-marketplaces/:id',async(req,res)=>{const marketId=id.parse(req.params.id);if(['amazon','mercadolivre'].includes(marketId))throw new HttpError(409,'Os marketplaces integrados podem ser desativados, mas não excluídos.');try{await db.query('DELETE FROM marketplaces WHERE id=$1',[marketId]);}catch(e){if((e as any)?.code==='23503')throw new HttpError(409,'Este marketplace possui ofertas ou histórico. Desative-o em vez de excluir.');throw e;}await audit(db,req.user!.id,'catalog_marketplace.deleted',marketId);res.json({ok:true});});
  app.get('/api/admin/selectors/:id',async(req,res)=>{const marketId=id.parse(req.params.id);if(!(await db.query('SELECT id FROM marketplaces WHERE id=$1',[marketId])).rows.length)throw new HttpError(404,'Marketplace não encontrado.');res.json((await db.query('SELECT * FROM scraping_profiles WHERE marketplace_id=$1',[marketId])).rows[0]??{marketplace_id:marketId,rules:[],wait_timeout_ms:15000,validity_minutes:360,version:0});});
- app.post('/api/admin/selectors/:id/test',async(req,res)=>{const marketId=id.parse(req.params.id),v=z.object({url:z.url().max(10000),profile:profileSchema}).parse(req.body);const market=(await db.query('SELECT * FROM marketplaces WHERE id=$1',[marketId])).rows[0];if(!market)throw new HttpError(404,'Marketplace não encontrado.');marketUrl(v.url,market.allowed_hosts);const data=await extractor.extract(v.url,market,{rules:v.profile.rules,version:v.profile.version,wait_timeout_ms:v.profile.waitTimeoutMs,validity_minutes:v.profile.validityMinutes});res.json({data,marketplaceName:market.name,affiliateUrl:v.url,isTest:true,canConfirm:false});});
+ app.post('/api/admin/selectors/:id/test',async(req,res)=>{const marketId=id.parse(req.params.id),v=z.object({url:z.url().max(10000),profile:profileSchema}).parse(req.body);const market=(await db.query('SELECT * FROM marketplaces WHERE id=$1',[marketId])).rows[0];if(!market)throw new HttpError(404,'Marketplace não encontrado.');marketUrl(v.url,market.allowed_hosts);if(market.catalog_executor==='extension'){res.status(202).json(await requestManualExtraction(db,req.user!.id,marketId,v.url,{rules:v.profile.rules,version:v.profile.version,wait_timeout_ms:v.profile.waitTimeoutMs,validity_minutes:v.profile.validityMinutes}));return;}const data=await extractor.extract(v.url,market,{rules:v.profile.rules,version:v.profile.version,wait_timeout_ms:v.profile.waitTimeoutMs,validity_minutes:v.profile.validityMinutes});res.json({data,marketplaceName:market.name,affiliateUrl:v.url,isTest:true,canConfirm:false});});
  app.put('/api/admin/selectors/:id',async(req,res)=>{
   const marketId=id.parse(req.params.id),v=profileSchema.parse(req.body);
   if(!(await db.query('SELECT id FROM marketplaces WHERE id=$1',[marketId])).rows.length)throw new HttpError(404,'Marketplace não encontrado.');
@@ -37,6 +38,7 @@ export function registerScrapingAdmin(app:Express,db:Database,extractor:OfferExt
   const market=(await db.query('SELECT * FROM marketplaces WHERE id=$1',[v.marketplaceId])).rows[0];if(!market?.scraping_enabled)throw new HttpError(409,'Ative a extração no cadastro desse marketplace.');
   marketUrl(v.url,market.allowed_hosts);
   const profile=(await db.query('SELECT * FROM scraping_profiles WHERE marketplace_id=$1',[v.marketplaceId])).rows[0];if(!profile?.rules?.length)throw new HttpError(409,'Cadastre os seletores desse marketplace antes de extrair.');
+  if(market.catalog_executor==='extension'){res.status(202).json(await requestManualExtraction(db,req.user!.id,v.marketplaceId,v.url,profile,{productId:product.id,sellerName:v.sellerName}));return;}
   const data=await extractor.extract(v.url,market,profile);const classification=await resolveClassification(db,product.category,product.subcategory);Object.assign(data,classification,{sellerName:v.sellerName});
   // URLs are validated again even for injected extractors used by tests.
   marketUrl(data.productUrl,market.allowed_hosts);

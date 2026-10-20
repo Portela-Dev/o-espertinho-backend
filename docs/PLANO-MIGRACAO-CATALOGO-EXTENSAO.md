@@ -410,3 +410,6 @@ Ao concluir uma fase, registrar data, repositórios/commits/PRs, migrations nova
 
 - Fase 8 e integração do coordenador: quatro botões definitivos, janela exclusiva, login preservado ao migrar storage, progresso, pausa/cancelamento, retomada paginada, heartbeat e buffer de resultado sem sessão. A interface de POC foi substituída (módulos antigos ainda serão removidos na fase 11). Testes do coordenador/background e preço/histórico diário aprovados; TypeScript/HTML aprovados. Retomada explícita invalida leases anteriores antes de reextrair, evitando reserva vencida travada. Apenas o histórico da última observação confirmada é alterado; falhas preservam a vitrine.
 
+
+- Fase 9 (implementação): cadastro manual e testes de seletores podem gerar solicitação assíncrona na extensão quando o marketplace usa o novo executor. Frontend acompanha, informa ID/como abrir e permite cancelar; backend verifica propriedade, produto/versionamento e cria prévia idempotente. Teste de ponta a ponta na API (solicitar → reservar → extrair → prévia → confirmar) e Angular typecheck aprovados, sem extrator. Caminho legado permanece apenas enquanto o executor estiver legacy.
+
