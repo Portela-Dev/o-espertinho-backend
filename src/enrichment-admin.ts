@@ -6,6 +6,7 @@ import {HttpError} from './security.js';
 import {audit} from './offers.js';
 import {pagedQuery} from './pagination.js';
 import {requiredCategory} from './classifications.js';
+import {marketUrl} from './scraping.js';
 const uuid=z.uuid();
 const marketId=z.string().regex(/^[a-z][a-z0-9_-]{1,39}$/);
 const settings=z.strictObject({requestIntervalMs:z.number().int().min(100).max(600000),categorySeparator:z.string().max(10)});
@@ -27,7 +28,7 @@ const runView=`SELECT r.id,r.marketplace_id,m.name AS marketplace_name,r.status,
  (SELECT count(*)::int FROM enrichment_items i WHERE i.run_id=r.id AND i.status IN ('skipped','cancelled')) AS skipped
  FROM enrichment_runs r JOIN marketplaces m ON m.id=r.marketplace_id`;
 async function transaction<T>(db:Database,work:(c:Pick<Database,'query'>)=>Promise<T>){const c=await db.connect();try{await c.query('BEGIN');const result=await work(c);await c.query('COMMIT');return result;}catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}}
-export async function startEnrichment(db:Database,marketplaceId:string,actor:string,retryFailed=false,limit=100,selection?:{linkId?:string;runId?:string}){
+export async function startEnrichment(db:Database,marketplaceId:string,actor:string,retryFailed=false,limit=100,selection?:{linkId?:string;runId?:string;linkIds?:string[];navigationUrls?:Record<string,string>}){
  return transaction(db,async c=>{
   const market=(await c.query('SELECT id,allowed_hosts,scraping_enabled FROM marketplaces WHERE id=$1 FOR UPDATE',[marketplaceId])).rows[0];
   const profile=(await c.query('SELECT rules,wait_timeout_ms,version FROM scraping_profiles WHERE marketplace_id=$1',[marketplaceId])).rows[0];
@@ -37,10 +38,12 @@ export async function startEnrichment(db:Database,marketplaceId:string,actor:str
    AND (extraction_status='pending' OR ($2 AND extraction_status='failed'))
    AND ($4::uuid IS NULL OR l.id=$4) AND ($5::uuid IS NULL OR EXISTS(SELECT 1 FROM enrichment_items i WHERE i.run_id=$5 AND i.link_id=l.id AND i.status='failed'))
    AND (($4::uuid IS NULL AND $5::uuid IS NULL) OR extraction_status='failed')
-   ORDER BY first_seen_at,id LIMIT $3`,[marketplaceId,retryFailed,limit,selection?.linkId??null,selection?.runId??null])).rows;
+   AND ($6::uuid[] IS NULL OR l.id=ANY($6))
+   ORDER BY first_seen_at,id LIMIT $3`,[marketplaceId,retryFailed,limit,selection?.linkId??null,selection?.runId??null,selection?.linkIds??null])).rows;
   if(!links.length)throw new HttpError(409,selection?'Não há links com falha elegíveis para esta nova tentativa. Atualize a lista.':'Não há links pendentes para esta seleção.');
   const config=(await c.query('SELECT * FROM enrichment_settings WHERE marketplace_id=$1',[marketplaceId])).rows[0];
-  const id=randomUUID(),snapshot={allowedHosts:market.allowed_hosts,rules:profile.rules,timeoutMs:profile.wait_timeout_ms,profileVersion:profile.version,requestIntervalMs:config?.request_interval_ms??2000,categorySeparator:config?.category_separator??'>'};
+  const navigationUrls=selection?.navigationUrls?Object.fromEntries(links.map(link=>{const url=selection.navigationUrls![link.id];if(!url)throw new HttpError(400,'Falta o link de navegação de um item selecionado.');return [link.id,marketUrl(url,market.allowed_hosts)];})):undefined;
+  const id=randomUUID(),snapshot={allowedHosts:market.allowed_hosts,rules:profile.rules,timeoutMs:profile.wait_timeout_ms,profileVersion:profile.version,requestIntervalMs:navigationUrls?Math.max(20000,config?.request_interval_ms??0):config?.request_interval_ms??2000,categorySeparator:config?.category_separator??'>',...(navigationUrls?{navigationUrls}:{})};
   await c.query('INSERT INTO enrichment_runs(id,marketplace_id,created_by,snapshot,total) VALUES($1,$2,$3,$4,$5)',[id,marketplaceId,actor,JSON.stringify(snapshot),links.length]);
   for(const link of links)await c.query('INSERT INTO enrichment_items(run_id,link_id) VALUES($1,$2)',[id,link.id]);
   await audit(c,actor,'discovery.enrichment.started',id);return {id,status:'queued',total:links.length};

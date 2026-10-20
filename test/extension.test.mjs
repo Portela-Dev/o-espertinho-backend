@@ -286,3 +286,30 @@ test('session proof batch is sequential, spaces every attempt and preserves tech
  await runProofBatch(batch,targets,async target=>{assert.equal(++active,1);events.push(target.url);await Promise.resolve();active--;if(target===targets[1])throw new Error('PRIVATE-CREDENTIAL');return {status:'available',priceCents:100};},async ms=>{assert.equal(ms,20000);assert.equal(active,0);events.push('wait');});
  assert.equal(batch.completed,5);assert.equal(batch.items.length,5);assert.equal(events.filter(e=>e==='wait').length,4);assert.equal(events[0],targets[0].url);assert.ok(batch.items[1].error);assert.equal(batch.items[2].result.status,'available');assert.equal(JSON.stringify(batch).includes('PRIVATE-CREDENTIAL'),false);
 });
+
+test('affiliate proof receives only scoped links and freezes navigation URLs for enrichment without replacing originals',async t=>{
+ const f=await fixture(t),auth=await f.login(),base='/affiliate-proof';
+ await f.db.query("UPDATE marketplaces SET website_url='https://shop.example.com',allowed_hosts=ARRAY['shop.example.com','example.com'],scraping_enabled=true WHERE id='amazon'");
+ await f.db.query("INSERT INTO scraping_profiles(marketplace_id,rules,wait_timeout_ms,validity_minutes) VALUES('amazon',$1,15000,360) ON CONFLICT(marketplace_id) DO UPDATE SET rules=$1",[JSON.stringify([{field:'title',selectors:['h1'],mode:'text',required:true},{field:'price',selectors:['.price'],mode:'text',required:true}])]);
+ const recipe={id:'amazon',name:'Generic test',loginUrl:'https://shop.example.com',allowedOrigins:['https://shop.example.com'],affiliateOrigins:['https://example.com'],batchSize:3,intervalMs:20000,steps:[{type:'extract',source:'requestHeader',name:'csrf',key:'x-csrf-token',sourceUrl:'https://shop.example.com/convert'},{type:'request',url:'https://shop.example.com/convert',method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':'{{csrf}}'},body:{url:'{{originalUrl}}'},responsePath:'short_url'}]};
+ assert.equal((await f.get(base+'/config')).status,401);
+ assert.equal((await f.post(base+'/recipes/amazon',{...recipe,affiliateOrigins:['https://foreign.example']},auth.token)).status,400);
+ assert.equal((await f.post(base+'/recipes/amazon',{...recipe,steps:[{...recipe.steps[1],headers:{Cookie:'PRIVATE'}}]},auth.token)).status,400);
+ assert.equal((await f.post(base+'/recipes/amazon',recipe,auth.token)).status,200);
+ assert.equal((await f.get(base+'/config',auth.token)).body.marketplaces[0].steps[1].responsePath,'short_url');
+ for(let i=0;i<4;i++)await f.db.query("INSERT INTO discovery_links(id,marketplace_id,url,extraction_status) VALUES($1,'amazon',$2,'failed')",[crypto.randomUUID(),'https://shop.example.com/product/'+i]);
+ const proof=(await f.post(base+'/tests',{marketplaceId:'amazon'},auth.token)).body;assert.equal(proof.items.length,3);
+ const second=await f.login();assert.equal((await f.get(base+'/tests/'+proof.id,second.token)).status,404);
+ assert.equal((await f.post(base+'/tests/'+proof.id+'/results',{results:[{id:proof.items[0].id,affiliateUrl:'https://foreign.example/x'}]},auth.token)).status,400);
+ assert.equal((await f.post(base+'/tests/'+proof.id+'/results',{cookies:['PRIVATE'],results:[{id:proof.items[0].id,affiliateUrl:'https://example.com/x'}]},auth.token)).status,400);
+ const results=proof.items.map((item,i)=>i===2?{id:item.id,error:'conversion_failed'}:{id:item.id,affiliateUrl:'https://example.com/affiliate/'+i+'?tracking=preserve'});
+ assert.equal((await f.post(base+'/tests/'+proof.id+'/results',{results},auth.token)).status,200);
+ assert.equal((await f.post(base+'/tests/'+proof.id+'/results',{results},auth.token)).status,200);
+ const run=await f.post(base+'/tests/'+proof.id+'/enrich',{},auth.token);assert.equal(run.status,202);assert.equal(run.body.total,2);
+ const snapshot=(await f.db.query('SELECT snapshot FROM enrichment_runs WHERE id=$1',[run.body.id])).rows[0].snapshot;
+ assert.equal(snapshot.requestIntervalMs,20000);assert.equal(Object.keys(snapshot.navigationUrls).length,2);assert.equal(snapshot.navigationUrls[results[0].id],results[0].affiliateUrl);
+ assert.ok((await f.db.query('SELECT url FROM discovery_links')).rows.every(row=>row.url.startsWith('https://shop.example.com/product/')));
+ assert.equal((await f.post(base+'/tests/'+proof.id+'/enrich',{},auth.token)).body.id,run.body.id);
+ const view=await f.get(base+'/tests/'+proof.id,auth.token);assert.equal(view.body.run.total,2);assert.equal(JSON.stringify(view.body).includes('PRIVATE'),false);
+ await f.db.query("INSERT INTO access_profiles(id,name,permissions) VALUES('affiliate-editor','Affiliate editor',ARRAY['affiliate_links'])");await f.db.query("UPDATE users SET role='user',access_profile_id='affiliate-editor' WHERE id=$1",[auth.user.id]);assert.equal((await f.get(base+'/config',auth.token)).status,403);
+});

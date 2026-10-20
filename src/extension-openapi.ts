@@ -134,6 +134,12 @@ export function extensionApiPaths() {
     };
   }
   const proofOperations = [
+    ['get','affiliate-proof/config','Listar receitas reais da prova de conversão local'],
+    ['post','affiliate-proof/recipes/{market}','Configurar receita declarativa da prova'],
+    ['post','affiliate-proof/tests','Preparar até três links com falha para conversão'],
+    ['post','affiliate-proof/tests/{id}/results','Receber somente links convertidos, sem credenciais'],
+    ['post','affiliate-proof/tests/{id}/enrich','Solicitar enriquecimento pelas URLs convertidas'],
+    ['get','affiliate-proof/tests/{id}','Acompanhar conversões e enriquecimento'],
     ['get','session-proof/marketplaces','Listar marketplaces para a prova'],
     ['post','session-proof/tests','Testar uma sessão temporária no container'],
     ['get','session-proof/tests/{id}','Consultar resultado privado da prova']
@@ -151,15 +157,16 @@ export function extensionApiPaths() {
   for(const [method,path,summary] of proofOperations){
     paths['/extension/'+path] = {[method]:{
       summary,operationId:'extension_proof_'+method+'_'+path.replaceAll('/','_'),tags:['Extensão Chrome'],
-      description:'Prova fora de produção. Exige administrador com affiliate_links. Sessão temporária, sem persistência no banco. Resultado privado expira em cinco minutos no teste individual ou quinze no lote. O lote retorna progresso e resultados por link e usa um contexto novo por acesso com a mesma captura inicial.',
+      description:path.startsWith('affiliate-proof')?'Prova fora de produção, restrita a administrador com affiliate_links. Receitas declarativas e URLs, sem envio de cookies ou headers de sessão. Testes privados expiram em 30 minutos. O enriquecimento usa URLs convertidas no snapshot, preservando a identidade original dos itens.':'Prova fora de produção. Exige administrador com affiliate_links. Sessão temporária, sem persistência no banco. Resultado privado expira em cinco minutos no teste individual ou quinze no lote. O lote retorna progresso e resultados por link e usa um contexto novo por acesso com a mesma captura inicial.',
       security:[{ExtensionBearer:[]}],
       parameters:[
         {name:'X-Espertinho-Extension-Id',in:'header',required:true,schema:{type:'string',pattern:'^[a-p]{32}$'}},
         ...(path.includes('{id}')?[{name:'id',in:'path',required:true,schema:{type:'string',format:'uuid'}}]:[])
+        ,...(path.includes('{market}')?[{name:'market',in:'path',required:true,schema:{type:'string'}}]:[])
       ],
-      ...(method==='post'?{requestBody:{required:true,content:{'application/json':{schema:proofBody}}}}:{}),
+      ...(method==='post'?{requestBody:{required:true,content:{'application/json':{schema:path.startsWith('affiliate-proof')?{type:'object',description:'Receita ou marketplaceId ao preparar; results com id e affiliateUrl ou conversion_failed ao enviar; objeto vazio para enriquecer. Nunca aceita sessão ou cookies.'}:proofBody}}}}:{}),
       responses:{
-        '200':{description:'Configuração ou resultado sem cookies'},'202':{description:'Teste enfileirado'},
+        '200':{description:'Configuração ou resultado sem cookies'},'201':{description:'Teste de conversão preparado'},'202':{description:'Teste enfileirado'},
         '400':{description:'Sessão ou domínio inválido'},'401':{description:'Extensão não autenticada'},
         '403':{description:'Exige administrador'},'404':{description:'Teste expirado ou de outra sessão'},
         '429':{description:'Teste já em andamento'},'503':{description:'Extrator não configurado'}

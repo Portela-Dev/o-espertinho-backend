@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
 import {registerSessionProof} from './extension-session-proof.js';
+import {registerAffiliateProof} from './affiliate-proof.js';
 import type { Database } from "./db.js";
 import type { Config } from "./config.js";
 import {
@@ -230,6 +231,7 @@ document.querySelector('#reload').addEventListener('click',check);button.addEven
     return user;
   };
   registerSessionProof(router,db,config,account,transport);
+  registerAffiliateProof(router,db,account);
   router.post("/auth/refresh", async (req, res) => {
     const user = await account(req, true),
       token = secret(),
