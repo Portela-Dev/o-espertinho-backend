@@ -30,7 +30,7 @@ export function registerEnrichmentAdmin(app:Express,db:Database){
 
    const updated=await db.query("UPDATE discovery_links SET extraction_status='pending',extraction_error=NULL,enrichment_version=enrichment_version+1 WHERE id=$1 AND status='pending' AND extraction_status='failed' AND published_offer_id IS NULL RETURNING id",[id]);
    if(!updated.rows.length)throw new HttpError(409,'Não há falha elegível para retentativa.');
-   await audit(db,req.user!.id,'discovery.retry_marked',id);res.status(202).json({id,status:'pending',executor:'extension'});return;
+   await audit(db,req.user!.id,'discovery.retry_marked',id);res.status(202).json({id,status:'pending',executor:'extension'});
  });
  app.post(base+'/review/:id/archive',async(req,res)=>{const id=uuid.parse(req.params.id);await transaction(db,async c=>{if(!(await c.query("UPDATE discovery_links SET status='archived' WHERE id=$1 RETURNING id",[id])).rows.length)throw new HttpError(404,'Link não encontrado.');
 await audit(c,req.user!.id,'discovery.link.archived',id);});res.json({ok:true});});
