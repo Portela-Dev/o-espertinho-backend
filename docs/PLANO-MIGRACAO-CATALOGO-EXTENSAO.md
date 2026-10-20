@@ -375,7 +375,7 @@ Refatoração estrutural e testes acompanham cada fase. A fase 11 concentra a ex
 | 7 — Revisão/publicação | Validado no Mercado Livre real com confirmação humana e publicação | Vínculo manual e publicação protegida |
 | 8 — Preços | Validado no Mercado Livre real: uma oferta atualizada e histórico diário único | Histórico diário e falhas técnicas preservadas |
 | 9 — Prévia manual | Validado no Mercado Livre real, sem extrator | Cadastro e testes sem extrator |
-| 10 — Corte | Corte local: Amazon/Mercado Livre na extensão; quatro serviços antigos parados; teste manual de seletores em conferência | Executor único e recuperação ensaiada |
+| 10 — Corte | Corte local: Amazon/Mercado Livre na extensão; quatro serviços antigos parados; teste manual de seletores concluído | Executor único e recuperação ensaiada |
 | 11 — Limpeza | POCs removidas do caminho ativo; infraestrutura aguarda corte | Serviços, POCs e referências retirados |
 | 12 — Homologação final | CI e Quality Gates aprovados; homologação da conta real em andamento | Instalação/migração e CI dos projetos ativos |
 
@@ -470,3 +470,5 @@ Todas foram atualizadas nas mesmas branches; não houve segunda PR no mesmo repo
 - A fase 11 ainda exige retirar caminhos de compatibilidade, integrações históricas, configurações de executor legado e deploys obsoletos; não confundir serviços parados com limpeza definitiva concluída. A revisão de consumidores foi retomada após os aceites reais.
 
 - Regressão encontrada no teste manual de seletores: fechar a janela deixava IDs persistidos e o comando FOCUS apenas tentava focar a janela removida. Corrigido na extensão: reabertura explícita recria janela própria, verifica vínculo aba/janela, preserva execução e mantém pausa até Continuar. Se a execução estiver ativa, pausa antes da recuperação. Sem reabertura automática durante o lote. Testes de regressão aprovados, cobertura geral 87,68%, typecheck aprovado e Chromium real validou fechar/reabrir/retomar a mesma execução sem enviar resultado durante a pausa. ZIP 0.3.0 regenerado; necessário recarregar extensão para repetir teste real de seletores.
+
+- Homologação real da recuperação: administrador confirmou reabertura da janela e teste de seletores Amazon 0552836b-a819-4895-aafe-0ce7e2ba391f concluído em 20/10/2026 10:56:04 (America/Sao_Paulo), item concluído sem erro, com extrator desligado. Correção da extensão commit 1e03242 na PR #7. Pipeline 39434561271 concluído com sucesso em testes/empacotamento e Chromium real; etapa SonarQube opcional marcada skipped, portanto sem nova aprovação de Quality Gate nessa execução. Permanecem as pendências de limpeza definitiva da fase 11 e validação de produção, sem impedir o uso local pela extensão.
