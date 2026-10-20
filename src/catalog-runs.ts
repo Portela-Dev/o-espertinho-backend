@@ -55,7 +55,7 @@ export async function startCatalogRun(db:Database,actor:CatalogActor,input:unkno
  });
 }
 export function registerCatalogRuns(router:Router,db:Database,account:(req:any)=>Promise<CatalogActor>){
- router.get('/catalog/config',async(req,res)=>{await account(req);const markets=(await db.query("SELECT id,name,website_url,allowed_hosts,catalog_executor FROM marketplaces WHERE scraping_enabled ORDER BY name")).rows;res.json({version:1,marketplaces:markets.map(m=>({...m,allowedOrigins:m.allowed_hosts.map((h:string)=>'https://'+h)}))});});
+ router.get('/catalog/config',async(req,res)=>{await account(req);const markets=(await db.query("SELECT id,name,website_url,allowed_hosts,catalog_executor FROM marketplaces WHERE scraping_enabled ORDER BY name")).rows;res.json({version:1,marketplaces:await Promise.all(markets.map(async m=>({...m,allowedOrigins:m.allowed_hosts.map((h:string)=>'https://'+h),...await getCatalogSettings(db,m.id)})))});});
  router.post('/catalog/runs',async(req,res)=>res.status(201).json(await startCatalogRun(db,await account(req),req.body)));
  router.get('/catalog/runs',async(req,res)=>{const actor=await account(req);await expireRuns(db);res.json(await pagedQuery(db,{...req.query,paginate:'true'},'SELECT id,marketplace_id,step,status,reason,created_at,updated_at FROM extension_catalog_runs WHERE created_by=$1 ORDER BY created_at DESC,id',[actor.id]));});
  router.get('/catalog/runs/:id',async(req,res)=>{const actor=await account(req),id=uuid.parse(req.params.id);await expireRuns(db);await ownRun(db,id,actor);res.json(await runView(db,id));});
