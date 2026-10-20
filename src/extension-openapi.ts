@@ -139,9 +139,9 @@ export function extensionApiPaths() {
     ['get','session-proof/tests/{id}','Consultar resultado privado da prova']
   ] as const;
   const proofBody = {
-    type:'object', required:['marketplaceId','url','consent','session'],
+    type:'object', required:['marketplaceId','consent','session'],
     properties:{
-      marketplaceId:{type:'string'},url:{type:'string',format:'uri'},consent:{type:'boolean',enum:[true]},
+      marketplaceId:{type:'string'},url:{type:'string',format:'uri',description:'Obrigatório no teste individual.'},batchFailed:{type:'boolean',default:false,description:'Seleciona até 5 links pendentes com falha de enriquecimento deste marketplace. Sequencial, com 20 s entre acessos; não altera os links.'},consent:{type:'boolean',enum:[true]},
       session:{type:'object',required:['cookies'],description:'Até 48 KiB. Cookies HTTPS de domínios cadastrados, incluindo HttpOnly; origins opcional com localStorage.',properties:{
         cookies:{type:'array',minItems:1,maxItems:200,items:{type:'object'}},
         origins:{type:'array',maxItems:10,items:{type:'object'}}
@@ -151,7 +151,7 @@ export function extensionApiPaths() {
   for(const [method,path,summary] of proofOperations){
     paths['/extension/'+path] = {[method]:{
       summary,operationId:'extension_proof_'+method+'_'+path.replaceAll('/','_'),tags:['Extensão Chrome'],
-      description:'Prova fora de produção. Exige administrador com affiliate_links. Sessão usada uma vez, sem persistência no banco. Resultado privado expira em cinco minutos.',
+      description:'Prova fora de produção. Exige administrador com affiliate_links. Sessão temporária, sem persistência no banco. Resultado privado expira em cinco minutos no teste individual ou quinze no lote. O lote retorna progresso e resultados por link e usa um contexto novo por acesso com a mesma captura inicial.',
       security:[{ExtensionBearer:[]}],
       parameters:[
         {name:'X-Espertinho-Extension-Id',in:'header',required:true,schema:{type:'string',pattern:'^[a-p]{32}$'}},

@@ -247,8 +247,9 @@ test("mocks ficam desativados em produção e podem ser desligados em desenvolvi
 
 
 test('session proof uses real extension auth, scoped domains, ephemeral private results and no cookie echo',async t=>{
- let resolve,submitted;
- const f=await fixture(t,{config:{MANUAL_EXTRACTOR_URL:'http://127.0.0.1:3011',MANUAL_EXTRACTION_SERVICE_TOKEN:'a'.repeat(40)},transport:async(url,options)=>{submitted=JSON.parse(options.body);return new Promise(done=>{resolve=done;});}});
+ let resolve,submitted,automatic=false;
+ const result=()=>({requestId:crypto.randomUUID(),status:'available',title:'Generic product',priceCents:12300,missing:[],finalUrl:'https://shop.example.com/failed',navigationStatuses:[200],cookiesImported:1,storageOriginsImported:0});
+ const f=await fixture(t,{config:{MANUAL_EXTRACTOR_URL:'http://127.0.0.1:3011',MANUAL_EXTRACTION_SERVICE_TOKEN:'a'.repeat(40)},transport:async(url,options)=>{submitted=JSON.parse(options.body);if(automatic)return Response.json(result());return new Promise(done=>{resolve=done;});}});
  const auth=await f.login();
  await f.db.query("UPDATE marketplaces SET website_url='https://shop.example.com',allowed_hosts=ARRAY['shop.example.com','example.com'],scraping_enabled=true WHERE id='amazon'");
  await f.db.query("INSERT INTO scraping_profiles(marketplace_id,rules,wait_timeout_ms,validity_minutes) VALUES('amazon',$1,15000,360) ON CONFLICT(marketplace_id) DO UPDATE SET rules=$1",[JSON.stringify([{field:'title',selectors:['h1'],mode:'text',required:true},{field:'price',selectors:['.price'],mode:'text',required:true}])]);
@@ -261,8 +262,27 @@ test('session proof uses real extension auth, scoped domains, ephemeral private 
  assert.equal((await f.post(base+'/tests',body,auth.token)).status,429);
  const second=await f.login();assert.equal((await f.get(base+'/tests/'+created.body.id,second.token)).status,404);
  resolve(Response.json({requestId:crypto.randomUUID(),status:'technical_failure',reason:'incomplete',title:null,priceCents:null,missing:['title','price'],finalUrl:'https://shop.example.com/login',navigationStatuses:[302,200],cookiesImported:1,storageOriginsImported:0,cookies:'PRIVATE-COOKIE'}));
- let result;for(let i=0;i<20;i++){result=await f.get(base+'/tests/'+created.body.id,auth.token);if(result.body.status==='completed')break;await new Promise(ok=>setTimeout(ok,5));}
- assert.equal(result.body.status,'completed');assert.equal(result.body.result.finalUrl,'https://shop.example.com/login');assert.equal(JSON.stringify([created.body,result.body]).includes('PRIVATE-COOKIE'),false);
+ let response;for(let i=0;i<20;i++){response=await f.get(base+'/tests/'+created.body.id,auth.token);if(response.body.status==='completed')break;await new Promise(ok=>setTimeout(ok,5));}
+ assert.equal(response.body.status,'completed');assert.equal(response.body.result.finalUrl,'https://shop.example.com/login');assert.equal(JSON.stringify([created.body,response.body]).includes('PRIVATE-COOKIE'),false);
  const logs=(await f.db.query('SELECT action,entity_id FROM audit_logs')).rows;assert.equal(JSON.stringify(logs).includes('PRIVATE-COOKIE'),false);
+ automatic=true;
+ const batchBody={marketplaceId:'amazon',batchFailed:true,consent:true,session:body.session};
+ assert.equal((await f.post(base+'/tests',batchBody,auth.token)).status,400);
+ const failedId=crypto.randomUUID();
+ await f.db.query("INSERT INTO discovery_links(id,marketplace_id,url,extraction_status) VALUES($1,'amazon','https://shop.example.com/failed','failed'),($2,'amazon','https://shop.example.com/completed','completed')",[failedId,crypto.randomUUID()]);
+ await f.db.query("INSERT INTO discovery_links(id,marketplace_id,url,extraction_status,status) VALUES($1,'amazon','https://shop.example.com/archived','failed','archived')",[crypto.randomUUID()]);
+ const batch=await f.post(base+'/tests',batchBody,auth.token);assert.equal(batch.status,202);assert.equal(batch.body.batch,undefined);
+ for(let i=0;i<20;i++){response=await f.get(base+'/tests/'+batch.body.id,auth.token);if(response.body.status==='completed')break;await new Promise(ok=>setTimeout(ok,5));}
+ assert.equal(response.body.batch.total,1);assert.equal(response.body.batch.completed,1);assert.equal(response.body.batch.intervalMs,20000);assert.equal(response.body.batch.items[0].discoveryLinkId,failedId);assert.equal(submitted.url,'https://shop.example.com/failed');assert.equal(JSON.stringify(response.body).includes('PRIVATE-COOKIE'),false);
+ assert.equal((await f.get(base+'/tests/'+batch.body.id,second.token)).status,404);
+ assert.equal((await f.db.query('SELECT extraction_status FROM discovery_links WHERE id=$1',[failedId])).rows[0].extraction_status,'failed');
  await f.db.query("INSERT INTO access_profiles(id,name,permissions) VALUES('proof-editor','Proof editor',ARRAY['affiliate_links'])");await f.db.query("UPDATE users SET role='user',access_profile_id='proof-editor' WHERE id=$1",[auth.user.id]);assert.equal((await f.get(base+'/marketplaces',auth.token)).status,403);
+});
+
+test('session proof batch is sequential, spaces every attempt and preserves technical failures per link',async()=>{
+ const {runProofBatch}=await import('../dist/extension-session-proof.js');
+ const targets=Array.from({length:5},(_,i)=>({url:'https://shop.example.com/'+i}));
+ const batch={total:5,completed:0,intervalMs:20000,items:[]},events=[];let active=0;
+ await runProofBatch(batch,targets,async target=>{assert.equal(++active,1);events.push(target.url);await Promise.resolve();active--;if(target===targets[1])throw new Error('PRIVATE-CREDENTIAL');return {status:'available',priceCents:100};},async ms=>{assert.equal(ms,20000);assert.equal(active,0);events.push('wait');});
+ assert.equal(batch.completed,5);assert.equal(batch.items.length,5);assert.equal(events.filter(e=>e==='wait').length,4);assert.equal(events[0],targets[0].url);assert.ok(batch.items[1].error);assert.equal(batch.items[2].result.status,'available');assert.equal(JSON.stringify(batch).includes('PRIVATE-CREDENTIAL'),false);
 });
