@@ -186,8 +186,9 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     const status=z.enum(['all','pending','published','rejected','expired']).default('pending').parse(req.query.status);
     const page=z.coerce.number().int().min(1).default(1).parse(req.query.page);
     const where=status==='all'?'TRUE':'o.status=$1',args=status==='all'?[]:[status];
-    if(wantsPage(req.query)){res.json(await pagedQuery(db,req.query,`SELECT o.*,p.name AS product_name,p.sku AS product_sku,m.name AS marketplace_name FROM offers o JOIN products p ON p.id=o.product_id JOIN marketplaces m ON m.id=o.marketplace_id WHERE ${where} ORDER BY o.updated_at DESC,o.id`,args));return;}
-    const {rows}=await db.query(`SELECT o.*,p.name AS product_name,p.sku AS product_sku,m.name AS marketplace_name FROM offers o JOIN products p ON p.id=o.product_id JOIN marketplaces m ON m.id=o.marketplace_id WHERE ${where} ORDER BY o.updated_at DESC LIMIT 50 OFFSET $${args.length+1}`,[...args,(page-1)*50]);res.json(rows);
+    const sql=`SELECT o.*,p.name AS product_name,p.sku AS product_sku,m.name AS marketplace_name FROM offers o JOIN products p ON p.id=o.product_id JOIN marketplaces m ON m.id=o.marketplace_id WHERE ${where} ORDER BY o.updated_at DESC,o.id`;
+    if(wantsPage(req.query)){res.json(await pagedQuery(db,req.query,sql,args));return;}
+    const {rows}=await db.query(`${sql} LIMIT 50 OFFSET $${args.length+1}`,[...args,(page-1)*50]);res.json(rows);
   });
   const getOffer=async(id:string)=>{const {rows}=await db.query('SELECT * FROM offers WHERE id=$1',[uuid.parse(id)]);if(!rows[0]) throw new HttpError(404,'Oferta não encontrada.');return rows[0];};
   app.patch('/api/admin/offers/:id',async(req,res)=>{
