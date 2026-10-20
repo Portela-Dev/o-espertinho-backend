@@ -369,15 +369,15 @@ Refatoração estrutural e testes acompanham cada fase. A fase 11 concentra a ex
 | 1 — Contratos e autorização | Implementado; testes de autorização e concorrência aprovados | Migrations, OpenAPI e concorrência/segurança |
 | 2 — Configurações | Implementado; configuração e E2E aprovados | Perfis e receitas genéricas validadas |
 | 3 — Motor da extensão | Implementado; Chromium controlado aprovado | Navegação, pausa humana e retomada |
-| 4 — Descoberta | Implementado; páginas e deduplicação testadas | Fontes com/sem paginação e deduplicação |
-| 5 — Conversão | Implementado; receita real ainda requer homologação da conta | URLs geradas sem exportação de sessão |
-| 6 — Extração | Implementado; dados/categorias testados | Dados e categorias com sugestões não confirmadas |
-| 7 — Revisão/publicação | Implementado; revisão/publicação testadas | Vínculo manual e publicação protegida |
-| 8 — Preços | Implementado; histórico e falhas testados | Histórico diário e falhas técnicas preservadas |
-| 9 — Prévia manual | Implementado; API e UI assíncronas testadas | Cadastro e testes sem extrator |
-| 10 — Corte | Preparado e testado; corte operacional real pendente | Executor único e recuperação ensaiada |
+| 4 — Descoberta | Validado também no Mercado Livre real: 1 vitrine / 3 links / sem falhas | Fontes com/sem paginação e deduplicação |
+| 5 — Conversão | Validado no Mercado Livre real: 1 URL curta gravada, sessão mantida no Chrome | URLs geradas sem exportação de sessão |
+| 6 — Extração | Validado no Mercado Livre real; categoria não encontrada pelo seletor deste anúncio | Dados e categorias com sugestões não confirmadas |
+| 7 — Revisão/publicação | Validado no Mercado Livre real com confirmação humana e publicação | Vínculo manual e publicação protegida |
+| 8 — Preços | Validado no Mercado Livre real: uma oferta atualizada e histórico diário único | Histórico diário e falhas técnicas preservadas |
+| 9 — Prévia manual | Validado no Mercado Livre real, sem extrator | Cadastro e testes sem extrator |
+| 10 — Corte | Homologação assistida em andamento; Mercado Livre usa extensão, jobs antigos pausados | Executor único e recuperação ensaiada |
 | 11 — Limpeza | POCs removidas do caminho ativo; infraestrutura aguarda corte | Serviços, POCs e referências retirados |
-| 12 — Homologação final | Homologação automatizada em andamento; conta real/CI em verificação | Instalação/migração e CI dos projetos ativos |
+| 12 — Homologação final | CI e Quality Gates aprovados; homologação da conta real em andamento | Instalação/migração e CI dos projetos ativos |
 
 Ao concluir uma fase, registrar data, repositórios/commits/PRs, migrations novas, testes executados, limitações e decisão de avanço. Não marcar como concluída com base apenas em implementação compilada ou em teste mockado quando o aceite exigir navegação real.
 
@@ -435,3 +435,23 @@ Ao concluir uma fase, registrar data, repositórios/commits/PRs, migrations nova
 - Homologação assistida autorizada pelo usuário: os quatro projetos passaram no Quality Gate. Backup local protegido criado em C:/Users/arnal/Documents/Codex/backups/espertinho/20261020-catalog-extension, com chave de cifragem separada, dump restaurado em PostgreSQL descartável e contagens conferidas (1 produto, 3 ofertas, 86 candidatos, 2 categorias). Migrations 029/030 aplicadas ao ambiente local após a restauração validada. Sem exclusão de dados/volumes.
 - Transição de teste: três jobs legados foram parados temporariamente (descoberta, enriquecimento e preços), sem remover containers/contas; extrator anterior continua disponível para recuperação. Mercado Livre foi selecionado como executor extension, receita existente preservada, bloqueios cadastrados como configuração, perfil limitado a 1 página/3 links/5 segundos. Configuração anterior salva junto ao backup para reversão. Usuário foi orientado a iniciar passo 1; nenhum lote real é considerado validado ainda.
 - Compatibilidade de dados anteriores: converter um candidato já enriquecido pelo fluxo antigo agora o deixa pendente de nova extração pelo link de afiliado, preservando os dados anteriores e a revisão. Testes de conversão e enriquecimento aprovados. Renovação simultânea de token da extensão foi serializada e testada; não há exportação de sessão do marketplace.
+
+- Primeira evidência real: execução 1317be2a-77c5-4773-b0d2-be81d51b8fbe, Mercado Livre / discover, concluída em 20/10/2026 13:16:44 UTC, 1 fonte e 3 links aceitos, nenhuma falha. Conversão ainda não registrada; aguardando o texto do painel para conferir a preparação do header local. Não considerar etapa 2 aprovada apenas pelo clique no botão.
+
+## PRs desta implementação
+
+- Backend: https://github.com/Portela-Dev/o-espertinho-backend/pull/13
+- Frontend: https://github.com/Portela-Dev/o-espertinho-frontend/pull/15
+- Extensão: https://github.com/Portela-Dev/o-espertinho-chrome-extension/pull/7
+- Compatibilidade do job de preços legado: https://github.com/Portela-Dev/o-espertinho-job-update-price/pull/7
+
+Todas foram atualizadas nas mesmas branches; não houve segunda PR no mesmo repositório, merge, release ou deploy.
+
+- Homologação real, conversão: 77ee78fd-9a93-4f28-978b-d54274b8b06a, concluída em 20/10/2026 13:20:11 UTC. Uma URL meli.la salva em campo separado, sem sessão enviada ao backend; candidato marcado para enriquecimento.
+- Homologação real, enriquecimento: 8acbba09-38f2-4670-b3bc-5fccae418ee9, concluída em 20/10/2026 13:21:10 UTC. Lavadora Kärcher, R$ 295,00, uma imagem. O seletor configurado .andes-breadcrumb__link não encontrou nós: source_category_path=[] foi preservado, sem inventar classificação. A revisão manual foi solicitada ao administrador. A ausência da categoria de origem neste anúncio não valida o seletor de breadcrumb; seu ajuste permanece uma pendência de configuração.
+
+- Homologação real, revisão/publicação: administrador confirmou a árvore Ferramentas > Ferramentas Elétricas > Limpeza > Lavadoras de Jato Elétricas, criou o produto 37a1d6bc-dfbc-4dce-b168-11611bae0ec4 e publicou a oferta 3f35c32b-5d3a-44e2-b151-ef3a5ada1a7e. Antes de publicar, o produto estava indisponível e fora da vitrine; não houve publicação automática.
+- Homologação real, preços: execução 0938b1f4-ee1c-4716-8db3-23cd110b43eb concluída em 20/10/2026 13:26:06 UTC, uma oferta, nenhuma falha. Atualizou o pijama já existente (R$ 150,71), conforme ordem de observação mais antiga; confirmado um registro diário no histórico. Não foi a lavadora recém-publicada.
+- Homologação real, prévia manual: execução f9a2c263-6e70-436b-a410-868034b196c1 concluída; usuário confirmou a prévia da lavadora no site após processamento pela extensão, sem extrator. Orientado a não confirmar novo cadastro da oferta existente.
+- Preparação Amazon: usuário forneceu apenas a resposta JSON real do SiteStripe, confirmando responsePath=shortUrl. Receita GET cadastrada como dado genérico, com tag espertinho-20, marketplaceId 526970 e storeId espertinho-20; nenhum código por marketplace adicionado. Configuração anterior salva no backup protegido. Executor local passou para extension, perfil limitado a uma página/três links/cinco segundos. Aguardando descoberta/conversão reais pela conta do administrador; não considerar Amazon homologada apenas pela validação de schema.
+- Limites restantes: categoria de origem da lavadora não encontrada pelo seletor atual; nenhuma resolução de CAPTCHA real ocorreu nesta rodada. Containers/grants/tabelas históricos ainda preservados até o aceite do corte.
