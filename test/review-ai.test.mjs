@@ -3,50 +3,74 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {catalogFixture} from './catalog-helpers.mjs';
 const base='/api/admin/discovery/enrichment';
-async function seed(f){const id=randomUUID();await f.db.query("INSERT INTO discovery_links(id,marketplace_id,url,extraction_status,enrichment_data,source_category_path) VALUES($1,'amazon',$2,'completed',$3,ARRAY['Tecnologia','Áudio'])",[id,'https://www.amazon.com.br/p/'+id,JSON.stringify({title:'Headset Modelo X',brand:'Marca',description:'Descrição',images:['https://example.com/image.jpg']})]);return id;}
-async function settings(f,changes={}){const current=(await f.browser.get(base+'/ai/settings')).body;const r=await f.browser.mutate('put',base+'/ai/settings',{...current,categoryEnabled:true,productEnabled:true,...changes});assert.equal(r.status,200,JSON.stringify(r.body));return r.body;}
-const suggestion=(category,changes={})=>({action:'needs_review',category,productId:null,product:null,reason:'Mesmo modelo e árvore adequada.',...changes});
+async function seed(f,title='Headset Modelo X'){
+ const id=randomUUID(),url='https://www.amazon.com.br/product/'+id,data={title,brand:'Marca',description:'Descrição',priceCents:12345,originalPriceCents:null,images:['https://example.com/photo.jpg'],missing:[],conditions:'',specifications:[],availability:'available'};
+ await f.db.query("INSERT INTO discovery_links(id,marketplace_id,url,affiliate_url,extraction_status,enrichment_data,source_category_path,extracted_at) VALUES($1,'amazon',$2,$3,'completed',$4,ARRAY['Tecnologia','Áudio'],clock_timestamp())",[id,url,url+'?tag=test-20',JSON.stringify(data)]);return id;
+}
+async function settings(f,changes={}){const value=(await f.browser.get(base+'/ai/settings')).body;const r=await f.browser.mutate('put',base+'/ai/settings',{...value,categoryEnabled:true,productEnabled:true,...changes});assert.equal(r.status,200,JSON.stringify(r.body));return r.body;}
+async function revision(f){return (await f.db.query('SELECT revision::text AS r FROM review_ai_inventory_state')).rows[0].r;}
+async function context(f,id,task){const r=await f.call('post','/catalog/ai/context',{id,task,inventoryRevision:await revision(f)});assert.equal(r.status,200,JSON.stringify(r.body));return r.body;}
+const decision=(action,extra={})=>({action,category:'',categoryId:null,productId:null,product:null,reason:'Identidade verificada nos candidatos.',...extra});
+async function save(f,ctx,suggestion){const body={requestId:ctx.requestId,model:'fixture',suggestion};const r=await f.call('post','/catalog/ai/suggestions',body);assert.equal(r.status,200,JSON.stringify(r.body));return {result:r.body,body};}
+async function category(f,path=['Tecnologia','Áudio']){return (await f.db.query('SELECT ids FROM register_category_path($1::text[])',[path])).rows[0].ids.at(-1);}
 
-test('IA salva apenas sugestões; categoria e produto só mudam com confirmação administrativa',async t=>{
- const f=await catalogFixture(t),id=await seed(f);await settings(f);
- const category=(await f.db.query("SELECT ids FROM register_category_path(ARRAY['Tecnologia','Áudio'])")).rows[0].ids.at(-1);
- let queue=await f.call('get','/catalog/ai/queue?marketplaceId=amazon&task=category');assert.equal(queue.status,200,JSON.stringify(queue.body));assert.equal(queue.body.items[0].id,id);
- const context=await f.call('post','/catalog/ai/context',{id,task:'category'});assert.equal(context.status,200,JSON.stringify(context.body));assert.ok(context.body.categories.includes('Tecnologia > Áudio'));
- const result=await f.call('post','/catalog/ai/suggestions',{requestId:context.body.requestId,model:'fixture',suggestion:suggestion('Tecnologia > Áudio')});assert.equal(result.status,200,JSON.stringify(result.body));
- let link=(await f.db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];assert.equal(link.confirmed_category_id,null);assert.equal(link.product_id,null);
- await settings(f,{productEnabled:false});
- const review=await f.browser.get(base+'/review');assert.equal(review.body.items[0].ai_category.categoryId,category);await settings(f);
+test('catalogação global reutiliza produto e herda categoria automaticamente, com replay idempotente e publicação manual',async t=>{
+ const f=await catalogFixture(t);await settings(f);const categoryId=await category(f),productId=randomUUID(),id=await seed(f);
+ await f.db.query("INSERT INTO products(id,name,brand,category_path) VALUES($1,'Headset Modelo X','Marca',ARRAY['Tecnologia','Áudio'])",[productId]);
+ const ctx=await context(f,id,'product'),{result,body}=await save(f,ctx,decision('link_existing',{productId}));assert.equal(result.outcome,'linked');assert.equal(result.applied,true);
+ const row=(await f.db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];assert.equal(row.product_id,productId);assert.equal(row.confirmed_category_id,categoryId);assert.equal(row.published_offer_id,null);
+ const replay=await f.call('post','/catalog/ai/suggestions',body);assert.deepEqual(replay.body,result);
+ assert.equal((await f.call('post','/catalog/ai/suggestions',{...body,suggestion:decision('needs_review')})).status,409);
  assert.equal((await f.call('get','/catalog/ai/queue?marketplaceId=amazon&task=category')).body.items.length,0);
- let confirmation=await f.browser.mutate('post',base+'/review/'+id+'/category',{categoryId:category,version:link.enrichment_version});assert.equal(confirmation.status,200,JSON.stringify(confirmation.body));
- const existing=randomUUID();await f.db.query("INSERT INTO products(id,name,brand,category_path) VALUES($1,'Headset Modelo X','Marca',ARRAY['Tecnologia','Áudio'])",[existing]);
- const productContext=await f.call('post','/catalog/ai/context',{id,task:'product'});assert.equal(productContext.status,200,JSON.stringify(productContext.body));assert.equal(productContext.body.products[0].id,existing);
- const p=await f.call('post','/catalog/ai/suggestions',{requestId:productContext.body.requestId,model:'fixture',suggestion:suggestion('Tecnologia > Áudio',{action:'link_existing',productId:existing})});assert.equal(p.status,200,JSON.stringify(p.body));
- link=(await f.db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];assert.equal(link.product_id,null);assert.equal((await f.browser.get(base+'/review')).body.items[0].ai_product.matchedProduct.name,'Headset Modelo X');
- confirmation=await f.browser.mutate('post',base+'/review/'+id+'/product',{mode:'existing',version:link.enrichment_version,productId:existing});assert.equal(confirmation.status,200,JSON.stringify(confirmation.body));
- assert.equal((await f.db.query('SELECT product_id FROM discovery_links WHERE id=$1',[id])).rows[0].product_id,existing);
- const config=(await f.call('get','/catalog/ai/config?marketplaceId=amazon')).body;assert.deepEqual(config.category,{completed:1,total:1});assert.deepEqual(config.product,{completed:1,total:1});
+ const published=await f.browser.mutate('post',base+'/review/'+id+'/publish',{version:row.enrichment_version,authorizedContent:true});assert.equal(published.status,200,JSON.stringify(published.body));assert.ok(published.body.offerId);
 });
 
-test('flags independentes, exclusividade, configurações e dados obsoletos bloqueiam respostas; criação exige confirmação',async t=>{
+test('rascunho compartilhado evita duplicatas e categorização cria um único produto para todos os links',async t=>{
+ const f=await catalogFixture(t);await settings(f);const categoryId=await category(f),ids=[await seed(f),await seed(f,'Outro título do mesmo modelo')];
+ let ctx=await context(f,ids[0],'product');const first=await save(f,ctx,decision('create_new',{product:{name:'Headset Modelo X',brand:'Marca',description:'Descrição canônica'}}));
+ assert.equal(first.result.outcome,'drafted');const draftId=first.result.inventory.drafts[0].id;assert.equal((await f.db.query('SELECT count(*)::int AS n FROM products')).rows[0].n,0);
+ ctx=await context(f,ids[1],'product');await save(f,ctx,decision('link_existing',{productId:draftId}));
+ assert.equal((await f.db.query('SELECT count(*)::int AS n FROM review_ai_product_drafts')).rows[0].n,1);
+ const queue=await f.call('get','/catalog/ai/queue?marketplaceId=amazon&task=category');assert.equal(queue.body.items.length,1);
+ ctx=await context(f,queue.body.items[0].id,'category');const before=(await f.db.query('SELECT count(*)::int AS n FROM category_nodes')).rows[0].n;
+ const done=await save(f,ctx,decision('use_category',{categoryId,category:'Tecnologia > Áudio'}));assert.equal(done.result.outcome,'categorized');assert.deepEqual(done.result.inventory.removeDraftIds,[draftId]);
+ const rows=(await f.db.query('SELECT product_id,confirmed_category_id,published_offer_id FROM discovery_links ORDER BY id')).rows;assert.equal(new Set(rows.map(r=>r.product_id)).size,1);assert.ok(rows[0].product_id);assert.ok(rows.every(r=>r.confirmed_category_id===categoryId&&r.published_offer_id===null));
+ assert.equal((await f.db.query('SELECT count(*)::int AS n FROM products')).rows[0].n,1);assert.equal((await f.db.query('SELECT count(*)::int AS n FROM category_nodes')).rows[0].n,before);
+ const config=(await f.call('get','/catalog/ai/config?marketplaceId=amazon')).body;assert.deepEqual(config.product,{completed:2,total:2});assert.deepEqual(config.category,{completed:2,total:2});
+});
+
+test('inventário percorre todas as páginas sem limite oculto e invalida snapshots após mudanças; ambiguidades não são aplicadas',async t=>{
+ const f=await catalogFixture(t);await settings(f);await f.db.query("INSERT INTO category_nodes(path,normalized_path) SELECT ARRAY['Grupo '||n],ARRAY[lower('Grupo '||n)] FROM generate_series(1,135) n");
+ let cursor,rev,ids=[];do{const page=await f.call('get','/catalog/ai/inventory?kind=categories&limit=25'+(cursor?'&cursor='+cursor:'')+(rev?'&revision='+rev:''));assert.equal(page.status,200,JSON.stringify(page.body));rev=page.body.revision;ids.push(...page.body.items.map(c=>c.id));cursor=page.body.nextCursor;}while(cursor);
+ assert.ok(ids.length>=135);assert.equal(new Set(ids).size,ids.length);
+ const id=await seed(f),ctx=await context(f,id,'product');await category(f,['Criada depois']);
+ let response=await f.call('post','/catalog/ai/suggestions',{requestId:ctx.requestId,model:'fixture',suggestion:decision('create_new',{product:{name:'Não criar',description:'',brand:''}})});assert.equal(response.status,409);
+ assert.equal((await f.call('get','/catalog/ai/inventory?kind=categories&revision='+rev)).status,409);
+ // A failed request remains reserved only until release, without modifying the catalogue.
+ await f.call('post','/catalog/ai/release',{requestId:ctx.requestId});const current=await context(f,id,'product');
+ response=await f.call('post','/catalog/ai/suggestions',{requestId:current.requestId,model:'fixture',suggestion:decision('link_existing',{productId:randomUUID()})});assert.equal(response.status,400);
+ const pending=await save(f,current,decision('needs_review'));assert.equal(pending.result.applied,false);assert.equal((await f.db.query('SELECT product_id,product_draft_id FROM discovery_links WHERE id=$1',[id])).rows[0].product_id,null);
+ assert.equal((await f.call('get','/catalog/ai/queue?marketplaceId=amazon&task=product')).body.items.length,0);
+ assert.equal((await f.browser.mutate('post',base+'/ai/suggestions/'+current.requestId+'/discard',{})).status,200);
+ assert.equal((await f.call('get','/catalog/ai/queue?marketplaceId=amazon&task=product')).body.items.length,1);
+});
+
+test('flags independentes, IDs inventados, versão do prompt e campos extras são validados; categorias semelhantes são reaproveitadas',async t=>{
  const f=await catalogFixture(t),id=await seed(f);
- assert.equal((await f.call('post','/catalog/ai/context',{id,task:'category'})).status,409);
- await settings(f,{productEnabled:false});let context=(await f.call('post','/catalog/ai/context',{id,task:'category'})).body;
- assert.equal((await f.call('post','/catalog/ai/context',{id,task:'category'})).status,409);
- await settings(f,{productEnabled:false,categoryPrompt:'Instrução alterada'});
- let save=await f.call('post','/catalog/ai/suggestions',{requestId:context.requestId,model:'fixture',suggestion:suggestion('Nova > Árvore')});assert.equal(save.status,409);
- context=(await f.call('post','/catalog/ai/context',{id,task:'category'})).body;
- save=await f.call('post','/catalog/ai/suggestions',{requestId:context.requestId,model:'fixture',suggestion:suggestion('Nova > Árvore')});assert.equal(save.status,200,JSON.stringify(save.body));
- assert.equal((await f.db.query("SELECT id FROM category_nodes WHERE path=ARRAY['Nova','Árvore']")).rows.length,0);
- assert.equal((await f.call('post','/catalog/ai/context',{id,task:'product'})).status,409);
- const category=(await f.db.query("SELECT ids FROM register_category_path(ARRAY['Tecnologia','Áudio'])")).rows[0].ids.at(-1);let link=(await f.db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];
- await f.browser.mutate('post',base+'/review/'+id+'/category',{categoryId:category,version:link.enrichment_version});await settings(f);
- context=(await f.call('post','/catalog/ai/context',{id,task:'product'})).body;
- save=await f.call('post','/catalog/ai/suggestions',{requestId:context.requestId,model:'fixture',suggestion:suggestion('Tecnologia > Áudio',{action:'link_existing',productId:randomUUID()})});assert.equal(save.status,400);
- const proposed=suggestion('Tecnologia > Áudio',{action:'create_new',product:{name:'Modelo X',brand:'Marca',description:'Descrição'}});
- save=await f.call('post','/catalog/ai/suggestions',{requestId:context.requestId,model:'fixture',suggestion:proposed,token:'not-accepted'});assert.equal(save.status,400);
- const before=(await f.db.query('SELECT count(*)::int AS n FROM products')).rows[0].n;
- save=await f.call('post','/catalog/ai/suggestions',{requestId:context.requestId,model:'fixture',suggestion:proposed});assert.equal(save.status,200,JSON.stringify(save.body));
- assert.equal((await f.db.query('SELECT count(*)::int AS n FROM products')).rows[0].n,before);
- link=(await f.db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];const confirmed=await f.browser.mutate('post',base+'/review/'+id+'/product',{mode:'new',version:link.enrichment_version,product:{...proposed.product,imageUrl:'https://example.com/image.jpg'}});assert.equal(confirmed.status,200,JSON.stringify(confirmed.body));
- assert.equal((await f.db.query('SELECT count(*)::int AS n FROM products')).rows[0].n,before+1);
+ assert.equal((await f.call('post','/catalog/ai/context',{id,task:'product',inventoryRevision:await revision(f)})).status,409);
+ await settings(f,{categoryEnabled:false});let ctx=await context(f,id,'product');await settings(f,{categoryEnabled:true});
+ const draft=await save(f,ctx,decision('create_new',{product:{name:'Modelo X',description:'',brand:'Marca'}}));const categoryId=await category(f,['Tecnologia','Fones']);
+ ctx=await context(f,id,'category');let bad=await f.call('post','/catalog/ai/suggestions',{requestId:ctx.requestId,model:'fixture',suggestion:decision('use_category',{categoryId:randomUUID()})});assert.equal(bad.status,409);
+ await save(f,ctx,decision('create_category',{category:'tecnologia > Fone'}));assert.equal((await f.db.query('SELECT confirmed_category_id FROM discovery_links WHERE id=$1',[id])).rows[0].confirmed_category_id,categoryId);
+ const other=await seed(f,'Novo modelo');ctx=await context(f,other,'product');await settings(f,{productPrompt:'Novo prompt de produto'});
+ bad=await f.call('post','/catalog/ai/suggestions',{requestId:ctx.requestId,model:'fixture',suggestion:decision('needs_review')});assert.equal(bad.status,409);
+ bad=await f.call('post','/catalog/ai/suggestions',{requestId:ctx.requestId,model:'fixture',suggestion:decision('needs_review'),token:'não aceito'});assert.equal(bad.status,400);assert.ok(draft.result.applied);
+});
+
+test('mudança da identidade extraída invalida rascunho antes da categorização',async t=>{
+ const f=await catalogFixture(t);await settings(f);const id=await seed(f),ctx=await context(f,id,'product');
+ await save(f,ctx,decision('create_new',{product:{name:'Modelo X',description:'',brand:'Marca'}}));
+ await f.db.query("UPDATE discovery_links SET enrichment_data=jsonb_set(enrichment_data,'{title}','\"Outro modelo\"'::jsonb) WHERE id=$1",[id]);
+ const row=(await f.db.query('SELECT product_draft_id,product_id FROM discovery_links WHERE id=$1',[id])).rows[0];assert.equal(row.product_draft_id,null);assert.equal(row.product_id,null);
+ assert.equal((await f.call('get','/catalog/ai/queue?marketplaceId=amazon&task=product')).body.items.length,1);
 });

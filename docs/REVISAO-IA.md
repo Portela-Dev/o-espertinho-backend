@@ -1,33 +1,45 @@
-# Revisão assistida por IA
+# Revisão do catálogo com IA
 
 ## Operação
 
-Admin → Revisão → Configurações de IA contém ativações e prompts independentes para categorização e catalogação. Ambas começam desativadas. Salvar exige as permissões atuais da revisão, XSRF e autenticação Google recente. Cada tarefa tem sua própria revisão: alterações em uma não invalidam a outra.
+Admin → Revisão → Configurações de IA mantém ativações e prompts independentes. Salvar exige as permissões atuais, XSRF e autenticação administrativa recente. Cada tarefa tem sua própria revisão.
 
-No painel lateral da extensão, entre no Espertinho e no ChatGPT, selecione um modelo e autorize o envio do lote. O marketplace e o máximo de itens por execução delimitam as filas. Os novos passos são:
+Na extensão, entre no Espertinho e no ChatGPT, escolha um modelo e autorize o envio do lote. Marketplace e máximo de itens delimitam a fila, sem limitar o inventário de comparação.
 
-- 4 — Categorizar produtos: categorias confirmadas / total de links não arquivados e não publicados do marketplace. Só analisa links enriquecidos sem categoria confirmada.
-- 5 — Catalogar produtos: produtos atribuídos / total de links com categoria confirmada. Só analisa links enriquecidos, com categoria confirmada e sem produto.
-- 6 — Analisar Preços: atualização independente, separada por divisor horizontal.
+- **4 — Catalogar produtos:** consulta todos os produtos e rascunhos. Reutilizar um produto existente confirma o vínculo e herda sua categoria. Uma identidade nova gera um rascunho compartilhável, ainda sem criar produto público.
+- **5 — Categorizar produtos:** compara os rascunhos com todas as árvores existentes. A decisão válida reutiliza ou cria a árvore, cria o produto com categoria obrigatória e atribui todos os links relacionados. Um rascunho é categorizado uma única vez.
+- **6 — Analisar Preços:** etapa independente, separada por divisor.
 
-As sugestões não contam como categorias/produtos confirmados. Após cada lote, no site, use Categorizar ou Atribuir Produto para revisar os dados preenchidos. É possível criar uma nova árvore, editar o produto sugerido, escolher outro existente ou descartar a sugestão e gerar outra. Publicar permanece uma confirmação separada.
+Os contadores do passo 4 incluem produtos atribuídos e rascunhos identificados / links não arquivados e não publicados. Os do passo 5 mostram produtos com categoria confirmada / links já catalogados. Somente links enriquecidos são analisados. As duas tarefas exigem suas flags habilitadas e login ChatGPT.
+
+Decisões válidas são aplicadas automaticamente. Ambiguidades ficam pendentes para revisão manual e podem ser descartadas para nova análise. Publicação permanece uma confirmação explícita. O admin permite trocar o produto ou corrigir sua categoria, propagando-a aos vínculos relacionados. Produtos existentes nunca ficam sem categoria; novos aguardam a categorização em uma tabela de rascunhos.
+
+## Inventário e reutilização
+
+O painel baixa o inventário completo por páginas consistentes, usando uma revisão comum. Produtos são comparados globalmente em blocos de 30; categorias em blocos de 100, com seleção final entre candidatos. Não há truncamento silencioso do catálogo. Antes de aceitar uma criação, percorre todos os blocos pertinentes. Cada resultado atualiza o cache em memória, incluindo categorias e rascunhos recém-criados, para reutilização nas próximas ofertas.
+
+O servidor também reaproveita identidades exatas normalizadas e caminhos equivalentes conservadores na mesma árvore. Descrição, marca e imagem vêm dos dados extraídos/revisados; a IA não fornece URL de imagem. Cor, tamanho e tensão isolados não definem outro produto. A inferência pode errar semanticamente: revise antes de publicar.
 
 ## Segurança e consistência
 
-A extensão faz inferência diretamente na OpenAI com credenciais exclusivamente em memória. O backend recebe apenas sugestões estruturadas e o identificador de uma solicitação, nunca tokens OpenAI. As rotas da extensão exigem conta Espertinho autorizada com catálogo e geração de links; o servidor verifica flags, tarefa, propriedade, expiração e versões. Não há código específico por marketplace.
+Credenciais ChatGPT ficam somente na memória do painel. O backend recebe decisões estruturadas, nunca cookies ou tokens OpenAI. Permissões, flags, propriedade, expiração, revisão do inventário, versão do link, tarefa e rascunho são verificados no servidor. Resultados inválidos ou obsoletos são rejeitados.
 
-Cada contexto reserva um link por até 10 minutos. O contexto é vinculado ao usuário, à versão do enriquecimento, à revisão do prompt/tarefa, à categoria confirmada e aos produtos candidatos. Cancelamento/falha libera a reserva; fechamento abrupto pode exigir aguardar sua expiração. Respostas obsoletas não são aplicadas. Reenvio da mesma resposta é idempotente. Erros interrompem o lote sem repetir inferência automaticamente; sugestões já enviadas permanecem para revisão.
+Aplicação e auditoria são transacionais. Reenvio idêntico é idempotente; resposta diferente para a mesma solicitação é rejeitada. Escritas concorrentes são serializadas, com espera curta e conflito explícito. Alterar os dados identificadores da oferta invalida seu rascunho. Cancelamento/falha libera a reserva e não desfaz decisões anteriores; fechamento abrupto pode exigir aguardar sua expiração de até 10 minutos. Não há repetição automática de inferência nem lógica fixa por marketplace.
 
-O backend seleciona até 100 árvores relevantes, priorizando mapeamento anterior e texto de origem/oferta. Para catalogação, busca até 30 produtos na categoria confirmada e subcategorias, ordenados por relevância textual e marca. Os candidatos podem ser parciais: o prompt informa isso, e ausência de candidato não comprova inexistência. A IA só pode vincular IDs incluídos no contexto. Nome, descrição e marca de novos produtos seguem os limites do cadastro; a imagem vem da extração, nunca de uma URL inventada pela IA. Cor, tamanho e tensão isolados não tornam o produto diferente.
+## Migrations e testes
 
-A sugestão é armazenada separadamente. As rotas administrativas existentes são as únicas que confirmam categorias e criam/atribuem produtos. As confirmações continuam verificando versões e pertinência à categoria, incluindo mudanças concorrentes no catálogo.
+Migrations 035 e 036 são aditivas: rascunhos, revisão do inventário e invalidação de identidade. Execute npm run db:migrate antes de usar as rotas. O Swagger inclui inventário paginado, filas, contexto e aplicação.
 
-## Uso ChatGPT
+Testes cobrem reutilização global, herança da categoria, rascunhos compartilhados, aplicação automática, publicação manual, inventários maiores que um bloco, cache atualizado, ambiguidades, permissões, flags, versões e replay. Chromium real usa serviços e respostas simulados; este ciclo não executou inferência com a conta real.
 
-Mostramos o número de respostas concluídas e os tokens reportados nesta sessão, sem persistir credenciais. Esse número não representa a quota total da conta. Não foi encontrado um saldo documentado para construir uma barra percentual confiável; o painel inclui Gerenciar uso no ChatGPT, conforme https://developers.openai.com/siwc/ui-ux-guidelines.
+O painel informa análises e tokens reportados nesta sessão. Isso não representa a quota total da conta; não há barra percentual baseada em saldo não documentado.
 
-## Entrega e testes
+## Entrega
 
-Migrations 033 e 034 são aditivas e preservam os registros existentes. Rode npm run db:migrate (com as contas de migration/runtime já configuradas) antes de usar as novas rotas. O Swagger documenta configurações, filas, contextos, sugestões e liberação.
-
-Testes cobrem ausência de aplicação automática, confirmação de árvore/produto, flags independentes, prompts, candidatos falsos, versões obsoletas, cancelamento e dados extras. O teste de Chromium usa uma conta OpenAI e serviços simulados; nenhuma conta real é utilizada automaticamente. A validação anterior de login/análise real permanece registrada na extensão, mas os novos lotes ainda precisam de homologação opcional com o administrador.
+- [x] Passo 4 cataloga globalmente e reutiliza cadastros/rascunhos.
+- [x] Passo 5 categoriza os novos produtos e confirma vínculos válidos.
+- [x] Inventário completo e cache atualizado em memória.
+- [x] Revisão permite correções; publicação permanece manual.
+- [x] Limpeza local sem backup: produtos, ofertas, links descobertos e dependências zerados; preservados 12 nós de categorias, usuários, 2 marketplaces e configurações/URLs de vitrines.
+- [x] Testes de backend, frontend e extensão.
+- [ ] Commits e pipelines nas PRs existentes #16/backend, #18/frontend e #9/extensão.

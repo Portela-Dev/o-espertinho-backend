@@ -22,7 +22,7 @@ Operações reais: `/api/extension/catalog/config`, `/catalog/runs`, `/catalog/r
 
 Admin: `/api/admin/extension-catalog/settings/:id`, `/runs`, `/runs/:id/items`, `/runs/:id/cancel` e `/manual/:id`. Configuração usa XSRF e confirmação administrativa recente. A API autoriza e valida independentemente da interface.
 
-Revisão: categoria de origem e sugestão de mapeamento não equivalem à confirmação. Atribuir produto exige categoria confirmada. Publicar exige vínculo compatível, URL e dados válidos, confirmação explícita e observação recente; é idempotente. Produtos podem existir sem ofertas, mas ofertas exigem produto.
+Revisão: categoria de origem e sugestão de mapeamento não equivalem à confirmação. Atribuir produto existente herda sua categoria; criar produto manualmente exige categoria confirmada. Publicar exige vínculo compatível, URL e dados válidos, confirmação explícita e observação recente; é idempotente. Produtos podem existir sem ofertas, mas ofertas exigem produto.
 
 Prévia manual e teste de seletores retornam 202 com executionId. O admin acompanha a solicitação e permite cancelar; a extensão a processa. Confirmar a prévia continua sujeito ao produto/perfil original e à expiração.
 
@@ -60,4 +60,4 @@ O cadastro de fontes não aceita mais intervalHours e não atualiza interval_hou
 
 ## Revisão com IA
 
-A revisão possui uma aba Configurações de IA com tarefas e prompts independentes. A extensão gera propostas; o administrador confirma categoria e produto antes de qualquer aplicação. Consulte docs/REVISAO-IA.md no backend.
+A revisão possui uma aba Configurações de IA com tarefas e prompts independentes. A extensão cataloga primeiro e categoriza produtos novos depois, reutilizando o inventário completo. Decisões válidas são confirmadas automaticamente; ambiguidades e publicação permanecem na revisão. Consulte docs/REVISAO-IA.md no backend.
