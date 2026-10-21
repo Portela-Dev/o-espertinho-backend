@@ -1,4 +1,4 @@
-import {rmSync} from 'node:fs';
+import {rmSync,cpSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {dirname,join,resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -7,4 +7,5 @@ if(dirname(output)!==root||output!==join(root,'dist'))throw new Error('Diretóri
 rmSync(output,{recursive:true,force:true});
 const result=spawnSync(process.execPath,[join(root,'node_modules/typescript/bin/tsc'),'-p','tsconfig.json'],{cwd:root,stdio:'inherit',windowsHide:true});
 if(result.error)throw result.error;
+if(result.status===0)cpSync(join(root,'src/extension-connect-assets'),join(output,'extension-connect-assets'),{recursive:true});
 process.exitCode=result.status??1;

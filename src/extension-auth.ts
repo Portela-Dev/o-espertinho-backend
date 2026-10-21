@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+import { extensionConnectPage } from "./extension-connect-page.js";
 import express, { type Express, type Request } from "express";
 import { randomBytes, randomUUID } from "node:crypto";
 import { rateLimit } from "express-rate-limit";
@@ -106,6 +108,7 @@ export function registerExtension(
       intervalMs: 3000,
     });
   });
+  router.use("/auth/assets", express.static(fileURLToPath(new URL("./extension-connect-assets/", import.meta.url)), { index: false, redirect: false, dotfiles: "deny" }));
   router.get("/auth/connect", (req, res) => {
     const code = z
       .string()
@@ -120,14 +123,14 @@ export function registerExtension(
     res
       .type("html")
       .send(
-        `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Conectar extensão — O Espertinho</title><script src="/api/extension/auth/connect.js" defer></script></head><body><main><h1>Conectar extensão ao O Espertinho</h1><p>Autorize somente se você iniciou esta conexão na extensão.</p><p id="status" role="status">Verificando sua conta…</p><p><a href="${escape(config.APP_ORIGIN)}" target="_blank" rel="noopener noreferrer">Entrar no O Espertinho com Google</a></p><button type="button" id="reload">Verificar login novamente</button> <button type="button" id="approve" disabled>Autorizar extensão</button><p>As ofertas são demonstrativas. A prova de sessão só envia cookies ao servidor quando você aciona explicitamente a captura na extensão; eles são usados no teste e não são salvos no banco.</p></main></body></html>`,
+        extensionConnectPage(escape(config.APP_ORIGIN)),
       );
   });
   router.get("/auth/connect.js", (_req, res) =>
     res.type("application/javascript").send(`
-let csrf='';const status=document.querySelector('#status'),button=document.querySelector('#approve');
-async function check(){button.disabled=true;try{const r=await fetch('/api/auth/session',{cache:'no-store'});if(!r.ok)throw Error('Falha ao consultar sessão.');const {user}=await r.json();csrf=decodeURIComponent(document.cookie.split('; ').find(v=>v.startsWith('XSRF-TOKEN='))?.slice(11)||'');if(!user){status.textContent='Entre com Google no site e depois clique em Verificar login novamente.';return;}if(!user.permissions?.includes('affiliate_links')){status.textContent='Seu perfil não tem permissão para gerar links de afiliados.';return;}status.textContent='Conectar como '+user.email;button.disabled=false;}catch(e){status.textContent=e.message;}}
-document.querySelector('#reload').addEventListener('click',check);button.addEventListener('click',async()=>{button.disabled=true;try{const r=await fetch('/api/extension/auth/approve',{method:'POST',headers:{'Content-Type':'application/json','X-XSRF-TOKEN':csrf},body:JSON.stringify({code:new URL(location.href).searchParams.get('code')})});const body=await r.json();if(!r.ok)throw Error(body.error||'Não foi possível autorizar.');status.textContent='Extensão autorizada. Você pode fechar esta aba e voltar à extensão.';}catch(e){status.textContent=e.message;button.disabled=false;}});check();`),
+let csrf='';function show(message,state='info'){status.textContent=message;status.dataset.state=state;}const status=document.querySelector('#status'),button=document.querySelector('#approve');
+async function check(){button.disabled=true;try{const r=await fetch('/api/auth/session',{cache:'no-store'});if(!r.ok)throw Error('Falha ao consultar sessão.');const {user}=await r.json();csrf=decodeURIComponent(document.cookie.split('; ').find(v=>v.startsWith('XSRF-TOKEN='))?.slice(11)||'');if(!user){show('Entre com Google no site e depois clique em Verificar login novamente.');return;}if(!user.permissions?.includes('affiliate_links')){show('Seu perfil não tem permissão para gerar links de afiliados.','error');return;}show('Conectar como '+user.email,'ready');button.disabled=false;}catch(e){show(e.message,'error');}}
+document.querySelector('#reload').addEventListener('click',check);button.addEventListener('click',async()=>{button.disabled=true;show('Autorizando extensão…');try{const r=await fetch('/api/extension/auth/approve',{method:'POST',headers:{'Content-Type':'application/json','X-XSRF-TOKEN':csrf},body:JSON.stringify({code:new URL(location.href).searchParams.get('code')})});const body=await r.json();if(!r.ok)throw Error(body.error||'Não foi possível autorizar.');show('Extensão autorizada. Você pode fechar esta aba e voltar à extensão.','success');button.textContent='Extensão conectada';document.querySelector('#reload').hidden=true;document.querySelector('#site-login').hidden=true;}catch(e){show(e.message,'error');button.disabled=false;}});check();`),
   );
   router.post(
     "/auth/approve",
