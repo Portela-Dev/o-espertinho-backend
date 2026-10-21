@@ -42,4 +42,4 @@ O painel informa análises e tokens reportados nesta sessão. Isso não represen
 - [x] Revisão permite correções; publicação permanece manual.
 - [x] Limpeza local sem backup: produtos, ofertas, links descobertos e dependências zerados; preservados 12 nós de categorias, usuários, 2 marketplaces e configurações/URLs de vitrines.
 - [x] Testes de backend, frontend e extensão.
-- [ ] Commits e pipelines nas PRs existentes #16/backend, #18/frontend e #9/extensão.
+- [x] Commits enviados e pipelines acionados nas PRs existentes #16/backend, #18/frontend e #9/extensão.
