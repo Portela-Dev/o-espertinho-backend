@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 export const scrapedDataSchema = z.object({
   title: z.string().max(300),
+  rating: z.number().min(0).max(5).nullable().default(null),
+  reviewCount: z.number().int().min(0).max(1000000000).nullable().default(null),
   priceCents: z.number().int().positive().max(100000000).nullable(),
   originalPriceCents: z.number().int().positive().max(100000000).nullable(),
   description: z.string().max(4000), category: z.string().max(80), conditions: z.string().max(1500),

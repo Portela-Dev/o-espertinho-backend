@@ -117,7 +117,7 @@ async function priceResult({ c, run, item, v }: ResultContext, data: z.infer<typ
         throw new HttpError(409, 'A oferta foi alterada ou já possui observação mais recente.');
     const available = v.outcome === 'success', price = available ? data.priceCents : null;
     const expires=new Date(new Date(data.collectedAt).getTime()+run.snapshot.profile.validity_minutes*60000);
-    await c.query("UPDATE offers SET price_cents=COALESCE($2,price_cents),original_price_cents=$3,availability_status=$4,refresh_status='updated',data_updated_at=$5,expires_at=CASE WHEN $4='available' THEN $6 ELSE expires_at END,last_refresh_attempt_at=clock_timestamp(),last_refresh_error=NULL,updated_at=clock_timestamp() WHERE id=$1", [offer.id, price, data.originalPriceCents, available ? 'available' : 'unavailable', data.collectedAt,expires]);
+    await c.query("UPDATE offers SET price_cents=COALESCE($2,price_cents),original_price_cents=$3,availability_status=$4,refresh_status='updated',data_updated_at=$5,expires_at=CASE WHEN $4='available' THEN $6 ELSE expires_at END,rating=CASE WHEN $7 THEN $8 ELSE rating END,review_count=CASE WHEN $9 THEN $10 ELSE review_count END,last_refresh_attempt_at=clock_timestamp(),last_refresh_error=NULL,updated_at=clock_timestamp() WHERE id=$1", [offer.id, price, data.originalPriceCents, available ? 'available' : 'unavailable', data.collectedAt,expires,run.snapshot.profile.rules.some((r:any)=>r.field==='rating'),data.rating,run.snapshot.profile.rules.some((r:any)=>r.field==='reviewCount'),data.reviewCount]);
     await recordDailyPrice(c, offer.id, offer.product_id, price, data.collectedAt);
 }
 async function successfulResult(context: ResultContext) {
