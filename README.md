@@ -22,7 +22,7 @@ Operações reais: `/api/extension/catalog/config`, `/catalog/runs`, `/catalog/r
 
 Admin: `/api/admin/extension-catalog/settings/:id`, `/runs`, `/runs/:id/items`, `/runs/:id/cancel` e `/manual/:id`. Configuração usa XSRF e confirmação administrativa recente. A API autoriza e valida independentemente da interface.
 
-Revisão: categoria de origem e sugestão de mapeamento não equivalem à confirmação. Atribuir produto exige categoria confirmada. Publicar exige vínculo compatível, URL e dados válidos, confirmação explícita e observação recente; é idempotente. Produtos podem existir sem ofertas, mas ofertas exigem produto.
+Revisão: categoria de origem e sugestão de mapeamento não equivalem à confirmação. Atribuir produto existente herda sua categoria; criar produto manualmente exige categoria confirmada. Publicar exige vínculo compatível, URL e dados válidos, confirmação explícita e observação recente; é idempotente. Produtos podem existir sem ofertas, mas ofertas exigem produto.
 
 Prévia manual e teste de seletores retornam 202 com executionId. O admin acompanha a solicitação e permite cancelar; a extensão a processa. Confirmar a prévia continua sujeito ao produto/perfil original e à expiração.
 
@@ -57,3 +57,7 @@ A extensão tem teste adicional em Chromium real com HTTPS e API controlados. Is
 A consulta administrativa de ofertas inclui o nome/SKU do produto e o marketplace para a listagem única do frontend, mantendo a permissão catalog. As permissões existentes permanecem com os mesmos IDs; o rótulo updates descreve consulta de execuções e atualização de preços. A centralização visual não altera as verificações de etapa no cancelamento.
 
 O cadastro de fontes não aceita mais intervalHours e não atualiza interval_hours. A coluna histórica permanece preservada no banco, sem consumidor de agendamento; não há migration destrutiva nem mudança nas URLs/perfis de vitrines. Habilitação da fonte, paginação e intervalo entre requisições continuam operacionais.
+
+## Revisão com IA
+
+A revisão possui uma aba Configurações de IA com tarefas e prompts independentes. A extensão cataloga primeiro e categoriza produtos novos depois, reutilizando o inventário completo. Decisões válidas são confirmadas automaticamente; ambiguidades e publicação permanecem na revisão. Consulte docs/REVISAO-IA.md no backend.

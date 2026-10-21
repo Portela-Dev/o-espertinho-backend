@@ -74,19 +74,20 @@ test('product assignment requires confirmed category, creates atomically and rej
  assert.equal((await db.query('SELECT count(*)::int n FROM offers')).rows[0].n,0);
 });
 
-test('existing products are searched within category, preserved and invalidated on category changes',async()=>{
+test('existing products are searched globally and inherit category; product category edits preserve links',async()=>{
  const id=ids[1],url=base+'/review/'+id;
  let row=(await db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];
  const existing=(await db.query('SELECT * FROM products LIMIT 1')).rows[0];
  const unrelated=await seedProduct(db,{name:'Produto fora da categoria',category:'Casa'});
  const found=await admin.get(url+'/products?q=Fone&pageSize=1');assert.equal(found.status,200);assert.equal(found.body.total,1);assert.equal(found.body.items[0].id,existing.id);
  assert.equal((await admin.get(url+'/products?q=%25')).body.total,0);
- assert.equal((await admin.mutate('post',url+'/product',{mode:'existing',version:row.enrichment_version,productId:unrelated})).status,409);
+ const outside=await admin.mutate('post',url+'/product',{mode:'existing',version:row.enrichment_version,productId:unrelated});assert.equal(outside.status,200);
+ row=(await db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];assert.deepEqual((await db.query('SELECT path FROM category_nodes WHERE id=$1',[row.confirmed_category_id])).rows[0].path,['Casa']);
  assert.equal((await admin.mutate('post',url+'/product',{mode:'existing',version:row.enrichment_version,productId:existing.id})).status,200);
  assert.deepEqual((await db.query('SELECT * FROM products WHERE id=$1',[existing.id])).rows[0],existing);
  row=(await db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];
  const root=existing.category_ids[0];assert.equal((await admin.mutate('post',url+'/category',{categoryId:root,version:row.enrichment_version})).status,200);
- assert.equal((await db.query('SELECT product_id FROM discovery_links WHERE id=$1',[id])).rows[0].product_id,null);
+ assert.equal((await db.query('SELECT product_id FROM discovery_links WHERE id=$1',[id])).rows[0].product_id,existing.id);
  // Simulate worker invalidation after the source category changes.
  await db.query('UPDATE discovery_links SET confirmed_category_id=NULL WHERE id=$1',[ids[0]]);
  assert.equal((await db.query('SELECT product_id FROM discovery_links WHERE id=$1',[ids[0]])).rows[0].product_id,null);

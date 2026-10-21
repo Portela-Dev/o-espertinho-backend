@@ -1,3 +1,4 @@
+import {registerReviewAiAdmin,registerReviewAiExtension} from './review-ai.js';
 import {registerCatalogAdmin} from './catalog-admin.js';
 import {registerCatalogManual} from './catalog-manual.js';
 import {registerCatalogPublication} from './catalog-publication.js';
@@ -63,7 +64,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     }
     res.json({user:req.user??null,autoSignInAllowed:req.cookies[SIGNED_OUT_COOKIE]!=='1'});
   });
-  registerExtension(app,db,config,(router,account)=>{registerCatalogRuns(router,db,account);registerCatalogResults(router,db,account);});
+  registerExtension(app,db,config,(router,account)=>{registerCatalogRuns(router,db,account);registerReviewAiExtension(router,db,account);registerCatalogResults(router,db,account);});
   app.use('/api',csrfMiddleware(config));
   app.post('/api/auth/google',rateLimit({windowMs:60000,limit:15,skip:()=>config.NODE_ENV==='test',message:{error:'Muitas tentativas de login. Aguarde.'}}),async(req,res)=>{
     if(!config.GOOGLE_CLIENT_ID) throw new HttpError(503,'Login Google não configurado. Defina GOOGLE_CLIENT_ID no backend.');
@@ -179,7 +180,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
   registerUserAdmin(app,db);
   registerProductAdmin(app,db);
   registerCatalogSettings(app,db);registerCatalogAdmin(app,db);registerCatalogManual(app,db);
-  registerDiscoveryAdmin(app,db);registerDiscoveryRuns(app,db);registerEnrichmentAdmin(app,db);registerCatalogPublication(app,db);
+  registerDiscoveryAdmin(app,db);registerDiscoveryRuns(app,db);registerEnrichmentAdmin(app,db);registerReviewAiAdmin(app,db);registerCatalogPublication(app,db);
   registerScrapingAdmin(app,db);
   app.get('/api/admin/category-options',async(_req,res)=>res.json((await db.query('SELECT category,subcategory FROM offer_category_options ORDER BY lower(category),lower(subcategory)')).rows));
   app.get('/api/admin/offers',async(req,res)=>{
