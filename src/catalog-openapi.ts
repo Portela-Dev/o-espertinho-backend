@@ -1,3 +1,4 @@
+import {publishBatchInput} from './catalog-publication.js';
 import {reviewAiInput,reviewAiResult} from './review-ai.js';
 import { z } from 'zod';
 import { catalogSettings } from './catalog-settings.js';
@@ -43,6 +44,7 @@ export function catalogApiPaths() {
         ['get', '/admin/extension-catalog/manual/{id}', 'Acompanhar prévia manual solicitada no admin'],
         ['post', '/admin/extension-catalog/manual/{id}/finalize', 'Criar prévia após extração com XSRF', z.strictObject({})],
         ['post', '/admin/extension-catalog/manual/{id}/cancel', 'Cancelar solicitação de prévia', z.strictObject({})],
+        ['post','/admin/discovery/enrichment/review/publish-batch','Publicar até 100 links selecionados com confirmação explícita e validação individual',publishBatchInput],
         ['post', '/admin/discovery/enrichment/review/{id}/publish', 'Publicar candidato após confirmação de categoria e produto', z.strictObject({
                 version: z.number().int().nonnegative(), authorizedContent: z.literal(true)
             })],

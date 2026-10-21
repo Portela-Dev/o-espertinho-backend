@@ -43,3 +43,11 @@ O painel informa análises e tokens reportados nesta sessão. Isso não represen
 - [x] Limpeza local sem backup: produtos, ofertas, links descobertos e dependências zerados; preservados 12 nós de categorias, usuários, 2 marketplaces e configurações/URLs de vitrines.
 - [x] Testes de backend, frontend e extensão.
 - [x] Commits enviados e pipelines acionados nas PRs existentes #16/backend, #18/frontend e #9/extensão.
+
+## Publicação em massa e teste limpo
+
+A revisão permite selecionar links aptos entre páginas (até 100), com confirmação única de autorização para divulgação. POST /api/admin/discovery/enrichment/review/publish-batch recebe IDs e versões explícitos. Cada item passa pela mesma transação e validações da publicação individual; pendências, dados vencidos, versões alteradas e marketplaces desativados são recusados sem bloquear os demais. O retorno informa sucesso ou motivo de recusa por link. Reenvio não duplica ofertas, histórico ou auditoria. Permissões, XSRF e confirmação administrativa recente permanecem obrigatórios.
+
+Novo ciclo de teste: removidos 46 produtos, 54 links descobertos, 3 ofertas, 46 rascunhos e dependências de processamento, sem backup. Preservadas 41 categorias, 2 marketplaces, usuários, coleções e configurações/perfis/URLs de vitrines.
+
+Na extensão, a barra única conta links processados (incluindo pendências), enquanto o contador de catalogação conta somente links vinculados ou identificados como rascunho. O caso 47/51 continha 47 links catalogados, 43 identidades distintas e 4 decisões needs_review, não um erro de deduplicação de produtos.
