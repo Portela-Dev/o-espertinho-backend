@@ -14,6 +14,8 @@ export async function getProduct(db:Pick<Database,'query'>,id:string){
 }
 const publicColumns='p.id,p.name,p.description,p.brand,p.model,p.category,p.subcategory,p.category_path,p.category_ids,p.image_url,p.created_at,p.updated_at';
 const valid="o.status='published' AND o.availability_status='available' AND o.affiliate_url IS NOT NULL";
+const reviewColumns='reviews.rating,reviews.review_count,reviews.rating_marketplace_name';
+const reviewSource=`SELECT o.rating,o.review_count,m.name AS rating_marketplace_name FROM offers o JOIN marketplaces m ON m.id=o.marketplace_id WHERE o.product_id=p.id AND ${valid} AND o.rating IS NOT NULL AND o.review_count>0 ORDER BY o.review_count DESC,o.rating DESC,o.id LIMIT 1`;
 export function registerPublicProducts(app:Express,db:Database){
  app.get('/api/category-tree',async(_req,res)=>res.json((await db.query(`SELECT id,path,cardinality(path) AS depth FROM category_nodes ORDER BY path`)).rows));
  app.get('/api/products',async(req,res)=>{
@@ -24,25 +26,26 @@ export function registerPublicProducts(app:Express,db:Database){
   if(f.categoryId)add('p.category_ids @> ARRAY[?]::uuid[]',f.categoryId);else if(f.category)add('p.category=?',f.category);
   if(f.marketplace)add(`EXISTS(SELECT 1 FROM offers o WHERE o.product_id=p.id AND ${valid} AND o.marketplace_id=?)`,f.marketplace);
   if(f.maxPrice)add('summary.min_price_cents<=?',f.maxPrice);
-  const from=`FROM products p JOIN LATERAL (SELECT min(o.price_cents)::int AS min_price_cents,max(o.price_cents)::int AS max_price_cents,count(*)::int AS offer_count,max(o.published_at) AS latest,max(CASE WHEN o.featured THEN 1 ELSE 0 END) AS featured,max(COALESCE((o.original_price_cents-o.price_cents)::float/NULLIF(o.original_price_cents,0),0)) AS discount FROM offers o WHERE o.product_id=p.id AND ${valid}) summary ON summary.offer_count>0`;
+  const from=`FROM products p JOIN LATERAL (SELECT min(o.price_cents)::int AS min_price_cents,max(o.price_cents)::int AS max_price_cents,count(*)::int AS offer_count,max(o.published_at) AS latest,max(CASE WHEN o.featured THEN 1 ELSE 0 END) AS featured,max(COALESCE((o.original_price_cents-o.price_cents)::float/NULLIF(o.original_price_cents,0),0)) AS discount FROM offers o WHERE o.product_id=p.id AND ${valid}) summary ON summary.offer_count>0 LEFT JOIN LATERAL (${reviewSource}) reviews ON true`;
   const where=conditions.length?' WHERE '+conditions.join(' AND '):'';
   const total=(await db.query(`SELECT count(*)::int AS total ${from}${where}`,args)).rows[0].total;
   const order=f.sort==='price_asc'?'summary.min_price_cents ASC':f.sort==='discount'?'summary.discount DESC':'summary.featured DESC,summary.latest DESC NULLS LAST';
-  const items=(await db.query(`SELECT ${publicColumns},summary.min_price_cents,summary.max_price_cents,summary.offer_count,COALESCE(p.image_url,(SELECT image_url FROM offers o WHERE o.product_id=p.id AND ${valid} AND image_url IS NOT NULL ORDER BY o.price_cents,o.id LIMIT 1)) AS display_image_url ${from}${where} ORDER BY ${order},p.id LIMIT 24 OFFSET $${args.length+1}`,[...args,(f.page-1)*24])).rows;
+  const items=(await db.query(`SELECT ${publicColumns},${reviewColumns},summary.min_price_cents,summary.max_price_cents,summary.offer_count,COALESCE(p.image_url,(SELECT image_url FROM offers o WHERE o.product_id=p.id AND ${valid} AND image_url IS NOT NULL ORDER BY o.price_cents,o.id LIMIT 1)) AS display_image_url ${from}${where} ORDER BY ${order},p.id LIMIT 24 OFFSET $${args.length+1}`,[...args,(f.page-1)*24])).rows;
   res.json({items,total,page:f.page,pageSize:24});
  });
  app.get('/api/products/:id',async(req,res)=>{
   const product=await getProduct(db,String(req.params.id));
+  const reviews=(await db.query(`SELECT ${reviewColumns} FROM products p LEFT JOIN LATERAL (${reviewSource}) reviews ON true WHERE p.id=$1`,[product.id])).rows[0];
   if(wantsPage(req.query)){
    const result=await pagedQuery(db,req.query,`SELECT o.*,m.name AS marketplace_name,m.logo_url AS marketplace_logo_url FROM offers o JOIN marketplaces m ON m.id=o.marketplace_id WHERE o.product_id=$1 AND ${valid} ORDER BY o.price_cents,o.id`,[product.id]);
    const summary=(await db.query(`SELECT min(o.price_cents)::int AS min_price_cents,max(o.price_cents)::int AS max_price_cents FROM offers o WHERE o.product_id=$1 AND ${valid}`,[product.id])).rows[0];
    const image=(await db.query(`SELECT image_url FROM offers o WHERE o.product_id=$1 AND ${valid} AND image_url IS NOT NULL ORDER BY o.price_cents,o.id LIMIT 1`,[product.id])).rows[0]?.image_url;
    const {sku:_sku,...publicProduct}=product;
-   res.json({...publicProduct,...summary,available:result.total>0,status:result.total?'available':'unavailable',offers:result.items,offer_count:result.total,page:result.page,pageSize:result.pageSize,display_image_url:product.image_url??image??null});return;
+   res.json({...publicProduct,...reviews,...summary,available:result.total>0,status:result.total?'available':'unavailable',offers:result.items,offer_count:result.total,page:result.page,pageSize:result.pageSize,display_image_url:product.image_url??image??null});return;
   }
   const offers=(await db.query(`SELECT o.*,m.name AS marketplace_name,m.logo_url AS marketplace_logo_url FROM offers o JOIN marketplaces m ON m.id=o.marketplace_id WHERE o.product_id=$1 AND ${valid} ORDER BY o.price_cents,o.id`,[product.id])).rows;
   const {sku:_internalCode,...publicProduct}=product;
-  res.json({...publicProduct,available:offers.length>0,status:offers.length?'available':'unavailable',min_price_cents:offers[0]?.price_cents??null,max_price_cents:offers.at(-1)?.price_cents??null,offers,display_image_url:product.image_url??offers.find(o=>o.image_url)?.image_url??null});
+  res.json({...publicProduct,...reviews,available:offers.length>0,status:offers.length?'available':'unavailable',min_price_cents:offers[0]?.price_cents??null,max_price_cents:offers.at(-1)?.price_cents??null,offers,display_image_url:product.image_url??offers.find(o=>o.image_url)?.image_url??null});
  });
 }
 export function registerProductAdmin(app:Express,db:Database){
