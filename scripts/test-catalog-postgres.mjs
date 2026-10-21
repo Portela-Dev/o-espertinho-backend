@@ -20,7 +20,9 @@ try {
     docker(['run', '--detach', '--rm', '--name', name, '--tmpfs', '/var/lib/postgresql/data', '-e', 'POSTGRES_USER=catalog_test_admin', '-e', 'POSTGRES_PASSWORD=' + password, '-e', 'POSTGRES_DB=' + database, '-p', '127.0.0.1::5432', 'postgres:17-alpine']);
     let ready = false;
     for (let i = 0; i < 80; i++) {
-        const result = spawnSync(dockerExecutable, ['exec', name, 'pg_isready', '-U', 'catalog_test_admin', '-d', database], {
+        // The entrypoint's temporary initialization server accepts Unix sockets only.
+        // Wait for the final TCP server, which is the one reached by the tests.
+        const result = spawnSync(dockerExecutable, ['exec', name, 'pg_isready', '-h', '127.0.0.1', '-U', 'catalog_test_admin', '-d', database], {
             stdio: 'ignore', windowsHide: true
         });
         if (result.status === 0) {
