@@ -78,7 +78,7 @@ export async function startCatalogRun(db: Database, actor: CatalogActor, input: 
    FROM discovery_links WHERE marketplace_id=$1 AND status='pending' AND published_offer_id IS NULL AND
    (($2='convert' AND affiliate_url IS NULL) OR ($2='enrich' AND affiliate_url IS NOT NULL AND (extraction_status='pending' OR ($3 AND extraction_status='failed')))) ORDER BY first_seen_at,id LIMIT $4`, [market.id, v.step, v.retryFailed, v.limit])).rows;
         if (v.step === 'prices')
-            items = (await c.query(`SELECT id AS target_id,jsonb_build_object('url',affiliate_url,'originalUrl',product_url,'title',title) AS payload,updated_at::text AS expected_version FROM offers WHERE marketplace_id=$1 AND status='published' AND affiliate_url IS NOT NULL ORDER BY data_updated_at,id LIMIT $2`, [market.id, v.limit])).rows;
+            items = (await c.query(`SELECT id AS target_id,jsonb_build_object('url',product_url,'originalUrl',product_url,'title',title) AS payload,updated_at::text AS expected_version FROM offers WHERE marketplace_id=$1 AND status='published' AND affiliate_url IS NOT NULL ORDER BY data_updated_at,id LIMIT $2`, [market.id, v.limit])).rows;
         if (!items.length)
             throw new HttpError(409, 'Não há itens elegíveis para esta etapa.');
         const id = randomUUID();
