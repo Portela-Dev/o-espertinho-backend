@@ -12,7 +12,7 @@ export async function inventoryPage(c:CatalogQuery,input:unknown){
  const v=inventoryInput.parse(input),revision=await inventoryRevision(c);
  if(v.revision&&v.revision!==revision)throw new HttpError(409,'O catálogo mudou. Atualize o inventário e inicie o lote novamente.');
  const table={categories:'category_nodes',products:'products',drafts:'review_ai_product_drafts'}[v.kind];
- const columns=v.kind==='categories'?'id,path':'id,name,brand,description,image_url'+(v.kind==='products'?',category_path':'');
+ const columns=v.kind==='categories'?'id,path':'id,name,brand,description,image_url,personalized_kit'+(v.kind==='products'?',category_path':'');
  const rows=(await c.query('SELECT '+columns+' FROM '+table+' WHERE ($1::uuid IS NULL OR id>$1::uuid)'+(v.kind==='drafts'?' AND product_id IS NULL':'')+' ORDER BY id LIMIT $2',[v.cursor??null,v.limit+1])).rows;
  if(await inventoryRevision(c)!==revision)throw new HttpError(409,'O catálogo mudou durante a leitura. Carregue o inventário novamente.');
  const items=rows.slice(0,v.limit).map(row=>({...row,...(v.kind==='categories'?{}:{kind:v.kind==='drafts'?'draft':'product'})}));
@@ -26,11 +26,11 @@ export async function assignCatalogProduct(c:CatalogQuery,linkId:string,product:
  await audit(c,userId,'discovery.product.assigned',linkId);
 }
 export async function catalogDraft(c:CatalogQuery,link:any,product:any,userId:string){
- const key=identityKey(product.name,product.brand),known=(await c.query('SELECT * FROM products ORDER BY id')).rows.find(p=>identityKey(p.name,p.brand)===key);
+ const kit=product.personalizedKit===true,key=identityKey(product.name,product.brand)+(kit?'|kit:'+link.id:''),known=kit?null:(await c.query('SELECT * FROM products WHERE personalized_kit=false ORDER BY id')).rows.find(p=>identityKey(p.name,p.brand)===key);
  if(known){await assignCatalogProduct(c,link.id,known,userId);return {outcome:'linked',product:known};}
  const image=(link.enrichment_data.images??[]).find((url:string)=>url.startsWith('https://'))??null;
- const draft=(await c.query(`INSERT INTO review_ai_product_drafts(id,identity_key,name,description,brand,image_url,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)
- ON CONFLICT(identity_key) DO UPDATE SET identity_key=EXCLUDED.identity_key RETURNING *`,[randomUUID(),key,product.name,product.description,product.brand,image,userId])).rows[0];
+ const draft=(await c.query(`INSERT INTO review_ai_product_drafts(id,identity_key,name,description,brand,image_url,created_by,personalized_kit) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+ ON CONFLICT(identity_key) DO UPDATE SET identity_key=EXCLUDED.identity_key RETURNING *`,[randomUUID(),key,product.name,product.description,product.brand,image,userId,kit])).rows[0];
  if(draft.product_id){const p=(await c.query('SELECT * FROM products WHERE id=$1',[draft.product_id])).rows[0];await assignCatalogProduct(c,link.id,p,userId);return {outcome:'linked',product:p};}
  await c.query('UPDATE discovery_links SET product_draft_id=$2,enrichment_version=enrichment_version+1 WHERE id=$1',[link.id,draft.id]);
  await audit(c,userId,'review_ai.product_draft',draft.id);return {outcome:'drafted',draft};
@@ -40,9 +40,9 @@ export async function finalizeCatalogDraft(c:CatalogQuery,draftId:string,categor
  if(!draft||draft.product_id)throw new HttpError(409,'O rascunho já foi resolvido. Atualize a revisão.');
  const category=(await c.query('SELECT path FROM category_nodes WHERE id=$1',[categoryId])).rows[0];
  if(!category)throw new HttpError(400,'Categoria não encontrada.');
- let product=(await c.query('SELECT * FROM products ORDER BY id')).rows.find(p=>identityKey(p.name,p.brand)===draft.identity_key);
- if(!product){product=(await c.query('INSERT INTO products(id,name,description,brand,image_url,category_path,category,subcategory) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',[randomUUID(),draft.name,draft.description,draft.brand,draft.image_url,category.path,category.path[0],category.path[1]??''])).rows[0];await audit(c,userId,'product.created',product.id);}
- const links=(await c.query("SELECT id FROM discovery_links WHERE product_draft_id=$1 AND product_id IS NULL AND status='pending' AND published_offer_id IS NULL AND extraction_status='completed' ORDER BY id FOR UPDATE",[draftId])).rows;
+ let product=draft.personalized_kit?null:(await c.query('SELECT * FROM products WHERE personalized_kit=false ORDER BY id')).rows.find(p=>identityKey(p.name,p.brand)===draft.identity_key);
+ if(!product){product=(await c.query('INSERT INTO products(id,name,description,brand,image_url,category_path,category,subcategory,personalized_kit) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',[randomUUID(),draft.name,draft.description,draft.brand,draft.image_url,category.path,category.path[0],category.path[1]??'',draft.personalized_kit])).rows[0];await audit(c,userId,'product.created',product.id);}
+ const links=(await c.query("SELECT id FROM discovery_links WHERE product_draft_id=$1 AND product_id IS NULL AND status='pending' AND published_offer_id IS NULL AND extraction_status='completed' AND COALESCE(ai_resolution->'product'->>'action','')<>'invalid' AND COALESCE(ai_resolution->'category'->>'action','')<>'invalid' ORDER BY id FOR UPDATE",[draftId])).rows;
  for(const link of links)await assignCatalogProduct(c,link.id,product,userId);
  await c.query('UPDATE discovery_links SET product_draft_id=NULL,enrichment_version=enrichment_version+1 WHERE product_draft_id=$1 AND product_id IS NULL',[draftId]);
  await c.query('UPDATE review_ai_product_drafts SET product_id=$2,version=version+1 WHERE id=$1',[draftId,product.id]);

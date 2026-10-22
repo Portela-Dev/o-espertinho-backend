@@ -17,9 +17,9 @@ export function catalogApiPaths() {
         ['post','/admin/discovery/enrichment/ai/suggestions/{id}/discard','Descartar proposta e permitir nova análise',z.strictObject({})],
         ['get','/extension/catalog/ai/config','Configurações e contadores de categorias/produtos confirmados'],
         ['get','/extension/catalog/ai/inventory','Inventário completo e paginado de categorias, produtos e rascunhos, com revisão consistente'],
-        ['get','/extension/catalog/ai/queue','Fila elegível de categorização ou catalogação'],
-        ['post','/extension/catalog/ai/context','Reservar contexto e obter candidatos sem credenciais OpenAI',z.strictObject({id:z.uuid(),task:z.enum(['category','product']),inventoryRevision:z.string().regex(/^\d+$/)})],
-        ['post','/extension/catalog/ai/suggestions','Aplicar decisão válida; respostas ambíguas ficam pendentes, sem publicação',reviewAiResult],
+        ['get','/extension/catalog/ai/queue','Fila elegível; retryReview=true seleciona somente decisões em revisão para reprocessamento explícito'],
+        ['post','/extension/catalog/ai/context','Reservar contexto e instruções configuradas sem credenciais OpenAI',z.strictObject({id:z.uuid(),task:z.enum(['category','product']),inventoryRevision:z.string().regex(/^\d+$/),retryReview:z.boolean().default(false)})],
+        ['post','/extension/catalog/ai/suggestions','Aplicar decisão válida; necessidades de revisão e anúncios inválidos não aplicam dados nem publicam',reviewAiResult],
         ['post','/extension/catalog/ai/release','Liberar análise cancelada ou com falha',z.strictObject({requestId:z.uuid()})],
         ['get', '/extension/catalog/config', 'Configurações dos marketplaces autorizados'],
         ['get', '/extension/catalog/stats', 'Pendências por marketplace; preços sem verificação bem-sucedida nas últimas 24 horas'],
@@ -64,11 +64,9 @@ export function catalogApiPaths() {
                     type: 'string', pattern: '^[a-p]{32}$'
                 }
             });
-        if(path==='/extension/catalog/stats'||path==='/extension/catalog/ai/config'||path==='/extension/catalog/ai/queue')parameters.push(
-            {name:'marketplaceId',in:'query',required:true,schema:{type:'string'}},
-            {name:'retryFailed',in:'query',schema:{type:'string',enum:['true','false'],default:'false'}}
-        );
-        if(path==='/extension/catalog/ai/queue')parameters.push({name:'task',in:'query',required:true,schema:{type:'string',enum:['category','product']}},{name:'limit',in:'query',schema:{type:'integer',minimum:1,maximum:10000,default:100}});
+        if(path==='/extension/catalog/stats'||path==='/extension/catalog/ai/config'||path==='/extension/catalog/ai/queue')parameters.push({name:'marketplaceId',in:'query',required:true,schema:{type:'string'}});
+        if(path==='/extension/catalog/stats')parameters.push({name:'retryFailed',in:'query',schema:{type:'string',enum:['true','false'],default:'false'}});
+        if(path==='/extension/catalog/ai/queue')parameters.push({name:'task',in:'query',required:true,schema:{type:'string',enum:['category','product']}},{name:'limit',in:'query',schema:{type:'integer',minimum:1,maximum:10000,default:100}},{name:'retryReview',in:'query',schema:{type:'string',enum:['true','false'],default:'false'}});
         if(path==='/extension/catalog/ai/inventory')parameters.push(
             {name:'kind',in:'query',required:true,schema:{type:'string',enum:['categories','products','drafts']}},
             {name:'cursor',in:'query',schema:{type:'string',format:'uuid'}},

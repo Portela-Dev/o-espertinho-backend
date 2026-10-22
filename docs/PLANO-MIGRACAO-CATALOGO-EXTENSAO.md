@@ -516,3 +516,10 @@ A consulta inicial desta limpeza retornou zero PRs abertas nos repositórios alt
 - Código sem consumidor retirado; nenhum módulo providers/OAuth/manual-extractor/offer-refresh antigo existe em src ou dist do backend. Só PostgreSQL permanece como container em execução. Backend/frontend seguem processos independentes e operações de navegador ficam na extensão. Conta restrita e migrations separadas verificadas; três contas de jobs sem login; nenhuma sessão comercial/catalogação foi zerada.
 - Plano raiz e cópia versionada sincronizados; PRs abertas permanecem únicas por repositório. Commits realizados por etapa e correção. Repositórios, pacote, releases, imagens antigas solicitadas pelo usuário e POC não commitada foram preservados como histórico; não são dependência operacional. Dados cifrados e execução antiga permanecem arquivo protegido sem grants de runtime.
 - Limpeza definitiva do código/local concluída. Publicação em VPS, merge de PRs, promoção para main e release não foram executados por consequência desta tarefa.
+
+
+## Evolução da revisão por IA — 22/10/2026
+
+Regras atualizadas nos prompts configurados (migration 039): modelo, RAM, armazenamento e tela distinguem produtos; kits personalizados possuem produto próprio por anúncio; inconsistências factuais geram anúncio inválido e não publicável. Dúvidas sem contradição permanecem em revisão. Reprocessamento explícito dos passos 4/5 pela extensão preserva marketplace, tarefa, autenticação e reservas; inválidos exigem nova extração bem-sucedida antes da reanálise. Contexto inclui o prompt atual e o mapeamento anterior; comparação em lotes consolida candidatos. Nenhuma lógica fixa por marketplace.
+
+Dados locais preservados (151 links/111 produtos), sem inferência real, publicação, deploy ou reativação do CI. Detalhes e testes em docs/REVISAO-IA.md. Atualização nas PRs existentes backend #18, frontend #20 e extensão #10, sem abrir novas PRs.

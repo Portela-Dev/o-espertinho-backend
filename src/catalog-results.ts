@@ -108,7 +108,9 @@ async function enrichResult({ c, item, v }: ResultContext, data: z.infer<typeof 
     if (link.confirmed_category_id && link.source_category_key !== categoryKey(path))
         throw new HttpError(409, 'A categoria de origem mudou; revise o item antes de substituir os dados.');
     const enriched = {...data, availability: v.outcome === 'unavailable' ? 'unavailable' : 'available'};
-    await c.query("UPDATE discovery_links SET enrichment_data=$2,source_category_path=$3,source_category_key=$4,extraction_status='completed',extraction_error=NULL,extracted_at=$5,enrichment_version=enrichment_version+1 WHERE id=$1", [link.id, JSON.stringify(enriched), path, categoryKey(path), data.collectedAt]);
+    // Fresh extraction is required before an invalid advert can be reconsidered, even if its text is unchanged.
+    const resolution=link.ai_resolution??{},wasInvalid=['product','category'].some(task=>resolution[task]?.action==='invalid');
+    await c.query("UPDATE discovery_links SET enrichment_data=$2,source_category_path=$3,source_category_key=$4,extraction_status='completed',extraction_error=NULL,extracted_at=$5,enrichment_version=enrichment_version+1,ai_resolution=CASE WHEN $6 THEN '{}'::jsonb ELSE ai_resolution END,product_draft_id=CASE WHEN $6 THEN NULL ELSE product_draft_id END WHERE id=$1", [link.id, JSON.stringify(enriched), path, categoryKey(path), data.collectedAt,wasInvalid]);
 }
 async function priceResult({ c, run, item, v }: ResultContext, data: z.infer<typeof dataSchema>) {
     const offer = (await c.query('SELECT * FROM offers WHERE id=$1 FOR UPDATE', [item.target_id])).rows[0];
