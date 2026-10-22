@@ -25,11 +25,14 @@ O diagnóstico no portal confirmou um cookie `csrftoken` e um `fetch` não nativ
 5. Catalogar, categorizar e revisar. Publicar uma oferta válida pelo admin e conferir a página pública e o destino de compra.
 6. Atualizar o preço e conferir resultado e histórico. Somente após a homologação aumentar os limites e validar a segunda página.
 
-O navegador temporário sem sessão retornou `/verify/traffic/error`; esse estado está configurado para pausa, sem tentativas de contornar a verificação. Os testes de contrato e de fragmentos HTML não substituem a homologação na sessão real. Publicação, conversão autenticada, galeria e indisponibilidade não devem ser consideradas homologadas antes da confirmação dos resultados.
+O navegador temporário sem sessão retornou `/verify/traffic/error`; esse estado está configurado para pausa, sem tentativas de contornar a verificação. Os testes de contrato e de fragmentos HTML não substituem a homologação na sessão real. Consultar as evidências abaixo para distinguir as etapas já homologadas das pendentes.
 
 ## Evidências de 22/10/2026
 
 - Configuração aplicada no banco local; a API pública lista a Shopee.
 - Descoberta real concluída: uma vitrine processada, três links únicos normalizados, sem falhas (execução `4c667f38-d3fc-4157-baa5-6ad95d7bdc80`).
-- Conversão ainda em homologação. A primeira tentativa pausou com o motivo genérico `login`, embora o administrador estivesse no portal autenticado. O executor foi ajustado para distinguir HTTP 401 (login), 403 (acesso negado) e 429 (limite de consultas), com status local no painel e sem exportar resposta ou sessão.
-- A tentativa anterior confirmou HTTP 403 (`access_denied`). O diagnóstico mostrou `fetch` não nativo e cookie `csrftoken` no portal. A receita foi então ajustada para usar contexto MAIN e o cookie local, sem exigir observação manual de header. Isso ainda precisa de validação real antes de concluir que resolve a recusa.
+- A primeira tentativa de conversão pausou com o motivo genérico `login`, embora o administrador estivesse no portal autenticado. O executor foi ajustado para distinguir HTTP 401 (login), 403 (acesso negado) e 429 (limite de consultas), com status local no painel e sem exportar resposta ou sessão.
+- A tentativa anterior confirmou HTTP 403 (`access_denied`). O diagnóstico mostrou `fetch` não nativo e cookie `csrftoken` no portal. A receita foi então ajustada para usar contexto MAIN e o cookie local, sem exigir observação manual de header; a confirmação real está registrada abaixo.
+- Conversão real confirmada com a nova receita: execução `2a4d822a-af7a-4688-9714-9f0124c336c2`, um item concluído, nenhuma falha e link curto salvo. O administrador confirmou que não precisou gerar manualmente o primeiro link.
+- Enriquecimento real confirmado: execução `2c9ecea1-9071-4b3a-8d4c-df9233d3ddb5`, produto “Aparelho Iphone 11 Roxo 128gb Apple Vitrine Grade A”, R$ 1.656,00 no Pix com cupom, condição de R$ 1.899,99 sem cupom preservada, imagem principal, nota 4,8, 47 avaliações e categoria de origem “Celulares e Dispositivos > Celulares”.
+- Pendentes: confirmação do produto/categoria, publicação, atualização de preço, segunda página, galeria completa e indicador explícito de indisponibilidade.
