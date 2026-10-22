@@ -8,7 +8,7 @@ test('lista usuários com filtros e paginação, sem expor identidade Google ou 
  const {admin,alice}=await fixture(t);assert.equal((await alice.get('/api/admin/users')).status,403);
  const r=await admin.get('/api/admin/users?q=ALICE&status=active&profile=user');assert.equal(r.status,200);assert.equal(r.body.total,1);assert.equal(r.body.items[0].email,'alice@gmail.com');assert.equal(r.body.pageSize,25);assert.equal(r.body.items[0].google_sub,undefined);
  assert.equal((await admin.get('/api/admin/users?page=0')).status,400);assert.equal((await admin.get('/api/admin/users?page=2')).body.items.length,0);
- const profiles=await admin.get('/api/admin/access-profiles');assert.equal(profiles.body.permissions.length,9);assert.ok(profiles.body.permissions.some(p=>p.id==='affiliate_links'));assert.ok(profiles.body.profiles.some(p=>p.id==='admin'&&p.system));
+ const profiles=await admin.get('/api/admin/access-profiles');assert.equal(profiles.body.permissions.length,10);assert.ok(profiles.body.permissions.some(p=>p.id==='affiliate_links'));assert.ok(profiles.body.permissions.some(p=>p.id==='purge'));assert.ok(profiles.body.profiles.some(p=>p.id==='admin'&&p.system));
 });
 test('editor recebe acesso apenas ao catálogo; alterações de perfil afetam a sessão já aberta',async t=>{
  const {admin,alice,user}=await fixture(t);assert.equal((await change(admin,user,'editor')).status,200);

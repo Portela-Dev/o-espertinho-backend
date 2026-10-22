@@ -523,3 +523,10 @@ A consulta inicial desta limpeza retornou zero PRs abertas nos repositórios alt
 Regras atualizadas nos prompts configurados (migration 039): modelo, RAM, armazenamento e tela distinguem produtos; kits personalizados possuem produto próprio por anúncio; inconsistências factuais geram anúncio inválido e não publicável. Dúvidas sem contradição permanecem em revisão. Reprocessamento explícito dos passos 4/5 pela extensão preserva marketplace, tarefa, autenticação e reservas; inválidos exigem nova extração bem-sucedida antes da reanálise. Contexto inclui o prompt atual e o mapeamento anterior; comparação em lotes consolida candidatos. Nenhuma lógica fixa por marketplace.
 
 Dados locais preservados (151 links/111 produtos), sem inferência real, publicação, deploy ou reativação do CI. Detalhes e testes em docs/REVISAO-IA.md. Atualização nas PRs existentes backend #18, frontend #20 e extensão #10, sem abrir novas PRs.
+
+
+## Expurgo manual do catálogo — 22/10/2026
+
+Área Manutenção com permissão purge: períodos independentes de links e produtos (30 dias por padrão), prévia assinada, confirmação explícita e exclusão física transacional das dependências. Migration 040 registra duração contínua de indisponibilidade/falha e de produtos sem ofertas; contagem antiga sem evidência começa na ativação, sem inventar datas. Processamento ativo e catálogo alterado bloqueiam o expurgo. Runtime permanece sem acesso direto aos históricos dos jobs; triggers de exclusão removem suas dependências específicas.
+
+Backend: 142 testes e dois PostgreSQL reais separados aprovados. Frontend: build e sete jornadas SSR aprovados com API descartável. Migration local preservou dados e somente a prévia de 30 dias foi consultada; nenhum expurgo real. Detalhes em docs/EXPURGO-CATALOGO.md. Atualização nas PRs #18/backend e #20/frontend, mantendo CI desativado.

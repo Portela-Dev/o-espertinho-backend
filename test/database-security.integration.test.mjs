@@ -5,6 +5,8 @@ import {randomUUID} from 'node:crypto';
 import {createDatabase} from '../dist/db.js';
 import {provisionDatabase} from '../dist/provision-database.js';
 import {assertRestrictedDatabase} from '../dist/database-security.js';
+import {previewPurge,executePurge} from '../dist/catalog-purge.js';
+import {seedOffer,seedProduct} from './helpers.mjs';
 const url=process.env.TEST_DATABASE_ADMIN_URL;
 test('PostgreSQL real: provisionamento preserva dados e restringe runtime, DDL e migrations',{skip:!url},async()=>{
  const suffix=randomUUID().replaceAll('-','').slice(0,12),database='security_'+suffix,role='app_'+suffix;
@@ -19,6 +21,19 @@ test('PostgreSQL real: provisionamento preserva dados e restringe runtime, DDL e
   const id=randomUUID();await app.query("INSERT INTO products(id,name,category,category_path) VALUES($1,'Dado preservado','Tecnologia',ARRAY['Tecnologia'])",[id]);
   await app.query("UPDATE products SET name='Atualizado' WHERE id=$1",[id]);
   for(const table of ['amazon_sitestripe_session','affiliate_proof_recipes','offer_refresh_items','enrichment_items'])await assert.rejects(()=>app.query('SELECT * FROM '+table),error=>error.code==='42501');
+  // Purge reaches only dependencies of deleted rows through fixed definer triggers;
+  // runtime still cannot read or mutate the retired workers' tables directly.
+  const purgeProduct=await seedProduct(app,{name:'Produto do expurgo'}),offer=await seedOffer(app,{productId:purgeProduct}),legacyRun=randomUUID(),legacyItem=randomUUID();
+  const actor=(await owner.query("SELECT id FROM users WHERE role='admin' LIMIT 1")).rows[0].id;
+  await owner.query("INSERT INTO offer_refresh_runs(id,trigger,status) VALUES($1,'manual','completed')",[legacyRun]);
+  await owner.query("INSERT INTO offer_refresh_items(id,run_id,offer_id,marketplace_id,expected_updated_at,status) VALUES($1,$2,$3,'amazon',clock_timestamp(),'done')",[legacyItem,legacyRun,offer]);
+  await app.query("UPDATE offers SET availability_status='unavailable' WHERE id=$1",[offer]);
+  await owner.query("UPDATE offers SET unavailable_since=clock_timestamp()-interval '31 days' WHERE id=$1",[offer]);
+  const key=Buffer.alloc(32,1).toString('base64'),preview=await previewPurge(app,key,actor,{products:false});assert.equal(preview.counts.offers,1);
+  const purged=await executePurge(app,key,actor,{previewToken:preview.previewToken,confirmed:true});assert.equal(purged.counts.offers,1);
+  assert.equal((await owner.query('SELECT id FROM offer_refresh_items WHERE id=$1',[legacyItem])).rows.length,0);
+  assert.equal((await owner.query('SELECT id FROM offer_refresh_runs WHERE id=$1',[legacyRun])).rows.length,0);
+  await assert.rejects(()=>app.query('SELECT * FROM offer_refresh_items'),error=>error.code==='42501');
   await assert.rejects(()=>app.query('SELECT credentials_encrypted FROM marketplaces'),error=>error.code==='42501');
   await app.query("SELECT id,name,allowed_hosts,catalog_executor FROM marketplaces");
   await assert.rejects(()=>app.query('SELECT * FROM schema_migrations'),error=>error.code==='42501');

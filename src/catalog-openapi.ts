@@ -1,4 +1,5 @@
 import {publishBatchInput} from './catalog-publication.js';
+import {purgeCriteria,purgeExecute} from './catalog-purge.js';
 import {reviewAiInput,reviewAiResult} from './review-ai.js';
 import { z } from 'zod';
 import { catalogSettings } from './catalog-settings.js';
@@ -12,6 +13,8 @@ export function catalogApiPaths() {
         string,
         any?
     ][] = [
+        ['post','/admin/purge/preview','Prévia de expurgo físico: exige purge e confirmação administrativa recente; padrão 30 dias',purgeCriteria],
+        ['post','/admin/purge/execute','Executar exatamente a prévia assinada; exclui dependências e recusa catálogo alterado ou processamento ativo',purgeExecute],
         ['get','/admin/discovery/enrichment/ai/settings','Consultar configurações independentes de IA'],
         ['put','/admin/discovery/enrichment/ai/settings','Ativar tarefas e definir prompts; invalida sugestões antigas',reviewAiInput],
         ['post','/admin/discovery/enrichment/ai/suggestions/{id}/discard','Descartar proposta e permitir nova análise',z.strictObject({})],

@@ -67,7 +67,7 @@ function extensionAdminPermissions(section:string,method:string):string[]{
 }
 function adminPermissions(parts:string[],method:string):string[]{
  const resource=parts[0];
- const fixed:Record<string,string[]>={users:['users'],'access-profiles':['users'],stats:['overview'],audit:['activity'],selectors:['selectors'],'category-tree':['catalog'],'category-options':['catalog'],products:['catalog'],offers:['catalog'],'link-imports':['catalog']};
+ const fixed:Record<string,string[]>={purge:['purge'],users:['users'],'access-profiles':['users'],stats:['overview'],audit:['activity'],selectors:['selectors'],'category-tree':['catalog'],'category-options':['catalog'],products:['catalog'],offers:['catalog'],'link-imports':['catalog']};
  if(fixed[resource])return fixed[resource];
  if(resource==='extension-catalog')return extensionAdminPermissions(parts[1],method);
  if(resource==='catalog-marketplaces')return method==='GET'?['catalog','selectors','marketplaces','discovery']:['marketplaces'];
@@ -83,7 +83,7 @@ export function requireAdmin(req: Request,_res: Response,next: NextFunction) {
 export const ADMIN_VERIFICATION_MS=15*60*1000;
 export function requireRecentAdmin(req:Request,_res:Response,next:NextFunction){
  const resource=req.path.split('/').find(Boolean)?.toLowerCase()??'';
- const sensitive=!['GET','HEAD','OPTIONS'].includes(req.method)&&['users','access-profiles','catalog-marketplaces','selectors','discovery','extension-catalog'].includes(resource);
+ const sensitive=!['GET','HEAD','OPTIONS'].includes(req.method)&&['purge','users','access-profiles','catalog-marketplaces','selectors','discovery','extension-catalog'].includes(resource);
  if(sensitive&&(!req.adminVerifiedAt||Date.now()-req.adminVerifiedAt.getTime()>ADMIN_VERIFICATION_MS))return next(new HttpError(403,'Confirme sua conta Google para concluir esta operação.','ADMIN_REAUTH_REQUIRED'));
  next();
 }

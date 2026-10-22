@@ -1,4 +1,5 @@
 import {registerReviewAiAdmin,registerReviewAiExtension} from './review-ai.js';
+import {registerCatalogPurge} from './catalog-purge.js';
 import {registerCatalogAdmin} from './catalog-admin.js';
 import {registerCatalogManual} from './catalog-manual.js';
 import {registerCatalogPublication} from './catalog-publication.js';
@@ -179,6 +180,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
   app.use('/api/admin',requireUser,requireAdmin,requireRecentAdmin,(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
   registerUserAdmin(app,db);
   registerProductAdmin(app,db);
+  registerCatalogPurge(app,db);
   registerCatalogSettings(app,db);registerCatalogAdmin(app,db);registerCatalogManual(app,db);
   registerDiscoveryAdmin(app,db);registerDiscoveryRuns(app,db);registerEnrichmentAdmin(app,db);registerReviewAiAdmin(app,db);registerCatalogPublication(app,db);
   registerScrapingAdmin(app,db);

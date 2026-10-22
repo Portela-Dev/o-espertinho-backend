@@ -15,9 +15,10 @@ export const accessPermissions=[
  {id:'updates',name:'Consultar execuções e atualizar preços'},
  {id:'activity',name:'Registro de atividade'},
  {id:'affiliate_links',name:'Gerar links de afiliados pela extensão'},
+ {id:'purge',name:'Expurgar ofertas, produtos e dependências (exclusão física)'},
  {id:'users',name:'Gestão de usuários e perfis (permite conceder acesso administrativo)'}
 ] as const;
-const profileInput=z.object({name:z.string().trim().min(1).max(80),description:z.string().trim().max(400).default(''),permissions:z.array(z.enum(['overview','catalog','marketplaces','selectors','updates','activity','users','affiliate_links','discovery'])).max(9).transform(v=>[...new Set(v)])});
+const profileInput=z.object({name:z.string().trim().min(1).max(80),description:z.string().trim().max(400).default(''),permissions:z.array(z.enum(['overview','catalog','marketplaces','selectors','updates','activity','users','affiliate_links','discovery','purge'])).max(10).transform(v=>[...new Set(v)])});
 const userColumns='u.id,u.email,u.name,u.avatar,u.role,u.access_profile_id,u.blocked,u.created_at,p.name AS profile_name';
 export function registerUserAdmin(app:Express,db:Database){
  app.get('/api/admin/access-profiles',async(req,res)=>{
