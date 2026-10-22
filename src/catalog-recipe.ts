@@ -20,7 +20,7 @@ const step = z.discriminatedUnion('type', [
     })
 ]);
 export const affiliateRecipe = z.strictObject({
-    id, name: z.string().min(1).max(100), loginUrl: z.url(), allowedOrigins: z.array(z.url()).min(1).max(10), affiliateOrigins: z.array(z.url()).min(1).max(10), batchSize: z.number().int().min(1).max(10), intervalMs: z.number().int().min(100).max(600000), steps: z.array(step).min(1).max(15)
+    id, name: z.string().min(1).max(100), loginUrl: z.url(), allowedOrigins: z.array(z.url()).min(1).max(10), affiliateOrigins: z.array(z.url()).min(1).max(10), batchSize: z.number().int().min(1).max(10), intervalMs: z.number().int().min(100).max(600000), executionWorld: z.enum(['ISOLATED','MAIN']).optional(), steps: z.array(step).min(1).max(15)
 });
 type Recipe = z.infer<typeof affiliateRecipe>;
 type Market = {
