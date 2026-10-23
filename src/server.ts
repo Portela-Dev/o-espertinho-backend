@@ -1,13 +1,26 @@
-import {assertRestrictedDatabase} from './database-security.js';
+import { assertRestrictedDatabase } from './database-security.js';
 import { loadConfig } from './config.js';
 import { createDatabase } from './db.js';
 import { createApp } from './app.js';
 import { startWorker } from './worker-runtime.js';
-const config=loadConfig(),db=createDatabase(config.DATABASE_URL);
-if(config.NODE_ENV==='production')await assertRestrictedDatabase(db);
+const config = loadConfig(),
+  db = createDatabase(config.DATABASE_URL);
+if (config.NODE_ENV === 'production') await assertRestrictedDatabase(db);
 await db.query('SELECT 1 FROM users LIMIT 1');
-const app=createApp(db,config);
-const server=app.listen(config.PORT,config.HOST,()=>console.log(`API: http://${config.HOST}:${config.PORT}/api`));
-const stopWorker=config.RUN_WORKER==='true'?startWorker(db,config):async()=>{};
-let stopping=false;
-for(const signal of ['SIGINT','SIGTERM'] as const) process.on(signal,()=>{if(stopping)return;stopping=true;server.close(async()=>{await stopWorker();await db.end();process.exit(0);});});
+const app = createApp(db, config);
+const server = app.listen(config.PORT, config.HOST, () =>
+  console.log(`API: http://${config.HOST}:${config.PORT}/api`),
+);
+const stopWorker =
+  config.RUN_WORKER === 'true' ? startWorker(db, config) : async () => {};
+let stopping = false;
+for (const signal of ['SIGINT', 'SIGTERM'] as const)
+  process.on(signal, () => {
+    if (stopping) return;
+    stopping = true;
+    server.close(async () => {
+      await stopWorker();
+      await db.end();
+      process.exit(0);
+    });
+  });
