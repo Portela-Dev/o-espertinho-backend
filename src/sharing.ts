@@ -1,3 +1,4 @@
+import {isPublicHttpsUrl} from './public-url.js';
 import type {Express} from 'express';
 import {z} from 'zod';
 import type {Database} from './db.js';
@@ -6,14 +7,14 @@ import {audit} from './offers.js';
 
 const tokens=['titulo','preco','loja','url','texto'];
 const knownTokens=(text:string)=>[...text.matchAll(/\{([^{}]+)\}/g)].every(m=>tokens.includes(m[1]));
-const https=(value:string)=>{try{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password;}catch{return false;}};
-const logo=z.string().max(2000).refine(v=>/^\/brand\/social\/[a-z0-9-]+\.svg$/.test(v)||https(v),'Use uma URL HTTPS ou um logo padrão.');
+
+const logo=z.string().max(2000).refine(v=>/^\/brand\/social\/[a-z0-9-]+\.svg$/.test(v)||isPublicHttpsUrl(v),'Use uma URL HTTPS ou um logo padrão.');
 export const sharingChannelSchema=z.object({
  id:z.string().regex(/^[a-z][a-z0-9-]{0,39}$/),name:z.string().trim().min(1).max(60),enabled:z.boolean(),logoUrl:logo,
  action:z.enum(['url','copy']),urlTemplate:z.string().max(2000),
  textTemplate:z.string().trim().min(1).max(3000).refine(v=>knownTokens(v)&&!v.includes('{texto}'),'Use {titulo}, {preco}, {loja} e {url} no texto.')
 }).strict().superRefine((v,ctx)=>{
- if(v.action==='url'&&(!knownTokens(v.urlTemplate)||!https(v.urlTemplate.replace(/\{[^{}]+\}/g,'sample'))||!(/\{(?:url|texto)\}/.test(v.urlTemplate))))ctx.addIssue({code:'custom',path:['urlTemplate'],message:'Informe um endereço HTTPS com {url} ou {texto} e variáveis válidas.'});
+ if(v.action==='url'&&(!knownTokens(v.urlTemplate)||!isPublicHttpsUrl(v.urlTemplate.replace(/\{[^{}]+\}/g,'sample'))||!(/\{(?:url|texto)\}/.test(v.urlTemplate))))ctx.addIssue({code:'custom',path:['urlTemplate'],message:'Informe um endereço HTTPS com {url} ou {texto} e variáveis válidas.'});
 });
 export const sharingSettingsInput=z.object({enabled:z.boolean(),version:z.number().int().positive(),channels:z.array(sharingChannelSchema).max(20)}).strict().refine(v=>new Set(v.channels.map(c=>c.id)).size===v.channels.length,'Não repita identificadores de redes.');
 function settings(row:any){return {enabled:row.enabled,version:row.version,channels:row.channels};}

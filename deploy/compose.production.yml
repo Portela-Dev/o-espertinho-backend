@@ -21,6 +21,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?Configure a conta restrita}
       APP_ORIGIN: ${APP_ORIGIN:?Configure APP_ORIGIN}
+      EXTENSION_BACKEND_URL: ${EXTENSION_BACKEND_URL:?Configure a origem publica HTTPS da extensao}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       RUN_WORKER: ${RUN_WORKER:-true}
       WORKER_INTERVAL_SECONDS: ${WORKER_INTERVAL_SECONDS:-60}

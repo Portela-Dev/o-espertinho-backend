@@ -94,3 +94,12 @@ Em produção (`NODE_ENV=production`), Swagger, assets e `/api/openapi.json` exi
 ## Operação atual
 
 Somente backend/PostgreSQL e frontend são implantados na VPS. O navegador roda na extensão do administrador; não há extrator, job, porta de navegador ou segredo de serviço. RUN_WORKER controla somente manutenção interna sem navegador. Configure DATABASE_URL restrita e MIGRATION_DATABASE_URL separada; o provisionamento retira acesso às credenciais arquivadas. Prévia e teste de seletores aguardam solicitação processada pela extensão. Faça backup antes da migration 031; o arquivo histórico é preservado e nenhuma exclusão de dados é exigida.
+
+
+## Origens e URLs públicas em produção
+
+Defina `APP_ORIGIN=https://seu-dominio.example` e `EXTENSION_BACKEND_URL=https://seu-dominio.example` no `.env` do backend antes de iniciar o Compose. O Compose exige a variável da extensão explicitamente; não usa fallback para localhost. No modelo de domínio único, ambas apontam para o site público servido pelo frontend/Nginx, que encaminha `/api` ao backend. Isso preserva a sessão usada para autorizar a extensão.
+
+O backend recusa inicialização de produção com HTTP, IPs literais, hosts locais, credenciais, portas personalizadas, caminhos, query ou fragmento nessas origens. A barra final e a capitalização do hostname são normalizadas antes da validação de Origin/CSRF. Desenvolvimento continua aceitando os endereços HTTP locais com suas portas.
+
+Imagens de produtos (cadastro, revisão e resultados de extração), logos e destinos de compartilhamento usam a política comum de URL HTTPS com hostname público, sem credenciais e sem porta personalizada. Os logos locais de compartilhamento em `/brand/social/*.svg` continuam permitidos. A validação não resolve DNS nem faz requisições aos destinos; não é uma garantia contra mudanças posteriores de DNS/redirecionamento. A origem interna `API_BASE_URL=http://espertinho-backend:3000` permanece restrita à rede Docker e não segue a política das URLs públicas.

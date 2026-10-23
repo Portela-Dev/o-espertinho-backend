@@ -1,5 +1,5 @@
 // API-side validation of the extraction HTTP contract. No browser implementation.
-import {isIP} from 'node:net';
+import {publicHostname} from './public-url.js';
 import {z} from 'zod';
 import {HttpError} from './security.js';
 export const extractionFields=['title','brand','price','originalPrice','rating','reviewCount','images','description','specifications','conditions','category','externalId','productUrl'] as const;
@@ -7,5 +7,5 @@ export const selectorRuleSchema=z.object({field:z.enum(extractionFields),selecto
 export const profileSchema=z.object({version:z.number().int().min(0),rules:z.array(selectorRuleSchema).min(2).max(40),waitTimeoutMs:z.number().int().min(1000).max(30000).default(15000),validityMinutes:z.number().int().min(15).max(1440).default(360)}).superRefine((v,ctx)=>{for(const field of ['title','price'])if(!v.rules.some(r=>r.field===field))ctx.addIssue({code:'custom',message:'Cadastre uma regra para '+field,path:['rules']});});
 export type SelectorRule=z.infer<typeof selectorRuleSchema>;
 export interface ScrapingProfile {rules:SelectorRule[];wait_timeout_ms:number;validity_minutes:number;version:number}
-export function validHost(host:string){return host===host.toLowerCase()&&!isIP(host)&&host.includes('.')&&!host.endsWith('.')&&!host.includes(':')&&!/(^|\.)(localhost|local|internal|test|invalid)$/.test(host)&&/^[a-z0-9.-]+$/.test(host);}
+export const validHost=publicHostname;
 export function marketUrl(value:string,hosts:string[]){let url:URL;try{url=new URL(value);}catch{throw new HttpError(400,'URL inválida.');}if(url.protocol!=='https:'||url.username||url.password||url.port||!hosts.includes(url.hostname))throw new HttpError(400,'Use um link HTTPS de um dos domínios cadastrados nesse marketplace.');return url.href;}

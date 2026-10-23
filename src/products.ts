@@ -1,3 +1,4 @@
+import {publicHttpsUrlSchema} from './public-url.js';
 import {pagedQuery,wantsPage} from './pagination.js';
 import type {Express} from 'express';
 import {randomUUID} from 'node:crypto';
@@ -7,7 +8,7 @@ import {HttpError} from './security.js';
 import {requiredCategory,classificationText} from './classifications.js';
 import {audit} from './offers.js';
 const uuid=z.uuid();
-const productSchema=z.object({name:z.string().trim().min(1).max(300),description:z.string().max(4000).default(''),brand:z.string().trim().max(120).default(''),model:z.string().trim().max(120).default(''),category:requiredCategory.optional(),categoryPath:z.array(requiredCategory).min(1).max(10).optional(),subcategory:classificationText.default(''),imageUrl:z.url().refine(v=>new URL(v).protocol==='https:','A imagem deve usar HTTPS.').nullable().default(null)}).refine(v=>!!v.categoryPath?.length||!!v.category,{message:'Informe uma categoria.',path:['categoryPath']});
+const productSchema=z.object({name:z.string().trim().min(1).max(300),description:z.string().max(4000).default(''),brand:z.string().trim().max(120).default(''),model:z.string().trim().max(120).default(''),category:requiredCategory.optional(),categoryPath:z.array(requiredCategory).min(1).max(10).optional(),subcategory:classificationText.default(''),imageUrl:publicHttpsUrlSchema.nullable().default(null)}).refine(v=>!!v.categoryPath?.length||!!v.category,{message:'Informe uma categoria.',path:['categoryPath']});
 export async function getProduct(db:Pick<Database,'query'>,id:string){
  const p=(await db.query('SELECT * FROM products WHERE id=$1',[uuid.parse(id)])).rows[0];
  if(!p)throw new HttpError(404,'Produto nÃ£o encontrado. Cadastre-o na aba Produtos antes de adicionar links.');return p;

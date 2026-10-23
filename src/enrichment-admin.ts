@@ -1,3 +1,4 @@
+import {publicHttpsUrlSchema} from './public-url.js';
 import {finalizeCatalogDraft,assignCatalogProduct} from './review-ai-catalog.js';
 import type {Express} from 'express';
 import {randomUUID} from 'node:crypto';
@@ -10,7 +11,7 @@ import {requiredCategory} from './classifications.js';
 import {invalidAiReview} from './review-ai.js';
 const uuid=z.uuid();
 const marketId=z.string().regex(/^[a-z][a-z0-9_-]{1,39}$/);
-const newProduct=z.strictObject({name:z.string().trim().min(1).max(300),description:z.string().max(4000).default(''),brand:z.string().trim().max(120).default(''),imageUrl:z.url().refine(v=>new URL(v).protocol==='https:','A imagem deve usar HTTPS.').nullable().default(null)});
+const newProduct=z.strictObject({name:z.string().trim().min(1).max(300),description:z.string().max(4000).default(''),brand:z.string().trim().max(120).default(''),imageUrl:publicHttpsUrlSchema.nullable().default(null)});
 const assignment=z.discriminatedUnion('mode',[
  z.strictObject({mode:z.literal('existing'),version:z.number().int().nonnegative(),productId:uuid}),
  z.strictObject({mode:z.literal('new'),version:z.number().int().nonnegative(),product:newProduct})

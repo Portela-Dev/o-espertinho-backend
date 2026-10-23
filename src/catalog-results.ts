@@ -3,7 +3,7 @@ import type { Database } from './db.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { hash, HttpError } from './security.js';
-import { marketUrl, validHost } from './scraping.js';
+import { marketUrl } from './scraping.js';
 import { scrapedDataSchema } from './extraction-data.js';
 import { normalizeProductUrl } from './url-normalization.js';
 import { categoryKey } from './enrichment-admin.js';
@@ -82,11 +82,7 @@ function validateProductResult({ run, item, market, v }: ResultContext) {
         throw new HttpError(400, 'Dados extraídos necessários.');
     const data = v.data;
     marketUrl(data.productUrl, market.allowed_hosts);
-    for (const image of data.images) {
-        const url = new URL(image);
-        if (url.protocol !== 'https:' || url.username || url.password || !validHost(url.hostname))
-            throw new HttpError(400, 'Imagem inválida.');
-    }
+
     data.collectedAt = new Date(item.observed_at).toISOString();
     if (v.outcome === 'success' && (!data.title || data.priceCents === null || data.missing.length))
         throw new HttpError(400, 'Extração incompleta não confirma disponibilidade.');
