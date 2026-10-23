@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# Defense in depth: validate again immediately before using SSH credentials.
+node scripts/ci/release-policy.mjs --require-deploy
 service="backend"
 for key in VPS_HOST VPS_USER VPS_SSH_PRIVATE_KEY VPS_KNOWN_HOSTS; do
   [[ -n ${!key:-} ]] || { echo "Configure $key no environment production." >&2; exit 1; }

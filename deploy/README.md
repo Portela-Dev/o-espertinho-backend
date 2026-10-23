@@ -6,17 +6,20 @@ O workflow `.github/workflows/ci-vps.yml` adapta as etapas do Quest Crush: valid
 
 ## Execuções
 
-- PRs para `develop` ou `main`: validação, testes e construção/smoke test da imagem, sem secrets de deploy e sem executar código de PR no runner próprio. Arquivos grandes de imagem não são publicados em PRs.
-- Push na `develop`: mesmas verificações e análise no SonarQube. O deploy automático vem desativado.
-- Push na `main`: validação e imagem. Não analisa outra branch no mesmo projeto Community e não implanta.
-- Actions → CI e deploy VPS → Run workflow → branch `develop` → marcar `deploy`: deploy manual, condicionado a todas as validações e ao Quality Gate.
-- Para habilitar deploy em cada push na `develop`, configure a variable de repositório `VPS_AUTO_DEPLOY=true`. Não é necessário para deploy manual.
+- PRs e pushes em develop, staging e main executam CI, sem deploy por branch.
+- workflow_dispatch executa somente CI/Sonar; a opção de deploy manual foi removida.
+- Apenas o push de criação de uma tag staging-vMAJOR.MINOR.PATCH, como staging-v0.1.0, pode fazer deploy automático. A tag deve apontar exatamente para o HEAD remoto atual de staging. Tags leves e anotadas são aceitas; versões antigas, movimentações e exclusões são recusadas.
+- A política é verificada antes da validação e novamente imediatamente antes de usar SSH. Se staging avançar durante o pipeline, a release antiga é recusada.
+- A release depende de validação, Quality Gate do mesmo commit e imagem aprovada. Desenvolvimentos e tags não autorizadas nunca entram no job de deploy.
+- A extensão Chrome continua sem deploy ou publicação na Web Store.
 
-O botão **Run workflow** da interface exige que este workflow também exista na branch padrão do GitHub (atualmente main). Após aprovar estas PRs na develop, promova o workflow à main pelo fluxo de revisão normal, ou selecione develop como branch padrão nas configurações. Não alteramos a main nem a branch padrão automaticamente. Depois de o workflow ter sido registrado por uma execução, também é possível dispará-lo pela CLI: `gh workflow run ci-vps.yml --repo Portela-Dev/o-espertinho-backend --ref develop -f deploy=true`. Referência: [execuções manuais](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch).
+Consulte [RELEASE-STAGING.md](../docs/RELEASE-STAGING.md) para promoção de branches e criação das tags. A branch staging precisa receber estas alterações antes da primeira tag. Nenhuma tag é criada automaticamente pelo CI. VPS_AUTO_DEPLOY não é mais consultada.
 
-Os nomes dos artefatos usam o identificador da execução (`run_id`), sem o número da tentativa. Assim, **Re-run failed jobs** reutiliza a cobertura e a imagem já publicadas pelo mesmo build. Quando os jobs produtores são reexecutados, seus artefatos são substituídos.
+O environment continua chamado production para reutilizar as variáveis/secrets já cadastrados. Ele representa a VPS atual; não foi criado outro ambiente ou servidor. Restrinja o environment a tags staging-v*, sem permitir branches.
 
-Cada repositório implanta somente seu serviço. Há exclusão mútua no GitHub e na VPS; um deploy em andamento não é cancelado por outro. O CI constrói uma imagem Linux no runner ubuntu-latest do GitHub e usa a mesma imagem no smoke test e na VPS, sem recompilar remotamente. O pacote contém tag do commit, manifesto e hashes SHA-256. A transferência SSH valida a chave do host, sem `StrictHostKeyChecking=no` nem descoberta automática de host confiável. Não é preciso registry ou PAT do Docker/GitHub Packages.
+Relatórios e pacotes têm retenção de um dia. O arquivo de imagem para deploy só é gerado/publicado em releases autorizadas; PRs e pushes de branch fazem build/smoke test sem guardar esse arquivo grande. Os nomes incluem run_id; reruns reutilizam os artefatos do mesmo build.
+
+Cada repositório implanta apenas seu serviço. A exclusão mútua no GitHub e na VPS é preservada, sem cancelar um deploy em andamento. A mesma imagem Linux compilada no runner hospedado é verificada por SHA-256 e transferida por SSH com chave do host validada. Não há recompilação na VPS.
 
 ## GitHub: configurações em cada repositório
 
@@ -26,7 +29,6 @@ Em Settings → Secrets and variables → Actions:
 |---|---|---|
 | Repository secret | `SONAR_TOKEN` | Token de análise do projeto correspondente, com permissão Execute Analysis |
 | Repository variable | `SONAR_HOST_URL` | URL alcançável a partir do runner de análise; exemplo `http://127.0.0.1:9000` apenas quando SonarQube está no mesmo PC |
-| Repository variable opcional | `VPS_AUTO_DEPLOY` | `true` habilita deploy após push validado na develop; ausente/false mantém manual |
 
 Em Settings → Environments, crie **production** e cadastre:
 
@@ -38,7 +40,7 @@ Em Settings → Environments, crie **production** e cadastre:
 | Secret | `VPS_SSH_PRIVATE_KEY` | Chave privada OpenSSH da automação, dedicada a esse acesso |
 | Secret | `VPS_KNOWN_HOSTS` | Linha(s) de known_hosts do servidor, com hostname/porta correspondentes |
 
-Configure regras de aprovação e restrição à branch `develop` no environment se desejar revisão antes do deploy. Os dados de runtime da aplicação ficam na VPS; não há segredo de banco embutido na imagem nem enviado como artefato.
+No environment production, permita somente tags staging-v* em Selected branches and tags; não inclua regras de branch. Os dados de runtime da aplicação ficam na VPS; não há segredo de banco embutido na imagem nem enviado como artefato.
 
 ## SonarQube e runner
 
@@ -46,7 +48,7 @@ Crie o projeto com a chave **o-espertinho-backend** e nome **O Espertinho - Back
 
 Validação, testes, build Docker e deploy por SSH executam em runners hospedados pelo GitHub (`ubuntu-latest`). Apenas o job de SonarQube usa o runner da organização `Portela-Dev`, com os labels `[self-hosted, Windows, X64, windows-portela-dev]`. Esse runner precisa de Git for Windows com GPG e dirmngr, acesso ao servidor SonarQube e versão atualizada para as actions com runtime Node 24. Ele não precisa de Docker. ShellCheck e Playwright/Chromium executam no Linux hospedado pelo GitHub.
 
-Em **Organization Settings > Actions > Runner groups**, libere estes três repositórios no grupo do runner e habilite o acesso a repositórios públicos. PRs executam validações nos runners hospedados do GitHub. A análise Sonar no runner próprio só ocorre na develop em push ou execução manual. `SONAR_HOST_URL` deve ser alcançável pela conta do runner; loopback só funciona quando o Sonar está no mesmo computador.
+Em **Organization Settings > Actions > Runner groups**, libere estes três repositórios no grupo do runner e habilite o acesso a repositórios públicos. PRs executam validações nos runners hospedados do GitHub. A análise Sonar no runner próprio ocorre na develop, em execução manual autorizada ou em release staging validada. `SONAR_HOST_URL` deve ser alcançável pela conta do runner; loopback só funciona quando o Sonar está no mesmo computador.
 
 O relatório LCOV vem dos testes reais do mesmo commit, via artefato do job validate, com sourcemaps para o TypeScript. Testes E2E não são contabilizados como cobertura unitária. Especialmente no frontend, a cobertura unitária ainda é inicial e o Quality Gate poderá exigir novos testes; o workflow preserva essa avaliação.
 
@@ -72,7 +74,7 @@ O Compose inicia PostgreSQL em rede privada e conserva os dados no volume `o-esp
 
 Se a troca do container falhar, o script tenta reiniciar a imagem anterior e o job continua marcado como falha. Rollback de imagem **não desfaz migrations SQL**. O arquivo de runtime permanece fora das releases, e as imagens anteriores ficam disponíveis para recuperação. O arquivo de imagem transferido é removido depois do sucesso; agende manutenção de imagens antigas, backups e metadados conforme o espaço da VPS. Os artefatos de imagem no GitHub têm retenção de 3 dias; relatórios, 7 dias.
 
-O workflow não provisiona a VPS, DNS, certificados, runners ou projetos SonarQube e não recebe credenciais de produção nos jobs de validação. O deploy só é executado depois que você configurar o environment e acioná-lo/habilitá-lo.
+O workflow não provisiona a VPS, DNS, certificados, runners ou projetos SonarQube e não recebe credenciais de produção nos jobs de validação. O deploy só é executado após configurar o environment, habilitar o workflow e criar uma tag staging válida.
 
 ## Segurança
 
