@@ -1,5 +1,4 @@
 // API-side validation of the extraction HTTP contract. No browser implementation.
-import { publicHostname } from './public-url.js';
 import { z } from 'zod';
 import { HttpError } from './security.js';
 export const extractionFields = [

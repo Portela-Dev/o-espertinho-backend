@@ -401,7 +401,7 @@ async function seedChanges(
   c: Pick<Database, 'query'>,
   seed: z.input<typeof seedSchema>,
 ) {
-  const changes: { table: Table; row: Row; exists: boolean }[] = [];
+  const changes: SeedChange[] = [];
   for (const table of tables) {
     const definition = definitions[table],
       rows = (

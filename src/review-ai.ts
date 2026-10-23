@@ -107,8 +107,7 @@ async function eligible(
     )
   ).rows[0];
   if (
-    !row ||
-    row.status !== 'pending' ||
+    row?.status !== 'pending' ||
     row.published_offer_id ||
     row.extraction_status !== 'completed' ||
     invalidAiReview(row) ||
@@ -364,7 +363,7 @@ export async function saveAiSuggestion(
           [v.requestId],
         )
       ).rows[0];
-      if (!snapshot || snapshot.created_by !== actor.id)
+      if (snapshot?.created_by !== actor.id)
         throw new HttpError(404, 'Solicitação de IA não encontrada.');
       if (snapshot.suggestion?.resultHash) {
         if (snapshot.suggestion.resultHash !== hash)
