@@ -164,10 +164,12 @@ export function registerUserAdmin(app: Express, db: Database) {
       })
       .parse(req.query);
     const args = [
-      `%${v.q
-        .replaceAll('\\', String.raw`\\`)
-        .replaceAll('%', String.raw`\%`)
-        .replaceAll('_', String.raw`\_`)}%`,
+      '%' +
+        v.q
+          .replaceAll('\\', String.raw`\\`)
+          .replaceAll('%', String.raw`\%`)
+          .replaceAll('_', String.raw`\_`) +
+        '%',
       v.profile,
       v.status,
     ];

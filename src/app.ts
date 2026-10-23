@@ -369,7 +369,9 @@ export function createApp(
     if (f.q)
       add(
         'o.title ILIKE ?',
-        `%${f.q.replaceAll('%', String.raw`\%`).replaceAll('_', String.raw`\_`)}%`,
+        '%' +
+          f.q.replaceAll('%', String.raw`\%`).replaceAll('_', String.raw`\_`) +
+          '%',
       );
     if (f.marketplace) add('o.marketplace_id=?', f.marketplace);
     if (f.categoryId) add('o.category_ids @> ARRAY[?]::uuid[]', f.categoryId);

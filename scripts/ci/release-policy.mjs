@@ -8,7 +8,7 @@ const git = (args) =>
   execFileSync(
     process.platform === 'win32'
       ? join(
-          process.env.ProgramFiles || 'C:\\Program Files',
+          process.env.ProgramFiles || 'C:/Program Files',
           'Git',
           'cmd',
           'git.exe',
