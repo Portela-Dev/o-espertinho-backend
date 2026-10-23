@@ -4,7 +4,7 @@ on:
     branches: [develop, staging, main]
   push:
     branches: [develop, staging, main]
-    tags: ['staging-v*']
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       sonar:
@@ -24,7 +24,7 @@ defaults:
 
 jobs:
   release_policy:
-    name: 0. Validar origem da release staging
+    name: 0. Validar origem da release main
     runs-on: ubuntu-latest
     outputs:
       deploy: ${{ steps.policy.outputs.deploy }}
@@ -38,7 +38,7 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-      - name: Conferir criação da tag no HEAD de staging
+      - name: Conferir criação da tag no HEAD de main
         id: policy
         run: node scripts/ci/release-policy.mjs
 
@@ -103,7 +103,7 @@ jobs:
   sonarqube:
     name: 2. SonarQube e Quality Gate
     needs: [validate, release_policy]
-    if: (github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/staging-v') && needs.release_policy.outputs.deploy == 'true') || (github.ref == 'refs/heads/develop' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')) || (github.event_name == 'workflow_dispatch' && inputs.sonar)
+    if: (github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v') && needs.release_policy.outputs.deploy == 'true') || (github.ref == 'refs/heads/develop' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')) || (github.event_name == 'workflow_dispatch' && inputs.sonar)
     runs-on: [self-hosted, Windows, X64, windows-portela-dev]
     timeout-minutes: 15
     concurrency:
@@ -217,7 +217,7 @@ jobs:
   deploy:
     name: 4. Deploy independente por SSH
     needs: [release_policy, validate, sonarqube, image]
-    if: github.event_name == 'push' && github.event.created == true && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/staging-v') && needs.release_policy.outputs.deploy == 'true'
+    if: github.event_name == 'push' && github.event.created == true && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v') && needs.release_policy.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production

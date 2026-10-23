@@ -8,14 +8,14 @@ O workflow `.github/workflows/ci-vps.yml` adapta as etapas do Quest Crush: valid
 
 - PRs e pushes em develop, staging e main executam CI, sem deploy por branch.
 - workflow_dispatch executa somente CI/Sonar; a opção de deploy manual foi removida.
-- Apenas o push de criação de uma tag staging-vMAJOR.MINOR.PATCH, como staging-v0.1.0, pode fazer deploy automático. A tag deve apontar exatamente para o HEAD remoto atual de staging. Tags leves e anotadas são aceitas; versões antigas, movimentações e exclusões são recusadas.
-- A política é verificada antes da validação e novamente imediatamente antes de usar SSH. Se staging avançar durante o pipeline, a release antiga é recusada.
+- Apenas o push de criação de uma tag vMAJOR.MINOR.PATCH, como v0.1.0, pode fazer deploy automático. A tag deve apontar exatamente para o HEAD remoto atual de main. Tags leves e anotadas são aceitas; versões antigas, movimentações e exclusões são recusadas.
+- A política é verificada antes da validação e novamente imediatamente antes de usar SSH. Se main avançar durante o pipeline, a release antiga é recusada.
 - A release depende de validação, Quality Gate do mesmo commit e imagem aprovada. Desenvolvimentos e tags não autorizadas nunca entram no job de deploy.
 - A extensão Chrome continua sem deploy ou publicação na Web Store.
 
-Consulte [RELEASE-STAGING.md](../docs/RELEASE-STAGING.md) para promoção de branches e criação das tags. A branch staging precisa receber estas alterações antes da primeira tag. Nenhuma tag é criada automaticamente pelo CI. VPS_AUTO_DEPLOY não é mais consultada.
+Consulte [RELEASE-MAIN.md](../docs/RELEASE-MAIN.md) para promoção de branches e criação das tags. A branch main precisa receber estas alterações antes da primeira tag. Nenhuma tag é criada automaticamente pelo CI. VPS_AUTO_DEPLOY não é mais consultada.
 
-O environment continua chamado production para reutilizar as variáveis/secrets já cadastrados. Ele representa a VPS atual; não foi criado outro ambiente ou servidor. Restrinja o environment a tags staging-v*, sem permitir branches.
+O environment continua chamado production para reutilizar as variáveis/secrets já cadastrados. Ele representa a VPS atual; não foi criado outro ambiente ou servidor. Restrinja o environment a tags v*, sem permitir branches.
 
 Relatórios e pacotes têm retenção de um dia. O arquivo de imagem para deploy só é gerado/publicado em releases autorizadas; PRs e pushes de branch fazem build/smoke test sem guardar esse arquivo grande. Os nomes incluem run_id; reruns reutilizam os artefatos do mesmo build.
 
@@ -40,7 +40,7 @@ Em Settings → Environments, crie **production** e cadastre:
 | Secret | `VPS_SSH_PRIVATE_KEY` | Chave privada OpenSSH da automação, dedicada a esse acesso |
 | Secret | `VPS_KNOWN_HOSTS` | Linha(s) de known_hosts do servidor, com hostname/porta correspondentes |
 
-No environment production, permita somente tags staging-v* em Selected branches and tags; não inclua regras de branch. Os dados de runtime da aplicação ficam na VPS; não há segredo de banco embutido na imagem nem enviado como artefato.
+No environment production, permita somente tags v* em Selected branches and tags; não inclua regras de branch. Os dados de runtime da aplicação ficam na VPS; não há segredo de banco embutido na imagem nem enviado como artefato.
 
 ## SonarQube e runner
 
@@ -48,7 +48,7 @@ Crie o projeto com a chave **o-espertinho-backend** e nome **O Espertinho - Back
 
 Validação, testes, build Docker e deploy por SSH executam em runners hospedados pelo GitHub (`ubuntu-latest`). Apenas o job de SonarQube usa o runner da organização `Portela-Dev`, com os labels `[self-hosted, Windows, X64, windows-portela-dev]`. Esse runner precisa de Git for Windows com GPG e dirmngr, acesso ao servidor SonarQube e versão atualizada para as actions com runtime Node 24. Ele não precisa de Docker. ShellCheck e Playwright/Chromium executam no Linux hospedado pelo GitHub.
 
-Em **Organization Settings > Actions > Runner groups**, libere estes três repositórios no grupo do runner e habilite o acesso a repositórios públicos. PRs executam validações nos runners hospedados do GitHub. A análise Sonar no runner próprio ocorre na develop, em execução manual autorizada ou em release staging validada. `SONAR_HOST_URL` deve ser alcançável pela conta do runner; loopback só funciona quando o Sonar está no mesmo computador.
+Em **Organization Settings > Actions > Runner groups**, libere estes três repositórios no grupo do runner e habilite o acesso a repositórios públicos. PRs executam validações nos runners hospedados do GitHub. A análise Sonar no runner próprio ocorre na develop, em execução manual autorizada ou em release main validada. `SONAR_HOST_URL` deve ser alcançável pela conta do runner; loopback só funciona quando o Sonar está no mesmo computador.
 
 O relatório LCOV vem dos testes reais do mesmo commit, via artefato do job validate, com sourcemaps para o TypeScript. Testes E2E não são contabilizados como cobertura unitária. Especialmente no frontend, a cobertura unitária ainda é inicial e o Quality Gate poderá exigir novos testes; o workflow preserva essa avaliação.
 
@@ -74,7 +74,7 @@ O Compose inicia PostgreSQL em rede privada e conserva os dados no volume `o-esp
 
 Se a troca do container falhar, o script tenta reiniciar a imagem anterior e o job continua marcado como falha. Rollback de imagem **não desfaz migrations SQL**. O arquivo de runtime permanece fora das releases, e as imagens anteriores ficam disponíveis para recuperação. O arquivo de imagem transferido é removido depois do sucesso; agende manutenção de imagens antigas, backups e metadados conforme o espaço da VPS. Os artefatos de imagem no GitHub têm retenção de 3 dias; relatórios, 7 dias.
 
-O workflow não provisiona a VPS, DNS, certificados, runners ou projetos SonarQube e não recebe credenciais de produção nos jobs de validação. O deploy só é executado após configurar o environment, habilitar o workflow e criar uma tag staging válida.
+O workflow não provisiona a VPS, DNS, certificados, runners ou projetos SonarQube e não recebe credenciais de produção nos jobs de validação. O deploy só é executado após configurar o environment, habilitar o workflow e criar uma tag de main válida.
 
 ## Segurança
 

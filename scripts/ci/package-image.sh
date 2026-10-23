@@ -10,7 +10,7 @@ docker build --pull --label "org.opencontainers.image.revision=$GITHUB_SHA" --ta
 bash scripts/ci/smoke-image.sh "$image"
 # Ordinary CI verifies the image without retaining large deploy archives.
 if [[ ${PACKAGE_DEPLOY_IMAGE:-false} != true ]]; then
-  printf 'Imagem compilada e smoke test aprovado; pacote de deploy reservado a uma release staging autorizada.\n' >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+  printf 'Imagem compilada e smoke test aprovado; pacote de deploy reservado a uma release main autorizada.\n' >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
   exit 0
 fi
 docker save "$image" | gzip -1 > "$output/image.tar.gz"
