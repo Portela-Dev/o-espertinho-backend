@@ -1,3 +1,4 @@
+import {sharingSettingsInput} from './sharing.js';
 import {catalogApiPaths} from './catalog-openapi.js';
 import {urlNormalizationRulesSchema} from './url-normalization.js';
 import {z} from 'zod';
@@ -166,6 +167,10 @@ export function createOpenApiDocument(config:Pick<Config,'APP_ORIGIN'>){
  const discoveryPage=(item:any)=>object({items:array(item),total:{type:'integer'},page:{type:'integer'},pageSize:{type:'integer'}});
  add('get','/admin/discovery/links','Exploração','Listar links descobertos',{parameters:[pageParam,parameter('pageSize',{type:'integer',minimum:1,maximum:50}),parameter('marketplaceId',str()),parameter('sourceId',str()),parameter('status',enumeration('','pending','archived'))],result:discoveryPage(object({id:uuid,url:url,marketplace_id:str(),marketplace_name:str(),status:enumeration('pending','archived'),first_seen_at:date,last_seen_at:date,sources:array(object({id:uuid,name:str(),categoryPath:array(str())}))}))});
  add('post','/admin/discovery/links/{id}/archive','Exploração','Arquivar um link descoberto',{description:'Preserva a identidade do link. Uma nova descoberta atualiza a última ocorrência, mas não desfaz o arquivamento.'});
+ const sharingSchema=z.toJSONSchema(sharingSettingsInput,{target:'openapi-3.0'});
+ add('get','/sharing','Catálogo público','Consultar redes de compartilhamento ativas',{role:'public',result:object({enabled:bool,channels:array(free)})});
+ add('get','/admin/sharing','Revisão de ofertas','Consultar configurações de compartilhamento',{result:sharingSchema});
+ add('put','/admin/sharing','Revisão de ofertas','Salvar configurações de compartilhamento',{body:sharingSchema,result:sharingSchema,description:'Exige permissão catalog, confirmação administrativa recente e versão atual. Textos são texto simples; variáveis: {titulo}, {preco}, {loja}, {url}; URLs também aceitam {texto}.'});
  Object.assign(paths,extensionApiPaths(),catalogApiPaths());
  const enrich='/admin/discovery/enrichment';
  const enrichDescription='Exige perfil discovery ou catalog, sessão, XSRF e confirmação recente para escritas. Não agenda nem publica ofertas. Mapeamentos são sugestões; a categoria exige confirmação por item.';
