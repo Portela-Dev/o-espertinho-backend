@@ -8,9 +8,9 @@ mkdir -p "$output"
 docker build --pull --label "org.opencontainers.image.revision=$GITHUB_SHA" --tag "$image" .
 # Smoke test runs in CI only. Production secrets are never used to build images.
 bash scripts/ci/smoke-image.sh "$image"
-# PRs verify the image without retaining large deploy archives.
-if [[ ${GITHUB_EVENT_NAME:-} == pull_request ]]; then
-  printf 'Imagem compilada e smoke test aprovado; pacote de deploy reservado à branch de integração.\n' >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+# Ordinary CI verifies the image without retaining large deploy archives.
+if [[ ${PACKAGE_DEPLOY_IMAGE:-false} != true ]]; then
+  printf 'Imagem compilada e smoke test aprovado; pacote de deploy reservado a uma release main autorizada.\n' >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
   exit 0
 fi
 docker save "$image" | gzip -1 > "$output/image.tar.gz"
