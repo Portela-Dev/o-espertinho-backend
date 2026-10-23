@@ -1,3 +1,4 @@
+import {publicHttpsUrlSchema} from './public-url.js';
 import {pagedQuery,wantsPage} from './pagination.js';
 import type {Express} from 'express';
 import {randomUUID} from 'node:crypto';
@@ -7,7 +8,7 @@ import {HttpError} from './security.js';
 import {requiredCategory,classificationText} from './classifications.js';
 import {audit} from './offers.js';
 const uuid=z.uuid();
-const productSchema=z.object({name:z.string().trim().min(1).max(300),description:z.string().max(4000).default(''),brand:z.string().trim().max(120).default(''),model:z.string().trim().max(120).default(''),category:requiredCategory.optional(),categoryPath:z.array(requiredCategory).min(1).max(10).optional(),subcategory:classificationText.default(''),imageUrl:z.url().refine(v=>new URL(v).protocol==='https:','A imagem deve usar HTTPS.').nullable().default(null)}).refine(v=>!!v.categoryPath?.length||!!v.category,{message:'Informe uma categoria.',path:['categoryPath']});
+const productSchema=z.object({name:z.string().trim().min(1).max(300),description:z.string().max(4000).default(''),brand:z.string().trim().max(120).default(''),model:z.string().trim().max(120).default(''),category:requiredCategory.optional(),categoryPath:z.array(requiredCategory).min(1).max(10).optional(),subcategory:classificationText.default(''),imageUrl:publicHttpsUrlSchema.nullable().default(null)}).refine(v=>!!v.categoryPath?.length||!!v.category,{message:'Informe uma categoria.',path:['categoryPath']});
 export async function getProduct(db:Pick<Database,'query'>,id:string){
  const p=(await db.query('SELECT * FROM products WHERE id=$1',[uuid.parse(id)])).rows[0];
  if(!p)throw new HttpError(404,'Produto nÃ£o encontrado. Cadastre-o na aba Produtos antes de adicionar links.');return p;
@@ -30,7 +31,7 @@ export function registerPublicProducts(app:Express,db:Database){
   const where=conditions.length?' WHERE '+conditions.join(' AND '):'';
   const total=(await db.query(`SELECT count(*)::int AS total ${from}${where}`,args)).rows[0].total;
   const order=f.sort==='price_asc'?'summary.min_price_cents ASC':f.sort==='discount'?'summary.discount DESC':'summary.featured DESC,summary.latest DESC NULLS LAST';
-  const items=(await db.query(`SELECT ${publicColumns},${reviewColumns},summary.min_price_cents,summary.max_price_cents,summary.offer_count,COALESCE(p.image_url,(SELECT image_url FROM offers o WHERE o.product_id=p.id AND ${valid} AND image_url IS NOT NULL ORDER BY o.price_cents,o.id LIMIT 1)) AS display_image_url ${from}${where} ORDER BY ${order},p.id LIMIT 24 OFFSET $${args.length+1}`,[...args,(f.page-1)*24])).rows;
+  const items=(await db.query(`SELECT ${publicColumns},${reviewColumns},summary.min_price_cents,summary.max_price_cents,summary.offer_count,(SELECT COALESCE(jsonb_agg(to_jsonb(stores) ORDER BY stores.name,stores.id),'[]'::jsonb) FROM (SELECT m.id,m.name,m.website_url,m.logo_url FROM marketplaces m WHERE EXISTS(SELECT 1 FROM offers o WHERE o.product_id=p.id AND o.marketplace_id=m.id AND ${valid})) stores) AS marketplaces,COALESCE(p.image_url,(SELECT image_url FROM offers o WHERE o.product_id=p.id AND ${valid} AND image_url IS NOT NULL ORDER BY o.price_cents,o.id LIMIT 1)) AS display_image_url ${from}${where} ORDER BY ${order},p.id LIMIT 24 OFFSET $${args.length+1}`,[...args,(f.page-1)*24])).rows;
   res.json({items,total,page:f.page,pageSize:24});
  });
  app.get('/api/products/:id',async(req,res)=>{

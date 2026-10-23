@@ -1,0 +1,254 @@
+{
+  "marketplace": {
+    "id": "shopee",
+    "name": "Shopee",
+    "websiteUrl": "https://shopee.com.br",
+    "logoUrl": "https://shopee.com.br/favicon.ico",
+    "allowedHosts": [
+      "shopee.com.br",
+      "www.shopee.com.br",
+      "affiliate.shopee.com.br",
+      "s.shopee.com.br"
+    ],
+    "scrapingEnabled": true,
+    "urlNormalizationRules": []
+  },
+  "settings": {
+    "intervalMs": 5000,
+    "timeoutMs": 30000,
+    "humanTimeoutMs": 900000,
+    "categorySeparator": ">",
+    "blockRules": [
+      {
+        "kind": "challenge",
+        "match": "url_contains",
+        "value": "/verify/"
+      },
+      {
+        "kind": "login",
+        "match": "url_contains",
+        "value": "/buyer/login"
+      },
+      {
+        "kind": "login",
+        "match": "selector",
+        "value": "input[type=\"password\"]"
+      }
+    ],
+    "recipe": {
+      "id": "shopee",
+      "name": "Shopee — conversão GraphQL com sessão local",
+      "loginUrl": "https://affiliate.shopee.com.br/offer/custom_link",
+      "allowedOrigins": [
+        "https://shopee.com.br",
+        "https://www.shopee.com.br",
+        "https://affiliate.shopee.com.br"
+      ],
+      "affiliateOrigins": [
+        "https://s.shopee.com.br",
+        "https://shopee.com.br"
+      ],
+      "batchSize": 1,
+      "intervalMs": 5000,
+      "steps": [
+        {
+          "type": "extract",
+          "name": "csrf",
+          "source": "cookie",
+          "key": "csrftoken"
+        },
+        {
+          "type": "request",
+          "url": "https://affiliate.shopee.com.br/api/v3/gql?q=batchCustomLink",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json; charset=UTF-8",
+            "affiliate-program-type": "1",
+            "csrf-token": "{{csrf}}"
+          },
+          "bodyEncoding": "json",
+          "body": {
+            "operationName": "batchGetCustomLink",
+            "query": "query batchGetCustomLink($linkParams: [CustomLinkParam!], $sourceCaller: SourceCaller) { batchCustomLink(linkParams: $linkParams, sourceCaller: $sourceCaller) { shortLink longLink failCode } }",
+            "variables": {
+              "linkParams": [
+                {
+                  "originalLink": "{{originalUrl}}",
+                  "advancedLinkParams": {
+                    "subId1": "OEspertinho"
+                  }
+                }
+              ],
+              "sourceCaller": "CUSTOM_LINK_CALLER"
+            }
+          },
+          "responsePath": "data.batchCustomLink.0.shortLink",
+          "responseChecks": [
+            {
+              "path": "data.batchCustomLink.0.failCode",
+              "equals": 0
+            }
+          ]
+        }
+      ],
+      "executionWorld": "MAIN"
+    }
+  },
+  "discovery": {
+    "name": "Teste Shopee — celulares (1 página, 3 links)",
+    "config": {
+      "schemaVersion": 1,
+      "rendering": {
+        "waitUntil": "domcontentloaded",
+        "readySelector": "a[href*=\"-i.\"]",
+        "frameSelector": "",
+        "timeoutMs": 30000,
+        "settleDelayMs": 2500
+      },
+      "extraction": {
+        "itemSelector": "a[href*=\"-i.\"]",
+        "linkSelector": ":scope",
+        "linkAttribute": "href"
+      },
+      "pagination": {
+        "mode": "next",
+        "nextSelector": ".shopee-mini-page-controller__next-btn",
+        "previousSelector": ".shopee-mini-page-controller__prev-btn",
+        "currentPageSelector": ".shopee-mini-page-controller__current",
+        "totalPagesSelector": ".shopee-mini-page-controller__total",
+        "disabledSelector": ".shopee-mini-page-controller__next-btn.shopee-button-outline--disabled",
+        "endSelector": "",
+        "urlTemplate": "",
+        "startPage": 1,
+        "pageStep": 1,
+        "scrollContainerSelector": "",
+        "scrollStrategy": "step",
+        "scrollStepPx": 800,
+        "waitAfterMs": 2500,
+        "noProgressLimit": 2,
+        "missingNextAction": "finish"
+      },
+      "limits": {
+        "maxPages": 1,
+        "maxItems": 3,
+        "maxDurationSeconds": 600,
+        "requestIntervalMs": 5000,
+        "deduplicate": true,
+        "stopOnRepeatedPage": true
+      },
+      "failures": {
+        "navigation": {
+          "action": "stop_section",
+          "retries": 2,
+          "delayMs": 5000,
+          "backoffMultiplier": 2
+        },
+        "timeout": {
+          "action": "stop_section",
+          "retries": 2,
+          "delayMs": 5000,
+          "backoffMultiplier": 2
+        },
+        "blocked": {
+          "action": "pause_source",
+          "retries": 0,
+          "delayMs": 5000,
+          "backoffMultiplier": 2
+        },
+        "emptyPage": {
+          "action": "stop_section",
+          "retries": 0,
+          "delayMs": 5000,
+          "backoffMultiplier": 2
+        },
+        "invalidItem": {
+          "action": "skip_item",
+          "retries": 0,
+          "delayMs": 5000,
+          "backoffMultiplier": 2
+        },
+        "pagination": {
+          "action": "stop_section",
+          "retries": 1,
+          "delayMs": 5000,
+          "backoffMultiplier": 2
+        },
+        "limitReached": "finish"
+      }
+    }
+  },
+  "source": {
+    "name": "Teste Shopee — celulares",
+    "url": "https://shopee.com.br/Celulares-cat.11059988.11060166",
+    "enabled": true,
+    "sourceCategoryPath": [],
+    "notes": "Homologação manual: uma página, até três links únicos. Não agendado. Conversão autenticada e seletores dependem da validação na extensão."
+  },
+  "profile": {
+    "version": 0,
+    "waitTimeoutMs": 15000,
+    "validityMinutes": 360,
+    "rules": [
+      {
+        "field": "title",
+        "selectors": [
+          "h1"
+        ],
+        "mode": "text",
+        "required": true
+      },
+      {
+        "field": "price",
+        "selectors": [
+          "section[aria-live=\"polite\"] .pyzxvq"
+        ],
+        "mode": "text",
+        "required": true
+      },
+      {
+        "field": "description",
+        "selectors": [
+          "meta[property=\"og:description\"]"
+        ],
+        "mode": "attribute",
+        "attribute": "content"
+      },
+      {
+        "field": "images",
+        "selectors": [
+          "meta[property=\"og:image\"]"
+        ],
+        "mode": "attribute",
+        "attribute": "content"
+      },
+      {
+        "field": "category",
+        "selectors": [
+          ".page-product__breadcrumb a[href*=\"-cat.\"]"
+        ],
+        "mode": "text"
+      },
+      {
+        "field": "rating",
+        "selectors": [
+          ".uLEz5u button:first-child .FllsTu"
+        ],
+        "mode": "text"
+      },
+      {
+        "field": "reviewCount",
+        "selectors": [
+          ".uLEz5u button:nth-child(2) .FllsTu"
+        ],
+        "mode": "text"
+      },
+      {
+        "field": "conditions",
+        "selectors": [
+          "section[aria-live=\"polite\"]"
+        ],
+        "mode": "text"
+      }
+    ]
+  }
+}

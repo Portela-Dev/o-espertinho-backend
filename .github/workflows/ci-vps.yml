@@ -81,7 +81,7 @@ jobs:
             playwright-report/
           if-no-files-found: ignore
           overwrite: true
-          retention-days: 7
+          retention-days: 1
 
   sonarqube:
     name: 2. SonarQube e Quality Gate
@@ -193,7 +193,7 @@ jobs:
           if-no-files-found: error
           overwrite: true
           compression-level: 0
-          retention-days: 3
+          retention-days: 1
 
   deploy:
     name: 4. Deploy independente por SSH

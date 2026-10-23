@@ -1,4 +1,6 @@
+import {registerPublicSharing,registerSharingAdmin} from './sharing.js';
 import {registerReviewAiAdmin,registerReviewAiExtension} from './review-ai.js';
+import {registerCatalogPurge} from './catalog-purge.js';
 import {registerCatalogAdmin} from './catalog-admin.js';
 import {registerCatalogManual} from './catalog-manual.js';
 import {registerCatalogPublication} from './catalog-publication.js';
@@ -110,7 +112,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
     await audit(db,req.user!.id,'session.admin_verified',req.user!.id);res.set('Cache-Control','no-store').json({ok:true});
   });
   app.post('/api/auth/logout',async(req,res)=>{if(req.sessionId) await db.query('DELETE FROM sessions WHERE id=$1',[req.sessionId]);await newSession(db,res,config,null);setSignedOut(res,config,true);res.json({ok:true});});
-  registerPublicProducts(app,db);
+  registerPublicProducts(app,db);registerPublicSharing(app,db);
   registerPriceHistory(app,db);
   app.get('/api/marketplaces',async(_req,res)=>res.json((await db.query('SELECT id,name,website_url,logo_url FROM marketplaces ORDER BY name')).rows));
   app.get('/api/categories',async(_req,res)=>{
@@ -179,6 +181,7 @@ export function createApp(db: Database,config: Config,options: AppOptions={}) {
   app.use('/api/admin',requireUser,requireAdmin,requireRecentAdmin,(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
   registerUserAdmin(app,db);
   registerProductAdmin(app,db);
+  registerCatalogPurge(app,db);registerSharingAdmin(app,db);
   registerCatalogSettings(app,db);registerCatalogAdmin(app,db);registerCatalogManual(app,db);
   registerDiscoveryAdmin(app,db);registerDiscoveryRuns(app,db);registerEnrichmentAdmin(app,db);registerReviewAiAdmin(app,db);registerCatalogPublication(app,db);
   registerScrapingAdmin(app,db);

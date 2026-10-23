@@ -64,6 +64,7 @@ test('product assignment requires confirmed category, creates atomically and rej
  assert.equal((await admin.mutate('post',base+'/review/'+pending+'/product',{...body,version:0})).status,409);
  assert.equal((await admin.get(base+'/review/'+pending+'/products')).status,409);
  assert.equal((await admin.mutate('post',url+'/product',{...body,product:{...product,imageUrl:'http://example.com/x'}})).status,400);
+ for(const imageUrl of ['https://127.0.0.1/image','https://router.local/image','https://example.com:8443/image','https://user:pass@example.com/image'])assert.equal((await admin.mutate('post',url+'/product',{...body,product:{...product,imageUrl}})).status,400,imageUrl);
  const created=await admin.mutate('post',url+'/product',body);assert.equal(created.status,200,JSON.stringify(created.body));
  assert.equal(created.body.status,'ready_for_review');assert.equal(created.body.product.name,product.name);
  assert.equal(created.body.product.description,product.description);assert.equal(created.body.product.brand,product.brand);assert.equal(created.body.product.image_url,product.imageUrl);

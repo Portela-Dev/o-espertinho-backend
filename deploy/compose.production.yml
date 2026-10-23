@@ -21,6 +21,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?Configure a conta restrita}
       APP_ORIGIN: ${APP_ORIGIN:?Configure APP_ORIGIN}
+      EXTENSION_BACKEND_URL: ${EXTENSION_BACKEND_URL:?Configure a origem publica HTTPS da extensao}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       RUN_WORKER: ${RUN_WORKER:-true}
       WORKER_INTERVAL_SECONDS: ${WORKER_INTERVAL_SECONDS:-60}
@@ -48,6 +49,15 @@ services:
     environment:
       MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?Configure a conta de migrations}
       DATABASE_URL: ${DATABASE_URL:?Configure a conta restrita}
+    networks: [database]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  seed-admin:
+    image: ${APP_IMAGE:?Use a imagem validada pelo CI}
+    profiles: [tools]
+    command: [node, dist/admin-seed-cli.js]
+    environment:
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?Configure a conta de migrations}
     networks: [database]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]

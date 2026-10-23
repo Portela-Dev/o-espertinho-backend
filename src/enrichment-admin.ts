@@ -1,3 +1,4 @@
+import {publicHttpsUrlSchema} from './public-url.js';
 import {finalizeCatalogDraft,assignCatalogProduct} from './review-ai-catalog.js';
 import type {Express} from 'express';
 import {randomUUID} from 'node:crypto';
@@ -7,9 +8,10 @@ import {HttpError} from './security.js';
 import {audit} from './offers.js';
 import {pagedQuery} from './pagination.js';
 import {requiredCategory} from './classifications.js';
+import {invalidAiReview} from './review-ai.js';
 const uuid=z.uuid();
 const marketId=z.string().regex(/^[a-z][a-z0-9_-]{1,39}$/);
-const newProduct=z.strictObject({name:z.string().trim().min(1).max(300),description:z.string().max(4000).default(''),brand:z.string().trim().max(120).default(''),imageUrl:z.url().refine(v=>new URL(v).protocol==='https:','A imagem deve usar HTTPS.').nullable().default(null)});
+const newProduct=z.strictObject({name:z.string().trim().min(1).max(300),description:z.string().max(4000).default(''),brand:z.string().trim().max(120).default(''),imageUrl:publicHttpsUrlSchema.nullable().default(null)});
 const assignment=z.discriminatedUnion('mode',[
  z.strictObject({mode:z.literal('existing'),version:z.number().int().nonnegative(),productId:uuid}),
  z.strictObject({mode:z.literal('new'),version:z.number().int().nonnegative(),product:newProduct})
@@ -17,7 +19,7 @@ const assignment=z.discriminatedUnion('mode',[
 async function reviewableLink(db:Pick<Database,'query'>,id:string,lock=false){
  const row=(await db.query('SELECT * FROM discovery_links WHERE id=$1'+(lock?' FOR UPDATE':''),[id])).rows[0];
  if(!row){throw new HttpError(404,'Link não encontrado.');}
- if(row.status!=='pending'||row.extraction_status!=='completed'){throw new HttpError(409,'Conclua a extração antes de atribuir um produto.');}
+ if(row.status!=='pending'||row.extraction_status!=='completed'||invalidAiReview(row)){throw new HttpError(409,'Conclua uma nova extração e análise de anúncios inválidos antes de atribuir um produto.');}
  return row;
 }
 export const categoryKey=(path:string[])=>JSON.stringify(path.map(s=>s.normalize('NFC').replace(/\s+/gu,' ').trim().toLowerCase()));
@@ -29,7 +31,7 @@ export function registerEnrichmentAdmin(app:Express,db:Database){
   const link=(await db.query('SELECT marketplace_id FROM discovery_links WHERE id=$1',[id])).rows[0];
   if(!link){throw new HttpError(404,'Link não encontrado.');}
 
-   const updated=await db.query("UPDATE discovery_links SET extraction_status='pending',extraction_error=NULL,enrichment_version=enrichment_version+1 WHERE id=$1 AND status='pending' AND extraction_status='failed' AND published_offer_id IS NULL RETURNING id",[id]);
+   const updated=await db.query("UPDATE discovery_links SET extraction_status='pending',extraction_error=NULL,enrichment_version=enrichment_version+1 WHERE id=$1 AND status='pending' AND (extraction_status='failed' OR (extraction_status='completed' AND (ai_resolution->'product'->>'action'='invalid' OR ai_resolution->'category'->>'action'='invalid'))) AND published_offer_id IS NULL RETURNING id",[id]);
    if(!updated.rows.length){throw new HttpError(409,'Não há falha elegível para retentativa.');}
    await audit(db,req.user!.id,'discovery.retry_marked',id);res.status(202).json({id,status:'pending',executor:'extension'});
  });
@@ -46,7 +48,7 @@ await audit(c,req.user!.id,'discovery.link.archived',id);});res.json({ok:true});
   });res.status(201).json(result);
  });
  app.get(base+'/review',async(req,res)=>{
-  const f=z.object({marketplaceId:marketId.or(z.literal('')).default(''),sourceCategory:z.string().max(1000).default(''),state:z.enum(['','pending','completed','failed']).default('')}).parse(req.query);
+  const f=z.object({marketplaceId:marketId.or(z.literal('')).default(''),sourceCategory:z.string().max(1000).default(''),state:z.enum(['','pending','completed','failed','invalid','needs_review']).default('')}).parse(req.query);
   res.json(await pagedQuery(db,{...req.query,paginate:'true'},`SELECT l.*,p.name AS product_name,p.sku AS product_sku,d.name AS draft_name,d.description AS draft_description,d.brand AS draft_brand,d.image_url AS draft_image_url,m.name AS marketplace_name,ac.suggestion AS ai_category,ac.request_id AS ai_category_request,ap.suggestion AS ai_product,ap.request_id AS ai_product_request,cm.id AS mapping_id,cm.category_id AS suggested_category_id,n.path AS suggested_category_path,confirmed.path AS confirmed_category_path
    FROM discovery_links l
  LEFT JOIN review_ai_suggestions ac ON ac.link_id=l.id AND ac.task='category' AND ac.link_version=l.enrichment_version AND ac.settings_version=(SELECT category_version FROM review_ai_settings WHERE id=true)
@@ -54,7 +56,9 @@ await audit(c,req.user!.id,'discovery.link.archived',id);});res.json({ok:true});
  LEFT JOIN review_ai_product_drafts d ON d.id=l.product_draft_id
  JOIN marketplaces m ON m.id=l.marketplace_id LEFT JOIN category_mappings cm ON cm.marketplace_id=l.marketplace_id AND cm.source_key=l.source_category_key
    LEFT JOIN category_nodes n ON n.id=cm.category_id LEFT JOIN category_nodes confirmed ON confirmed.id=l.confirmed_category_id LEFT JOIN products p ON p.id=l.product_id
-   WHERE l.status='pending' AND l.published_offer_id IS NULL AND ($1='' OR l.marketplace_id=$1) AND ($2='' OR l.extraction_status=$2) AND ($3='' OR position(lower($3) in lower(array_to_string(l.source_category_path,' > ')))>0) ORDER BY l.first_seen_at,l.id`,[f.marketplaceId,f.state,f.sourceCategory]));
+   WHERE l.status='pending' AND l.published_offer_id IS NULL AND ($1='' OR l.marketplace_id=$1)
+ AND ($2='' OR l.extraction_status=$2 OR ($2 IN ('invalid','needs_review') AND (l.ai_resolution->'product'->>'action'=$2 OR l.ai_resolution->'category'->>'action'=$2)))
+ AND ($3='' OR position(lower($3) in lower(array_to_string(l.source_category_path,' > ')))>0) ORDER BY l.first_seen_at,l.id`,[f.marketplaceId,f.state,f.sourceCategory]));
  });
  app.get(base+'/review/:id/products',async(req,res)=>{
   const row=await reviewableLink(db,uuid.parse(req.params.id));
@@ -90,7 +94,7 @@ throw error;}
   await transaction(db,async c=>{
    // Same lock order as the worker prevents a confirmation/extraction race.
    const row=(await c.query('SELECT * FROM discovery_links WHERE id=$1 FOR UPDATE',[id])).rows[0];
-   if(row?.status!=='pending'||row.extraction_status!=='completed'){throw new HttpError(409,'Conclua a extração antes de categorizar.');}
+   if(row?.status!=='pending'||row.extraction_status!=='completed'||invalidAiReview(row)){throw new HttpError(409,'Conclua uma nova extração e análise de anúncios inválidos antes de categorizar.');}
    if(row.enrichment_version!==v.version){throw new HttpError(409,'Os dados foram atualizados. Reabra a revisão.');}
    if(!(await c.query('SELECT id FROM category_nodes WHERE id=$1',[v.categoryId])).rows.length){throw new HttpError(400,'Categoria não encontrada.');}
    if(v.saveMapping&&!row.source_category_path.length){throw new HttpError(400,'Sem árvore de origem; aplique apenas neste item.');}

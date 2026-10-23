@@ -74,3 +74,55 @@ test('mudança da identidade extraída invalida rascunho antes da categorizaçã
  const row=(await f.db.query('SELECT product_draft_id,product_id FROM discovery_links WHERE id=$1',[id])).rows[0];assert.equal(row.product_draft_id,null);assert.equal(row.product_id,null);
  assert.equal((await f.call('get','/catalog/ai/queue?marketplaceId=amazon&task=product')).body.items.length,1);
 });
+
+test('prompts configurados chegam ao contexto, com regras de configuração, kits, inconsistências e árvores',async t=>{
+ const f=await catalogFixture(t);const defaults=await settings(f);
+ assert.match(defaults.productPrompt,/RAM física/);assert.match(defaults.productPrompt,/tamanho de tela/);assert.match(defaults.productPrompt,/personalizedKit=true/);assert.match(defaults.productPrompt,/action invalid/);
+ assert.match(defaults.categoryPrompt,/descendentes necessários/);
+ const id=await seed(f);await settings(f,{productPrompt:'Minha política de produtos e kits.'});
+ await f.db.query("UPDATE discovery_links SET enrichment_data=jsonb_set(enrichment_data,'{specifications}',$2::jsonb) WHERE id=$1",[id,JSON.stringify([{name:'RAM',value:'8 GB'}])]);
+ const ctx=await context(f,id,'product');assert.equal(ctx.instructions,'Minha política de produtos e kits.');assert.deepEqual(ctx.offer.specifications,[{name:'RAM',value:'8 GB'}]);
+});
+
+test('reprocessamento é explícito, limitado a revisão, isolado por tarefa e marketplace e protegido de concorrência',async t=>{
+ const f=await catalogFixture(t);await settings(f);const id=await seed(f),other=await seed(f);
+ const first=await context(f,id,'product');await save(f,first,decision('needs_review'));
+ let queue=await f.call('get','/catalog/ai/queue?marketplaceId=amazon&task=product&retryReview=true');assert.deepEqual(queue.body.items.map(i=>i.id),[id]);
+ assert.deepEqual((await f.call('get','/catalog/ai/queue?marketplaceId=mercadolivre&task=product&retryReview=true')).body.items,[]);
+ assert.equal((await f.call('get','/catalog/ai/queue?marketplaceId=amazon&task=category&retryReview=true')).body.items.length,0);
+ const payload={id,task:'product',inventoryRevision:await revision(f),retryReview:true};
+ let retry=await f.call('post','/catalog/ai/context',payload);assert.equal(retry.status,200,JSON.stringify(retry.body));
+ assert.equal((await f.call('post','/catalog/ai/context',payload)).status,409);
+ assert.equal((await f.call('post','/catalog/ai/context',{...payload,id:other})).status,409);
+ assert.equal((await f.call('get','/catalog/ai/queue?marketplaceId=amazon&task=product&retryReview=true')).body.items.length,0);
+ await f.call('post','/catalog/ai/release',{requestId:retry.body.requestId});
+ assert.equal((await f.call('get','/catalog/ai/queue?marketplaceId=amazon&task=product&retryReview=true')).body.items.length,1);
+ retry=await f.call('post','/catalog/ai/context',payload);assert.equal(retry.status,200,JSON.stringify(retry.body));
+ await save(f,retry.body,decision('create_new',{product:{name:'Modelo resolvido',description:'',brand:'Marca'}}));
+ queue=await f.call('get','/catalog/ai/queue?marketplaceId=amazon&task=product&retryReview=true');assert.equal(queue.body.items.length,0);
+});
+
+test('anúncio inválido mantém motivo, não é publicado nem atribuído e pode ser preparado para nova extração',async t=>{
+ const f=await catalogFixture(t);await settings(f);const id=await seed(f),ctx=await context(f,id,'product');
+ const {result,body}=await save(f,ctx,decision('invalid',{reason:'Título informa 128 GB; descrição informa 256 GB.'}));
+ assert.equal(result.outcome,'invalid');assert.equal(result.applied,false);
+ assert.deepEqual((await f.call('post','/catalog/ai/suggestions',body)).body,result);
+ const row=(await f.db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];assert.equal(row.ai_resolution.product.action,'invalid');assert.equal(row.product_id,null);
+ const list=await f.browser.get(base+'/review?state=invalid');assert.equal(list.body.items.length,1);
+ assert.equal((await f.browser.mutate('post',base+'/review/'+id+'/publish',{version:row.enrichment_version,authorizedContent:true})).status,409);
+ assert.equal((await f.browser.get(base+'/review/'+id+'/products')).status,409);
+ assert.equal((await f.call('get','/catalog/ai/queue?marketplaceId=amazon&task=product&retryReview=true')).body.items.length,0);
+ const retry=await f.browser.mutate('post',base+'/review/'+id+'/retry',{});assert.equal(retry.status,202);
+ assert.equal((await f.browser.mutate('post',base+'/review/'+id+'/retry',{})).status,409);
+ const pending=(await f.db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];assert.equal(pending.extraction_status,'pending');assert.equal(pending.ai_resolution.product.action,'invalid');
+ assert.equal((await f.call('get','/catalog/ai/queue?marketplaceId=amazon&task=product')).body.items.length,0);
+});
+
+test('kits personalizados de anúncios diferentes nunca compartilham rascunho ou produto mesmo com nome e marca iguais',async t=>{
+ const f=await catalogFixture(t);await settings(f);const cat=await category(f),ids=[await seed(f),await seed(f)];const drafts=[];
+ for(const id of ids){const ctx=await context(f,id,'product');const saved=await save(f,ctx,decision('create_new',{product:{name:'Kit personalizado A + B',description:'1 A e 1 B',brand:'Marca',personalizedKit:true}}));drafts.push(saved.result.inventory.drafts[0].id);}
+ assert.equal(new Set(drafts).size,2);
+ for(const id of ids){await save(f,await context(f,id,'category'),decision('use_category',{categoryId:cat,category:'Tecnologia > Áudio'}));}
+ const products=(await f.db.query('SELECT id,personalized_kit FROM products')).rows;assert.equal(products.length,2);assert.ok(products.every(p=>p.personalized_kit));
+ const third=await seed(f);const ctx=await context(f,third,'product');const response=await f.call('post','/catalog/ai/suggestions',{requestId:ctx.requestId,model:'fixture',suggestion:decision('link_existing',{productId:products[0].id})});assert.equal(response.status,400);
+});

@@ -10,7 +10,7 @@ after(async()=>db.end());
 test('OpenAPI é válido e descreve todas as rotas existentes',async()=>{
  await SwaggerParser.validate(structuredClone(spec));assert.equal(spec.openapi,'3.0.3');assert.equal(spec.servers[0].url,'/api');
  const ids=new Set();for(const path of Object.values(spec.paths))for(const op of Object.values(path)){assert.ok(!ids.has(op.operationId),'operationId duplicado');ids.add(op.operationId);}
- for(const file of ['app.ts','products.ts','scraping-admin.ts','price-history.ts','user-admin.ts','catalog-settings.ts','catalog-admin.ts','catalog-manual.ts','catalog-publication.ts']){
+ for(const file of ['sharing.ts','app.ts','products.ts','scraping-admin.ts','price-history.ts','user-admin.ts','catalog-settings.ts','catalog-admin.ts','catalog-manual.ts','catalog-publication.ts']){
   const source=await readFile(new URL('../src/'+file,import.meta.url),'utf8');
   for(const match of source.matchAll(/app\.(get|post|put|patch|delete)\('([^']+)'/g)){
    const path=match[2].replace(/^\/api/,'').replace(/:([A-Za-z]+)/g,'{$1}');assert.ok(spec.paths[path]?.[match[1]],'Rota sem documentação: '+match[1]+' '+path);

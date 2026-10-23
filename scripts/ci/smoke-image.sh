@@ -17,7 +17,7 @@ for _attempt in $(seq 1 60); do
  sleep 1
 done
 if [[ $database_ready != true ]]; then docker logs "$name-db"; echo 'PostgreSQL não ficou pronto para conexões TCP.' >&2; exit 1; fi
-settings=(--network "$name-net" -e "DATABASE_URL=postgresql://espertinho_app:ci-only-application-password-32-chars@$name-db:5432/test" -e APP_ORIGIN=https://ci.example.com -e RUN_WORKER=false)
+settings=(--network "$name-net" -e "DATABASE_URL=postgresql://espertinho_app:ci-only-application-password-32-chars@$name-db:5432/test" -e APP_ORIGIN=https://ci.example.com -e EXTENSION_BACKEND_URL=https://ci.example.com -e RUN_WORKER=false)
 docker run --rm "${settings[@]}" -e "MIGRATION_DATABASE_URL=postgresql://test:ci-only-password@$name-db:5432/test" "$image" node dist/provision-database.js
 docker run -d --name "$name" "${settings[@]}" "$image" >/dev/null
 for _attempt in $(seq 1 90); do

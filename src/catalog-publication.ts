@@ -7,6 +7,7 @@ import {marketUrl} from './scraping.js';
 import {HttpError} from './security.js';
 import {audit} from './offers.js';
 import {recordDailyPrice} from './price-history.js';
+import {invalidAiReview} from './review-ai.js';
 export const publishBatchInput=z.strictObject({authorizedContent:z.literal(true),items:z.array(z.strictObject({id:z.uuid(),version:z.number().int().nonnegative()})).min(1).max(100)});
 const publishInput=z.strictObject({version:z.number().int().nonnegative(),authorizedContent:z.literal(true)});
 async function publishCandidate(db:Database,userId:string,id:string,version:number){
@@ -14,6 +15,7 @@ async function publishCandidate(db:Database,userId:string,id:string,version:numb
    const link=(await c.query('SELECT * FROM discovery_links WHERE id=$1 FOR UPDATE',[id])).rows[0];
    if(!link)throw new HttpError(404,'Link não encontrado.');
    if(link.published_offer_id)return {offerId:link.published_offer_id,alreadyPublished:true};
+   if(invalidAiReview(link))throw new HttpError(409,'Anúncio inválido. Extraia os dados novamente e refaça a análise antes de publicar.');
    if(link.status!=='pending'||link.enrichment_version!==version||link.extraction_status!=='completed'||!link.confirmed_category_id||!link.product_id||!link.affiliate_url)throw new HttpError(409,'Confirme categoria, produto e informações antes de publicar.');
    const product=(await c.query('SELECT * FROM products WHERE id=$1 FOR SHARE NOWAIT',[link.product_id])).rows[0];
    if(!product?.category_ids.includes(link.confirmed_category_id))throw new HttpError(409,'O produto não pertence à categoria confirmada.');
