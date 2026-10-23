@@ -173,7 +173,7 @@ test('CLI verifica main no remoto e bloqueia execução direta do deploy fora de
   writeFileSync(join(shadow, 'git'), '#!/bin/sh\nexit 99\n', { mode: 0o755 });
   writeFileSync(join(shadow, 'git.cmd'), '@exit /b 99\r\n');
   assert.equal(
-    invoke({ PATH: shadow }).status,
+    invoke({ PATH: shadow, GITHUB_OUTPUT: join(shadow, 'output.txt') }).status,
     0,
     'release must not resolve git from an untrusted PATH',
   );
