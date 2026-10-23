@@ -27,6 +27,7 @@ target="$VPS_USER@$VPS_HOST"
 # shellcheck disable=SC2029 # Validated path arguments intentionally expand on the client.
 ssh "${options[@]}" -p "$port" "$target" "umask 077; mkdir -p '$remote'"
 scp "${options[@]}" -P "$port" "$bundle/"* "$target:$remote/"
+scp "${options[@]}" -P "$port" scripts/ci/deploy-remote.sh "$target:$remote/deploy-remote.sh"
 # shellcheck disable=SC2029 # Only validated release identifiers are sent as arguments.
-ssh "${options[@]}" -p "$port" "$target" "bash -s -- '$root' '$release' '$GITHUB_SHA'" < scripts/ci/deploy-remote.sh
+ssh -n "${options[@]}" -p "$port" "$target" "bash '$remote/deploy-remote.sh' '$root' '$release' '$GITHUB_SHA' && test \"\$(readlink -f '$root/current')\" = '$remote'"
 printf '### Deploy concluído\n\n- Serviço: %s\n- Commit: `%s`\n- Healthcheck do container: aprovado.\n' "$service" "$GITHUB_SHA" >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
