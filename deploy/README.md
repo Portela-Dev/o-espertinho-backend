@@ -1,5 +1,7 @@
 # CI/CD para VPS Linux — Docker Compose via SSH
 
+Para inicializar um banco novo com as configurações atuais do admin, consulte [SEED-ADMIN.md](../docs/SEED-ADMIN.md). O serviço opcional `seed-admin` é manual e separado das migrations e do deploy; não inclui catálogo, árvores de categorias ou credenciais.
+
 O workflow `.github/workflows/ci-vps.yml` adapta as etapas do Quest Crush: validação, testes, cobertura, SonarQube com Quality Gate, compilação do artefato e distribuição. Não contém etapas Android/Firebase e não depende de Coolify. Funciona em VPS HostGator ou Hostinger com Docker Engine, Compose v2 atualizado, Bash, OpenSSH e `flock` (util-linux).
 
 ## Execuções

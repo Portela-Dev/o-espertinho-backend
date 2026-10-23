@@ -7,6 +7,7 @@ import {provisionDatabase} from '../dist/provision-database.js';
 import {assertRestrictedDatabase} from '../dist/database-security.js';
 import {previewPurge,executePurge} from '../dist/catalog-purge.js';
 import {seedOffer,seedProduct} from './helpers.mjs';
+import {applyAdminSeed,readAdminSeed} from '../dist/admin-seed.js';
 const url=process.env.TEST_DATABASE_ADMIN_URL;
 test('PostgreSQL real: provisionamento preserva dados e restringe runtime, DDL e migrations',{skip:!url},async()=>{
  const suffix=randomUUID().replaceAll('-','').slice(0,12),database='security_'+suffix,role='app_'+suffix;
@@ -17,6 +18,15 @@ test('PostgreSQL real: provisionamento preserva dados e restringe runtime, DDL e
   const appUrl=new URL(ownerUrl);appUrl.username=role;appUrl.password='test-only-random-application-password';
   await assert.rejects(()=>provisionDatabase(owner,ownerUrl.href));
   await provisionDatabase(owner,appUrl.href);app=createDatabase(appUrl.href);await assertRestrictedDatabase(app);
+  const seed=await readAdminSeed();
+  const previewCli=spawnSync(process.execPath,['dist/admin-seed-cli.js','--dry-run'],{env:{...process.env,MIGRATION_DATABASE_URL:ownerUrl.href},encoding:'utf8',windowsHide:true,timeout:20000});
+  assert.equal(previewCli.status,0,previewCli.stderr);assert.equal(JSON.parse(previewCli.stdout).status,'preview');
+  const seeds=await Promise.all([applyAdminSeed(owner,seed),applyAdminSeed(owner,seed)]);
+  assert.deepEqual(seeds.map(r=>r.status).sort(),['already_applied','applied']);
+  const repeatCli=spawnSync(process.execPath,['dist/admin-seed-cli.js'],{env:{...process.env,MIGRATION_DATABASE_URL:ownerUrl.href},encoding:'utf8',windowsHide:true,timeout:20000});
+  assert.equal(repeatCli.status,0,repeatCli.stderr);assert.equal(JSON.parse(repeatCli.stdout).status,'already_applied');
+  assert.equal((await app.query("SELECT count(*)::int AS n FROM extension_catalog_settings")).rows[0].n,3);
+  assert.equal((await app.query("SELECT count(*)::int AS n FROM discovery_sources WHERE source_category_path<>'{}'")).rows[0].n,0);
   await assert.rejects(()=>assertRestrictedDatabase(owner));
   const id=randomUUID();await app.query("INSERT INTO products(id,name,category,category_path) VALUES($1,'Dado preservado','Tecnologia',ARRAY['Tecnologia'])",[id]);
   await app.query("UPDATE products SET name='Atualizado' WHERE id=$1",[id]);

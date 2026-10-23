@@ -52,6 +52,15 @@ services:
     networks: [database]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+  seed-admin:
+    image: ${APP_IMAGE:?Use a imagem validada pelo CI}
+    profiles: [tools]
+    command: [node, dist/admin-seed-cli.js]
+    environment:
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?Configure a conta de migrations}
+    networks: [database]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
 
 networks:
   database:
