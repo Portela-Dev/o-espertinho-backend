@@ -1,0 +1,16 @@
+node_modules
+dist
+.angular
+.git
+.env
+.env.*
+.auth
+.local
+.ci-backend
+coverage
+reports
+test-results
+playwright-report
+*.log
+*.pem
+*.key

@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {testDatabase,testConfig,identity,client,seedOffer,seedProduct,createApp} from './helpers.mjs';
 import {recordDailyPrice,sampleHistory,historyInterval} from '../dist/price-history.js';
-import {startOfferRefresh,tickOfferRefresh} from '../dist/offer-refresh.js';
 import {workerTick} from '../dist/offers.js';
 let db,admin,visitor,config;
 before(async()=>{({db}=await testDatabase());config=testConfig();const app=createApp(db,config,{verifyGoogle:async t=>identity(t)});admin=client(app);visitor=client(app);await admin.login('admin');await visitor.init();});
@@ -47,28 +46,14 @@ test('reassociação não move o histórico antigo para outro produto; exclusão
  await db.query('DELETE FROM offers WHERE id=$1',[a]);assert.equal((await db.query('SELECT * FROM offer_price_history WHERE offer_id=$1',[a])).rows.length,0);
 });
 
-test('job grava inclusive preço inalterado; falha técnica preserva registro; indisponibilidade substitui por lacuna',async()=>{
- const {db:job}=await testDatabase();try{
- const app=createApp(job,config,{verifyGoogle:async t=>identity(t)}),user=client(app);await user.login('admin');const adminId=(await user.get('/api/auth/session')).body.user.id;
- const id=await seedOffer(job,{source:'scraped'}),offer=(await job.query('SELECT * FROM offers WHERE id=$1',[id])).rows[0];let price=15000,fail=false;
- const extractor={extract:async()=>{if(fail)throw new Error('technical');return {title:offer.title,externalId:offer.external_id,priceCents:price,originalPriceCents:null,description:'',category:'',conditions:'',images:[],specifications:[],warnings:[],missing:price===null?['price']:[],evidence:[],collectedAt:new Date().toISOString()};}};
- const run=async()=>{await startOfferRefresh(job,adminId);await job.query("UPDATE offer_refresh_runs SET next_item_at=now()-interval '1 second' WHERE status='queued'");await tickOfferRefresh(job,config,{},extractor);};
- const history=async()=>(await job.query('SELECT * FROM offer_price_history WHERE offer_id=$1',[id])).rows;
- await run();let h=await history();assert.equal(h.length,1);assert.equal(h[0].price_cents,15000);const before=h[0].observed_at;
- await run();h=await history();assert.equal(h.length,1);assert.ok(h[0].observed_at>=before);
- price=17000;await run();assert.equal((await history())[0].price_cents,17000);const confirmed=(await history())[0].observed_at.toISOString();fail=true;await run();assert.equal((await history())[0].price_cents,17000);assert.equal((await history())[0].observed_at.toISOString(),confirmed);
- fail=false;price=null;await run();assert.equal((await history()).length,1);assert.equal((await history())[0].price_cents,null);
- price=16000;await run();assert.equal((await history())[0].price_cents,16000);
- // A history write failure rolls back the price update as well.
- const wrapped={...job,connect:async()=>{const c=await job.connect();return {...c,query:(sql,args)=>{if(sql.includes('INSERT INTO offer_price_history'))throw new Error('history storage failed');return c.query(sql,args);}};}};
- price=19000;await startOfferRefresh(job,adminId);await job.query("UPDATE offer_refresh_runs SET next_item_at=now()-interval '1 second' WHERE status='queued'");await assert.rejects(()=>tickOfferRefresh(wrapped,config,{},extractor),/history storage/);assert.equal((await job.query('SELECT price_cents FROM offers WHERE id=$1',[id])).rows[0].price_cents,16000);assert.equal((await history())[0].price_cents,16000);
- }finally{await job.end();}
-});
-
-test('migration usa somente a última observação conhecida; manutenção conserva 365 dias inclusivos',async()=>{
+test('migration usa somente a última observação; manutenção atual retém 365 dias',async()=>{
  const {db:old,pg}=await testDatabase({through:'015_zz'});try{const id=await seedOffer(old),pending=await seedOffer(old,{status:'pending'});await pg.exec(await readFile(new URL('../migrations/016_daily_price_history.sql',import.meta.url),'utf8'));assert.equal((await old.query('SELECT * FROM offer_price_history WHERE offer_id=$1',[id])).rows.length,1);assert.equal((await old.query('SELECT * FROM offer_price_history WHERE offer_id=$1',[pending])).rows.length,0);
  const p=(await old.query('SELECT product_id FROM offers WHERE id=$1',[id])).rows[0].product_id,now=(await old.query("SELECT to_char(clock_timestamp() AT TIME ZONE 'America/Sao_Paulo','YYYY-MM-DD') AS day")).rows[0].day;
- await recordDailyPrice(old,id,p,10000,offset(now,-365)+'T15:00:00Z');await recordDailyPrice(old,id,p,11000,offset(now,-364)+'T15:00:00Z');await workerTick(old,config,{});assert.equal((await old.query('SELECT * FROM offer_price_history WHERE offer_id=$1',[id])).rows.length,2);
+ await recordDailyPrice(old,id,p,10000,offset(now,-365)+'T15:00:00Z');await recordDailyPrice(old,id,p,11000,offset(now,-364)+'T15:00:00Z');assert.equal((await old.query('SELECT * FROM offer_price_history WHERE offer_id=$1',[id])).rows.length,3);
+ // Maintenance runs against the current schema, after all migrations, never the historical fixture.
+ const current=await seedOffer(db),product=(await db.query('SELECT product_id FROM offers WHERE id=$1',[current])).rows[0].product_id;
+ await recordDailyPrice(db,current,product,10000,offset(now,-365)+'T15:00:00Z');await recordDailyPrice(db,current,product,11000,offset(now,-364)+'T15:00:00Z');await workerTick(db,config,{});
+ const retained=(await db.query('SELECT price_cents FROM offer_price_history WHERE offer_id=$1',[current])).rows;assert.deepEqual(retained.map(r=>r.price_cents),[11000]);
  }finally{await old.end();}
 });
 

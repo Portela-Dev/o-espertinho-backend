@@ -1,36 +1,63 @@
-# Backend Espertinho
+# O Espertinho — backend
 
-Node.js + TypeScript + Express, PostgreSQL, migrations SQL versionadas e worker de ofertas.
+API Express/TypeScript e PostgreSQL. A extensão executa navegação; a API autentica, fornece snapshots, reserva itens, valida resultados e mantém revisão/publicação e histórico. Mobile fora do escopo.
 
-Este é o repositório `o-espertinho-backend`. Projetos relacionados: [frontend](https://github.com/arnaldoportela/o-espertinho-frontend) e [extrator](https://github.com/arnaldoportela/o-espertinho-jobs).
+## Desenvolvimento
 
-## Primeiro uso
+Use Node 24. Na raiz do workspace, `npm run setup` prepara os três projetos ativos e sobe somente PostgreSQL com detach. Em seguida execute `npm run dev:backend` e `npm run dev:frontend` em terminais separados.
 
-Requisitos: Node.js 22.12+ (preferencialmente 24), npm e Docker com Compose para o PostgreSQL.
+Neste repositório: `npm ci`, `npm run setup:env`, `npm run db:migrate`, `npm run dev`. Scripts não imprimem segredos e preservam `.env` existente. Configure GOOGLE_CLIENT_ID; a conta administrativa continua reconhecida após login Google verificado. Não há senha padrão nem bypass de autenticação de produção.
 
-```powershell
-npm ci
-npm run setup:env
-```
+Migrations novas: 029 adiciona filas persistidas e seleção de executor; 030 copia receitas da POC sem apagar registros ou habilitar execução automaticamente. Migrations antigas não foram reescritas. Aplique com a conta de migrations; produção usa DATABASE_URL restrita e separada de MIGRATION_DATABASE_URL. A migration 031 encerra filas/agendamentos antigos e fixa extension como único executor. Preserve o backup anterior e sua chave de arquivo cifrado; ENCRYPTION_KEY não é usada pelo runtime atual.
 
-Configure `GOOGLE_CLIENT_ID` no `.env`. O script gera a senha do PostgreSQL e as chaves locais apenas quando o arquivo não existe. Preserve `ENCRYPTION_KEY` para continuar lendo as configurações criptografadas do banco.
+## Configuração e execução
 
-```powershell
-npm run db:up
-npm run db:migrate
-npm run dev
-```
+Em Admin → Marketplaces → Execução pela extensão, configure receita e regras genéricas de login, desafio, acesso negado, limite e indisponibilidade. Cadastre perfis/fontes de exploração e seletores normalmente. Todo marketplace usa a extensão, inclusive novos cadastros; não há opção de reativar workers antigos.
 
-Aguarde o PostgreSQL ficar saudável antes de executar as migrations. A API escuta em `127.0.0.1:3000`, o banco em `127.0.0.1:5432`, e `APP_ORIGIN` deve corresponder à origem do frontend (por padrão `http://localhost:4200`). O frontend encaminha `/api` para a API. O login Google usa ID token e não exige client secret.
+A extensão usa `/api/extension/auth/*` para pareamento com prova de posse, sessão Google e XSRF na aprovação. Recebe token opaco com rotação, verifica a permissão affiliate_links e permissões adicionais de cada etapa. Logout, bloqueio e remoção de acesso invalidam chamadas. Tokens da API não são enviados ao marketplace.
 
-Para extração, execute separadamente o projeto `o-espertinho-jobs`, configure `SCRAPER_SERVICE_URL` e use o mesmo `EXTRACTION_SERVICE_TOKEN` nos dois serviços. O backend não inicia o extrator. O worker de atualização roda com o backend quando `RUN_WORKER=true`.
+Operações reais: `/api/extension/catalog/config`, `/catalog/runs`, `/catalog/runs/:id`, `/claim`, `/heartbeat`, `/results`, `/action` e `/items`. Uma execução por marketplace, reserva de três minutos, snapshot versionado, prazo de intervenção e gravações idempotentes. Cancelamento recusa respostas tardias. A extensão não acessa o banco diretamente e não envia cookies, storage ou headers do marketplace.
 
-Swagger: `http://localhost:3000/api/docs/`. Para operações autenticadas de escrita, faça login no frontend e abra `http://localhost:4200/api/docs/`, preservando sessão, origem e XSRF.
+`GET /api/extension/catalog/stats?marketplaceId=...&retryFailed=false` fornece os contadores do painel autenticado (completed conta links com URL de afiliado e extrações concluídas; falhas não contam como conclusão): conversões e extrações pendentes / links descobertos não arquivados; preços sem verificação bem-sucedida nas últimas 24 horas / ofertas publicadas com link de afiliado. Extrações com falha entram nos elegíveis quando retryFailed=true. Campos de extração e preços são nulos sem as permissões catalog e updates, respectivamente. Falhas técnicas não renovam data_updated_at. Os contadores não modificam a seleção das execuções nem seu limite de itens.
 
-Os arquivos `.env.example`, `docker-compose.yml` e as migrations estão incluídos; dados e credenciais locais não são versionados. Para parar o banco sem apagar o volume, execute `npm run db:down`.
+Admin: `/api/admin/extension-catalog/settings/:id`, `/runs`, `/runs/:id/items`, `/runs/:id/cancel` e `/manual/:id`. Configuração usa XSRF e confirmação administrativa recente. A API autoriza e valida independentemente da interface.
 
-Comandos: `npm run setup:env`, `npm run db:up`, `npm run db:migrate`, `npm run dev`, `npm run build`, `npm start`, `npm test`.
+Revisão: categoria de origem e sugestão de mapeamento não equivalem à confirmação. Atribuir produto existente herda sua categoria; criar produto manualmente exige categoria confirmada. Publicar exige vínculo compatível, URL e dados válidos, confirmação explícita e observação recente; é idempotente. Produtos podem existir sem ofertas, mas ofertas exigem produto.
 
-O admin inicial é reservado pela migration para `arnaldorolimportela@gmail.com`; a identidade só é vinculada após validar login Google. Chaves dos marketplaces são configuradas em Admin → Marketplaces. O Client ID do login Google precisa estar no `.env` antes do primeiro acesso.
+Prévia manual e teste de seletores retornam 202 com executionId. O admin acompanha a solicitação e permite cancelar; a extensão a processa. Confirmar a prévia continua sujeito ao produto/perfil original e à expiração.
 
-Nunca versione `.env` nem descarte o volume do PostgreSQL em uma parada rotineira.
+Indisponibilidade explícita exige uma regra unavailable na configuração capturada pela execução. O enriquecimento conclui sem falha e grava availability=unavailable nos dados de revisão; preço ausente por esse motivo não é pendência de hidratação. Na atualização de uma oferta, availability_status passa a unavailable e refresh_status a updated, preservando o último preço como referência e registrando indisponibilidade no histórico diário. Falha técnica continua mantendo o estado anterior e marcando atualização pendente.
+
+Na etapa enrich, o endereço de navegação enviado à extensão é a URL original do produto. O link de afiliado continua armazenado separadamente para publicação e compra; sua geração permanece uma etapa anterior do fluxo. Isso permite ler categorias e indicadores de disponibilidade da página original, sem depender da apresentação intermediária do link de afiliado.
+
+Preço e histórico são atualizados na mesma transação: um preço por oferta/dia de America/Sao_Paulo, sobrescrito somente por observação mais recente. Falhas técnicas preservam preço/disponibilidade e marcam Atualização pendente. Indisponibilidade exige indicador explícito. A publicação mantém agregação por produto e árvores de até dez níveis.
+
+Swagger/OpenAPI: `/api/docs/` e `/api/openapi.json`; produção exige autorização administrativa conforme configuração existente. Nenhum endpoint de demonstração, captura de sessão ou prova de conversão permanece registrado.
+
+## Migração e recuperação
+
+Consulte `docs/PLANO-MIGRACAO-CATALOGO-EXTENSAO.md` e `docs/CATALOG-MIGRATION-INVENTORY.md`. O workspace principal mantém o documento sincronizado a cada fase.
+
+Jobs/extrator/pacote Node foram descontinuados. Não há rota, variável de runtime ou dependência de navegador para esses serviços. Históricos antigos e credenciais cifradas são preservados como arquivo, sem acesso pela conta de runtime; somente discovery_runs recebe SELECT para conferir referências ao excluir configurações. Recuperação anterior ao corte exige backup e versões compatíveis; rollback apenas da imagem não desfaz migrations.
+
+O worker interno executa somente manutenção de sessões, prévias expiradas, auditoria, cliques e retenção de preços. O setup gera senhas distintas para a conta de migrations e a conta espertinho_app, e db:migrate provisiona os grants restritos. Em ambientes existentes, configurar as duas URLs antes de aplicar migration/provisionamento; não usar a conta dona do banco como runtime. Exemplos não incluem segredos do marketplace.
+
+## Validação
+
+Na paginação por rolagem, `pagination.scrollStrategy` aceita `step` (distância configurada, padrão compatível com perfis anteriores) ou `bottom` (fim do conteúdo carregado). A extensão informa posição, altura e viewport; o backend só conta uma tentativa sem progresso quando chegou ao fim, a altura permaneceu estável e não surgiram URLs únicas. Os limites de páginas, itens e tentativas continuam obrigatórios.
+
+A migration 032 armazena hashes das URLs normalizadas por item de execução para contar cada destino uma única vez, inclusive após retomadas. Query, fragmento e sufixos configurados não multiplicam a contagem. A exclusão da execução elimina esses hashes. Aplique migrations e publique o backend antes de atualizar frontend/extensão; recarregue a extensão e inicie uma execução nova para usar a estratégia.
+
+`npm run typecheck`, `npm test`, `npm run test:coverage`, `npm run build`. Testes SQL usam PGlite descartável; testes PostgreSQL reais exigem URL explícita de ambiente de teste. Nenhum teste normal usa DATABASE_URL pessoal. O teste de backup restaura uma cópia isolada antes de comparar os dados.
+
+A extensão tem teste adicional em Chromium real com HTTPS e API controlados. Isso não substitui homologar sua sessão real, seletores e um pequeno lote autorizado em cada marketplace. Não há contorno de login/CAPTCHA, perfis ocultos ou exportação de sessão.
+
+## Administração reorganizada
+
+A consulta administrativa de ofertas inclui o nome/SKU do produto e o marketplace para a listagem única do frontend, mantendo a permissão catalog. As permissões existentes permanecem com os mesmos IDs; o rótulo updates descreve consulta de execuções e atualização de preços. A centralização visual não altera as verificações de etapa no cancelamento.
+
+O cadastro de fontes não aceita mais intervalHours e não atualiza interval_hours. A coluna histórica permanece preservada no banco, sem consumidor de agendamento; não há migration destrutiva nem mudança nas URLs/perfis de vitrines. Habilitação da fonte, paginação e intervalo entre requisições continuam operacionais.
+
+## Revisão com IA
+
+A revisão possui uma aba Configurações de IA com tarefas e prompts independentes. A extensão cataloga primeiro e categoriza produtos novos depois, reutilizando o inventário completo. Decisões válidas são confirmadas automaticamente; ambiguidades e publicação permanecem na revisão. Consulte docs/REVISAO-IA.md no backend.

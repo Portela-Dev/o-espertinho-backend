@@ -1,0 +1,23 @@
+{
+  "name": "espertinho",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "setup": "node scripts/project.mjs setup",
+    "build": "node scripts/project.mjs build",
+    "test": "node scripts/project.mjs test",
+    "typecheck": "node scripts/project.mjs typecheck",
+    "dev": "npm --prefix 2-frontend run dev",
+    "dev:frontend": "npm --prefix 2-frontend run dev",
+    "dev:backend": "npm --prefix 1-backend run dev",
+    "db:up": "node scripts/project.mjs db:up",
+    "db:down": "node scripts/project.mjs db:down",
+    "db:migrate": "node scripts/project.mjs db:migrate",
+    "db:config": "node scripts/project.mjs db:config",
+    "extension:package": "npm --prefix o-espertinho-chrome-extension run package"
+  }
+}

@@ -8,7 +8,7 @@ test('lista usuários com filtros e paginação, sem expor identidade Google ou 
  const {admin,alice}=await fixture(t);assert.equal((await alice.get('/api/admin/users')).status,403);
  const r=await admin.get('/api/admin/users?q=ALICE&status=active&profile=user');assert.equal(r.status,200);assert.equal(r.body.total,1);assert.equal(r.body.items[0].email,'alice@gmail.com');assert.equal(r.body.pageSize,25);assert.equal(r.body.items[0].google_sub,undefined);
  assert.equal((await admin.get('/api/admin/users?page=0')).status,400);assert.equal((await admin.get('/api/admin/users?page=2')).body.items.length,0);
- const profiles=await admin.get('/api/admin/access-profiles');assert.equal(profiles.body.permissions.length,7);assert.ok(profiles.body.profiles.some(p=>p.id==='admin'&&p.system));
+ const profiles=await admin.get('/api/admin/access-profiles');assert.equal(profiles.body.permissions.length,10);assert.ok(profiles.body.permissions.some(p=>p.id==='affiliate_links'));assert.ok(profiles.body.permissions.some(p=>p.id==='purge'));assert.ok(profiles.body.profiles.some(p=>p.id==='admin'&&p.system));
 });
 test('editor recebe acesso apenas ao catálogo; alterações de perfil afetam a sessão já aberta',async t=>{
  const {admin,alice,user}=await fixture(t);assert.equal((await change(admin,user,'editor')).status,200);
@@ -24,11 +24,11 @@ test('perfis personalizados: validação, edição versionada, auditoria e exclu
  assert.equal((await admin.mutate('post','/api/admin/access-profiles',{name:'Inválido',permissions:['root']})).status,400);
  const created=await admin.mutate('post','/api/admin/access-profiles',{name:'Operação',permissions:['updates','updates']});assert.equal(created.status,201);const id=created.body.id;
  assert.equal((await admin.mutate('post','/api/admin/access-profiles',{name:'operação',permissions:[]})).status,409);
- assert.equal((await change(admin,user,id)).status,200);assert.equal((await alice.get('/api/admin/offer-refresh')).status,200);assert.equal((await alice.get('/api/admin/products')).status,403);
+ assert.equal((await change(admin,user,id)).status,200);assert.equal((await alice.get('/api/admin/extension-catalog/runs')).status,200);assert.equal((await alice.get('/api/admin/products')).status,403);
  assert.equal((await admin.mutate('delete','/api/admin/access-profiles/'+id)).status,409);
  const p=(await admin.get('/api/admin/access-profiles')).body.profiles.find(p=>p.id===id);
  const updated=await admin.mutate('put','/api/admin/access-profiles/'+id,{name:'Métricas',permissions:['overview'],expectedUpdatedAt:p.updated_at});assert.equal(updated.status,200,JSON.stringify(updated.body));
- assert.equal((await alice.get('/api/admin/offer-refresh')).status,403);assert.equal((await alice.get('/api/admin/stats')).status,200);
+ assert.equal((await alice.get('/api/admin/extension-catalog/runs')).status,403);assert.equal((await alice.get('/api/admin/stats')).status,200);
  assert.equal((await admin.mutate('put','/api/admin/access-profiles/'+id,{name:'Antigo',permissions:[],expectedUpdatedAt:p.updated_at})).status,409);
  assert.equal((await change(admin,{...user,access_profile_id:id},'user')).status,200);assert.equal((await admin.mutate('delete','/api/admin/access-profiles/'+id)).status,200);
  assert.ok((await db.query("SELECT id FROM audit_logs WHERE action='profile.updated'")).rows.length);
