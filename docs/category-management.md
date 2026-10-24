@@ -17,7 +17,7 @@ Nenhuma operação remove produtos, ofertas, históricos de preço, favoritos ou
 
 `POST /api/admin/categories/apply` recebe o mesmo corpo com `revision` e `confirm: true`. Exige sessão, permissão `catalog`, origem autorizada, XSRF e verificação administrativa recente. A transação verifica novamente o catálogo e recusa prévias obsoletas com 409. Bloqueia escritas concorrentes nas tabelas envolvidas durante o remapeamento; conflitos ou espera excessiva exigem nova prévia. A operação inteira é revertida em caso de falha. Não desativa triggers nem exige privilégios de migrations.
 
-A revisão de inventário da IA muda pelas triggers existentes, impedindo a aplicação posterior de análises sobre a árvore antiga. As operações são registradas em auditoria. Não há alteração de schema nem migrations adicionais.
+Atualizações de preço ou de texto que não mudem a classificação não invalidam a prévia e são preservadas. A revisão de inventário da IA muda pelas triggers existentes, impedindo a aplicação posterior de análises sobre a árvore antiga. As operações são registradas em auditoria. Não há alteração de schema nem migrations adicionais.
 
 ## Validação
 

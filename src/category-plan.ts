@@ -30,7 +30,7 @@ function operationContext(nodes:CategoryNode[],input:CategoryOperation){
  return {source,target,branch,branchIds};
 }
 type Context=ReturnType<typeof operationContext>;
-function affectedReferences(snapshot:CategorySnapshot,{source,branchIds}:Context){
+function affectedReferences(snapshot:CategorySnapshot,{source,branchIds}:Pick<Context,'source'|'branchIds'>){
  const affectedProducts=snapshot.products.filter(p=>p.category_ids.includes(source.id));
  const productIds=new Set(affectedProducts.map(p=>p.id));
  const affectedLinks=snapshot.links.filter(l=>branchIds.has(l.confirmed_category_id??'')||productIds.has(l.product_id??''));
@@ -72,7 +72,19 @@ function changedTree(nodes:CategoryNode[],context:Context,input:CategoryOperatio
  }
  return {finalNodes,destinations,removed};
 }
-export const categoryRevision=(snapshot:CategorySnapshot,input:CategoryOperation)=>createHash('sha256').update(JSON.stringify({snapshot,input})).digest('hex');
+export function categoryRevision(snapshot:CategorySnapshot,input:CategoryOperation){
+ const source=snapshot.nodes.find(n=>n.id===input.sourceId);
+ if(!source)return createHash('sha256').update(JSON.stringify({nodes:snapshot.nodes,input})).digest('hex');
+ const branchIds=new Set(snapshot.nodes.filter(n=>isWithin(n,source)).map(n=>n.id));
+ const affected=affectedReferences(snapshot,{source,branchIds});
+ // Prices, product copy and unrelated review work do not change this operation.
+ // Only taxonomy, affected membership/references and the preview counts matter.
+ const relevant={nodes:snapshot.nodes,input,
+  products:affected.affectedProducts.map(p=>({id:p.id,category_path:p.category_path,category_ids:p.category_ids})),
+  offers:snapshot.offers.filter(o=>affected.productIds.has(o.product_id)).map(o=>({id:o.id,product_id:o.product_id})),
+  links:affected.affectedLinks,mappings:affected.affectedMappings,filters:affected.affectedFilters};
+ return createHash('sha256').update(JSON.stringify(relevant)).digest('hex');
+}
 export function categoryPlan(snapshot:CategorySnapshot,input:CategoryOperation){
  const context=operationContext(snapshot.nodes,input),affected=affectedReferences(snapshot,context);
  const inUse=affected.affectedProducts.length+affected.affectedLinks.length+affected.affectedMappings.length+affected.affectedFilters.length;

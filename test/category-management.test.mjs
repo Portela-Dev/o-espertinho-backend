@@ -108,3 +108,12 @@ test('união reaproveita a grafia do pai existente também nos descendentes excl
  assert.deepEqual((await current(a.id)).category_path,['Grafia destino','Som','Cabos']);
  const child=(await db.query('SELECT path FROM category_nodes WHERE id=$1',[a.category_ids.at(-1)])).rows[0];assert.deepEqual(child.path,['Grafia destino','Som','Cabos']);
 });
+
+test('atualização de preço e texto não invalida prévia nem é sobrescrita pela gestão de categorias',async()=>{
+ const p=await product(['Preço independente']),offer=await seedOffer(db,{productId:p.id});
+ const input={action:'rename',sourceId:p.category_ids[0],name:'Preço independente atualizado'},pre=await preview(input);
+ await db.query('UPDATE offers SET price_cents=12345,updated_at=clock_timestamp() WHERE id=$1',[offer]);
+ await db.query("UPDATE products SET name='Nome atualizado em paralelo',updated_at=clock_timestamp() WHERE id=$1",[p.id]);
+ const r=await admin.mutate('post',base+'/apply',{...input,revision:pre.revision,confirm:true});assert.equal(r.status,200,JSON.stringify(r.body));
+ assert.equal((await current(p.id)).name,'Nome atualizado em paralelo');assert.equal((await db.query('SELECT price_cents FROM offers WHERE id=$1',[offer])).rows[0].price_cents,12345);
+});
