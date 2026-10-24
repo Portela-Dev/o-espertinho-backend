@@ -6,7 +6,7 @@ import {createDatabase} from '../dist/db.js';
 import {provisionDatabase} from '../dist/provision-database.js';
 import {assertRestrictedDatabase} from '../dist/database-security.js';
 import {previewPurge,executePurge} from '../dist/catalog-purge.js';
-import {seedOffer,seedProduct} from './helpers.mjs';
+import {seedOffer,seedProduct,client,createApp,testConfig,identity} from './helpers.mjs';
 import {applyAdminSeed,readAdminSeed} from '../dist/admin-seed.js';
 const url=process.env.TEST_DATABASE_ADMIN_URL;
 test('PostgreSQL real: provisionamento preserva dados e restringe runtime, DDL e migrations',{skip:!url},async()=>{
@@ -31,6 +31,20 @@ test('PostgreSQL real: provisionamento preserva dados e restringe runtime, DDL e
   const id=randomUUID();await app.query("INSERT INTO products(id,name,category,category_path) VALUES($1,'Dado preservado','Tecnologia',ARRAY['Tecnologia'])",[id]);
   await app.query("UPDATE products SET name='Atualizado' WHERE id=$1",[id]);
   for(const table of ['amazon_sitestripe_session','affiliate_proof_recipes','offer_refresh_items','enrichment_items'])await assert.rejects(()=>app.query('SELECT * FROM '+table),error=>error.code==='42501');
+  // Global category operations must also work without migration privileges.
+  const categoryProduct=await seedProduct(app,{category:'Categorias runtime'});
+  const categoryId=(await app.query('SELECT category_ids FROM products WHERE id=$1',[categoryProduct])).rows[0].category_ids[0];
+  const categoryClient=client(createApp(app,testConfig(),{verifyGoogle:async token=>identity(token)}));await categoryClient.login('admin');
+  const categoryInput={action:'rename',sourceId:categoryId,name:'Categorias runtime atualizadas'};
+  const categoryPreview=await categoryClient.mutate('post','/api/admin/categories/preview',categoryInput);assert.equal(categoryPreview.status,200,JSON.stringify(categoryPreview.body));
+  const categoryApplied=await categoryClient.mutate('post','/api/admin/categories/apply',{...categoryInput,revision:categoryPreview.body.revision,confirm:true});assert.equal(categoryApplied.status,200,JSON.stringify(categoryApplied.body));
+  assert.deepEqual((await app.query('SELECT category_path FROM products WHERE id=$1',[categoryProduct])).rows[0].category_path,['Categorias runtime atualizadas']);
+  const concurrentInput={action:'rename',sourceId:categoryId,name:'Categorias runtime concorrência'};
+  const concurrentPreview=await categoryClient.mutate('post','/api/admin/categories/preview',concurrentInput);
+  const concurrentResults=await Promise.all([1,2].map(()=>categoryClient.mutate('post','/api/admin/categories/apply',{...concurrentInput,revision:concurrentPreview.body.revision,confirm:true})));
+  assert.deepEqual(concurrentResults.map(r=>r.status).sort(),[200,409]);
+  assert.deepEqual((await app.query('SELECT category_path FROM products WHERE id=$1',[categoryProduct])).rows[0].category_path,['Categorias runtime concorrência']);
+
   // Purge reaches only dependencies of deleted rows through fixed definer triggers;
   // runtime still cannot read or mutate the retired workers' tables directly.
   const purgeProduct=await seedProduct(app,{name:'Produto do expurgo'}),offer=await seedOffer(app,{productId:purgeProduct}),legacyRun=randomUUID(),legacyItem=randomUUID();

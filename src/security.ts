@@ -196,6 +196,7 @@ function adminPermissions(parts: string[], method: string): string[] {
     stats: ['overview'],
     audit: ['activity'],
     selectors: ['selectors'],
+    categories: ['catalog'],
     'category-tree': ['catalog'],
     'category-options': ['catalog'],
     products: ['catalog'],
@@ -242,6 +243,7 @@ export function requireRecentAdmin(
     [
       'sharing',
       'purge',
+      'categories',
       'users',
       'access-profiles',
       'catalog-marketplaces',
