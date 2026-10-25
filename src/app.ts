@@ -783,7 +783,13 @@ export function createApp(
         'SELECT status,count(*)::int AS count FROM offers GROUP BY status',
       ),
       db.query(
-        'SELECT m.id,m.name,count(c.id)::int AS clicks FROM marketplaces m LEFT JOIN click_events c ON c.marketplace_id=m.id AND c.created_at>=$1 GROUP BY m.id,m.name ORDER BY clicks DESC',
+        `WITH clicks AS (
+          SELECT marketplace_id,count(*)::int AS total FROM click_events WHERE created_at>=$1 GROUP BY marketplace_id
+        ), published AS (
+          SELECT marketplace_id,count(*)::int AS total FROM offers WHERE status='published' GROUP BY marketplace_id
+        ) SELECT m.id,m.name,m.logo_url,m.website_url,COALESCE(c.total,0)::int AS clicks,COALESCE(p.total,0)::int AS "publishedOffers"
+          FROM marketplaces m LEFT JOIN clicks c ON c.marketplace_id=m.id LEFT JOIN published p ON p.marketplace_id=m.id
+          ORDER BY clicks DESC,m.id`,
         [since],
       ),
       pagedQuery(

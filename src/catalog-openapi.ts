@@ -1,4 +1,5 @@
 import {categoryOperation,categoryApply} from './category-contracts.js';
+import { reviewStates } from './review-status.js';
 import { publishBatchInput } from './catalog-publication.js';
 import { purgeCriteria, purgeExecute } from './catalog-purge.js';
 import { reviewAiInput, reviewAiResult } from './review-ai.js';
@@ -9,6 +10,7 @@ import { catalogResultInput } from './catalog-results.js';
 export function catalogApiPaths() {
   const paths: Record<string, any> = {};
   const definitions: [string, string, string, any?][] = [
+    ['get','/admin/discovery/enrichment/review','Listar revisões por status operacional único, incluindo prontas e publicadas'],
     ['get','/admin/categories','Listar categorias com paginação, busca e contagem de produtos'],
     ['post','/admin/categories/preview','Prévia de renomear, mover, unir ou excluir árvore; preserva produtos, ofertas e referências',categoryOperation],
     ['post','/admin/categories/apply','Aplicar prévia confirmada e atual; exige catalog, XSRF e autenticação administrativa recente',categoryApply],
@@ -212,6 +214,13 @@ export function catalogApiPaths() {
     {in:'query',name:'pageSize',schema:{type:'integer',minimum:1,maximum:50,default:20}},
   ];
   for(const action of ['preview','apply'])paths['/admin/categories/'+action].post.tags=['Produtos'];
+  paths['/admin/discovery/enrichment/review'].get.parameters = [
+    {in:'query',name:'state',schema:{type:'string',enum:['',...reviewStates]},description:'O mesmo review_status retornado em cada item. Sem filtro, arquivados ficam ocultos.'},
+    {in:'query',name:'marketplaceId',schema:{type:'string'}},
+    {in:'query',name:'sourceCategory',schema:{type:'string'}},
+    {in:'query',name:'page',schema:{type:'integer',minimum:1,default:1}},
+    {in:'query',name:'pageSize',schema:{type:'integer',minimum:1,maximum:50,default:20}},
+  ];
   return paths;
 }
 

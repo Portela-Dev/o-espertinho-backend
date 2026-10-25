@@ -426,7 +426,7 @@ const schemas: Record<string, Schema> = {
     days: { type: 'integer' },
     offers: array(object({ status: str(), count: { type: 'integer' } })),
     marketplaces: array(
-      object({ id: str(), name: str(), clicks: { type: 'integer' } }),
+      object({ id: str(), name: str(), logo_url: nullable(str()), website_url: str(), clicks: { type: 'integer' }, publishedOffers: { type: 'integer', description: 'Total atual de ofertas com status published, independente do período dos cliques.' } }),
     ),
     top: array(
       object({
