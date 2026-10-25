@@ -117,3 +117,8 @@ test('atualização de preço e texto não invalida prévia nem é sobrescrita p
  const r=await admin.mutate('post',base+'/apply',{...input,revision:pre.revision,confirm:true});assert.equal(r.status,200,JSON.stringify(r.body));
  assert.equal((await current(p.id)).name,'Nome atualizado em paralelo');assert.equal((await db.query('SELECT price_cents FROM offers WHERE id=$1',[offer])).rows[0].price_cents,12345);
 });
+
+test('pesquisa trata porcentagem, sublinhado e barra invertida como caracteres literais',async()=>{
+ const name=String.raw`Busca literal % _ \ fim`;const p=await product([name]);
+ const r=await admin.get(base+'?q='+encodeURIComponent(name));assert.equal(r.status,200);assert.equal(r.body.total,1);assert.deepEqual(r.body.items[0].path,[name]);assert.equal(r.body.items[0].id,p.category_ids[0]);
+});

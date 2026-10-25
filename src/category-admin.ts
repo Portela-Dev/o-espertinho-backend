@@ -40,7 +40,7 @@ function confirmedCategory(plan:CategoryPlan,link:CategorySnapshot['links'][numb
  const categoryId=plan.destinations.get(link.confirmed_category_id??'')?.id??link.confirmed_category_id;
  if(!path)return categoryId;
  const category=plan.finalNodes.find(n=>n.id===categoryId);
- if(category&&category.normalized_path.every((v,i)=>path[i]?.toLowerCase()===v))return categoryId;
+ if(category?.normalized_path.every((v,i)=>path[i]?.toLowerCase()===v))return categoryId;
  return plan.finalNodes.find(n=>categoryKey(n.path)===categoryKey(path))!.id;
 }
 async function updateLinks(db:Connection,plan:CategoryPlan,paths:Map<string,string[]>){
@@ -72,7 +72,7 @@ async function applyPlan(db:Connection,plan:CategoryPlan){
 export function registerCategoryAdmin(app:Express,db:Database){
  app.get('/api/admin/categories',async(req,res)=>{
   const q=z.string().trim().max(160).default('').parse(req.query.q);
-  const search='%'+q.replaceAll('\\','\\\\').replaceAll('%','\\%').replaceAll('_','\\_')+'%';
+  const search = '%' + q.replaceAll(/[\\%_]/g, String.raw`\$&`) + '%';
   res.json(await pagedQuery(db,{...req.query,paginate:'true'},`SELECT n.id,n.path,cardinality(n.path) AS depth,
     (SELECT count(*)::int FROM products p WHERE n.id=ANY(p.category_ids)) AS product_count,
     (SELECT count(*)::int FROM category_nodes c WHERE c.normalized_path[1:cardinality(n.path)]=n.normalized_path AND c.id<>n.id) AS descendant_count
