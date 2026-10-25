@@ -12,6 +12,7 @@ import { audit } from './offers.js';
 import { pagedQuery } from './pagination.js';
 import { requiredCategory } from './classifications.js';
 import { invalidAiReview } from './review-ai.js';
+import { reviewStates, reviewStatusSql } from './review-status.js';
 const uuid = z.uuid();
 const marketId = z.string().regex(/^[a-z][a-z0-9_-]{1,39}$/);
 const newProduct = z.strictObject({
@@ -48,6 +49,7 @@ async function reviewableLink(
   }
   if (
     row.status !== 'pending' ||
+    row.published_offer_id ||
     row.extraction_status !== 'completed' ||
     invalidAiReview(row)
   ) {
@@ -158,14 +160,7 @@ export function registerEnrichmentAdmin(app: Express, db: Database) {
         marketplaceId: marketId.or(z.literal('')).default(''),
         sourceCategory: z.string().max(1000).default(''),
         state: z
-          .enum([
-            '',
-            'pending',
-            'completed',
-            'failed',
-            'invalid',
-            'needs_review',
-          ])
+          .enum(['', ...reviewStates])
           .default(''),
       })
       .parse(req.query);
@@ -173,15 +168,17 @@ export function registerEnrichmentAdmin(app: Express, db: Database) {
       await pagedQuery(
         db,
         { ...req.query, paginate: 'true' },
-        `SELECT l.*,p.name AS product_name,p.sku AS product_sku,d.name AS draft_name,d.description AS draft_description,d.brand AS draft_brand,d.image_url AS draft_image_url,m.name AS marketplace_name,ac.suggestion AS ai_category,ac.request_id AS ai_category_request,ap.suggestion AS ai_product,ap.request_id AS ai_product_request,cm.id AS mapping_id,cm.category_id AS suggested_category_id,n.path AS suggested_category_path,confirmed.path AS confirmed_category_path
+        `SELECT l.*,${reviewStatusSql} AS review_status,p.name AS product_name,p.sku AS product_sku,d.name AS draft_name,d.description AS draft_description,d.brand AS draft_brand,d.image_url AS draft_image_url,m.name AS marketplace_name,ac.suggestion AS ai_category,ac.request_id AS ai_category_request,ap.suggestion AS ai_product,ap.request_id AS ai_product_request,cm.id AS mapping_id,cm.category_id AS suggested_category_id,n.path AS suggested_category_path,confirmed.path AS confirmed_category_path
    FROM discovery_links l
  LEFT JOIN review_ai_suggestions ac ON ac.link_id=l.id AND ac.task='category' AND ac.link_version=l.enrichment_version AND ac.settings_version=(SELECT category_version FROM review_ai_settings WHERE id=true)
  LEFT JOIN review_ai_suggestions ap ON ap.link_id=l.id AND ap.task='product' AND ap.link_version=l.enrichment_version AND ap.settings_version=(SELECT product_version FROM review_ai_settings WHERE id=true)
  LEFT JOIN review_ai_product_drafts d ON d.id=l.product_draft_id
  JOIN marketplaces m ON m.id=l.marketplace_id LEFT JOIN category_mappings cm ON cm.marketplace_id=l.marketplace_id AND cm.source_key=l.source_category_key
    LEFT JOIN category_nodes n ON n.id=cm.category_id LEFT JOIN category_nodes confirmed ON confirmed.id=l.confirmed_category_id LEFT JOIN products p ON p.id=l.product_id
-   WHERE l.status='pending' AND l.published_offer_id IS NULL AND ($1='' OR l.marketplace_id=$1)
- AND ($2='' OR l.extraction_status=$2 OR ($2 IN ('invalid','needs_review') AND (l.ai_resolution->'product'->>'action'=$2 OR l.ai_resolution->'category'->>'action'=$2)))
+   LEFT JOIN offers publication ON publication.id=l.published_offer_id
+   LEFT JOIN scraping_profiles profile ON profile.marketplace_id=l.marketplace_id
+   WHERE (l.status<>'archived' OR $2='archived') AND ($1='' OR l.marketplace_id=$1)
+ AND ($2='' OR (${reviewStatusSql})=$2)
  AND ($3='' OR position(lower($3) in lower(array_to_string(l.source_category_path,' > ')))>0) ORDER BY l.first_seen_at,l.id`,
         [f.marketplaceId, f.state, f.sourceCategory],
       ),
@@ -292,6 +289,7 @@ export function registerEnrichmentAdmin(app: Express, db: Database) {
       ).rows[0];
       if (
         row?.status !== 'pending' ||
+        row.published_offer_id ||
         row.extraction_status !== 'completed' ||
         invalidAiReview(row)
       ) {

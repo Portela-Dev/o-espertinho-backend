@@ -41,9 +41,10 @@ async function publishCandidate(
         409,
         'Anúncio inválido. Extraia os dados novamente e refaça a análise antes de publicar.',
       );
+    if (link.enrichment_version !== version)
+      throw new HttpError(409, 'A oferta foi alterada. Atualize a lista e confirme novamente.');
     if (
       link.status !== 'pending' ||
-      link.enrichment_version !== version ||
       link.extraction_status !== 'completed' ||
       !link.confirmed_category_id ||
       !link.product_id ||
@@ -82,20 +83,16 @@ async function publishCandidate(
       data = link.enrichment_data;
     if (
       !profile ||
-      !data?.title ||
+      !data?.title?.trim() ||
       data.missing?.length ||
       !Number.isInteger(data.priceCents) ||
       data.priceCents <= 0
     )
       throw new HttpError(409, 'Os dados obrigatórios estão incompletos.');
-    const expires = new Date(
-      new Date(link.extracted_at).getTime() + profile.validity_minutes * 60000,
-    );
-    if (expires.getTime() <= Date.now())
-      throw new HttpError(
-        409,
-        'Os dados perderam a validade. Extraia novamente antes de publicar.',
-      );
+    if (data.availability === 'unavailable')
+      throw new HttpError(409, 'A oferta está indisponível no marketplace.');
+    // Review duration does not invalidate data. Keep the actual collection timestamp.
+    const expires = new Date(Date.now() + profile.validity_minutes * 60000);
     const offerId = randomUUID();
     await c.query(
       `INSERT INTO offers(id,marketplace_id,external_id,title,description,category,subcategory,category_path,image_url,images,product_url,affiliate_url,price_cents,original_price_cents,source,status,published_at,conditions,expires_at,product_id,specifications,extraction_metadata,data_updated_at,rating,review_count)
