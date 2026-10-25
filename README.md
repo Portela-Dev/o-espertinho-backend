@@ -12,6 +12,8 @@ Migrations novas: 029 adiciona filas persistidas e seleção de executor; 030 co
 
 ## Configuração e execução
 
+O Pixel Meta é configurado em Admin → Ofertas → Pixel Meta. A migration 042 cria a configuração com ID `1918844482826551`; o ID é público e não é uma credencial. `/api/marketing` só habilita a coleta em produção HTTPS na origem canônica. O frontend exige consentimento específico antes de carregar o script. Escritas em `/api/admin/marketing` exigem permissão `catalog`, sessão, XSRF, autenticação administrativa recente e versão atual. O seed aceita `meta_pixel_settings` opcional em novos snapshots, preservando o snapshot anterior e seu checksum.
+
 Em Admin → Marketplaces → Execução pela extensão, configure receita e regras genéricas de login, desafio, acesso negado, limite e indisponibilidade. Cadastre perfis/fontes de exploração e seletores normalmente. Todo marketplace usa a extensão, inclusive novos cadastros; não há opção de reativar workers antigos.
 
 A extensão usa `/api/extension/auth/*` para pareamento com prova de posse, sessão Google e XSRF na aprovação. Recebe token opaco com rotação, verifica a permissão affiliate_links e permissões adicionais de cada etapa. Logout, bloqueio e remoção de acesso invalidam chamadas. Tokens da API não são enviados ao marketplace.

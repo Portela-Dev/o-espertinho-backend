@@ -77,6 +77,11 @@ const definitions = {
     columns: ['id', 'enabled', 'channels'],
     json: ['channels'],
   },
+  meta_pixel_settings: {
+    key: 'id',
+    columns: ['id', 'enabled', 'pixel_id'],
+    json: [],
+  },
   access_profiles: {
     key: 'id',
     columns: ['id', 'name', 'description', 'permissions', 'system'],
@@ -150,6 +155,9 @@ const configurationSchema = z.strictObject({
       }),
     )
     .length(1),
+  meta_pixel_settings: z.array(z.strictObject({
+    id: z.literal(true), enabled: z.boolean(), pixel_id: z.string().regex(/^[0-9]{5,30}$/),
+  })).max(1).default([]),
   access_profiles: z.array(
     z.strictObject({
       id: marketId,
@@ -412,11 +420,11 @@ async function seedChanges(
             quote(table),
         )
       ).rows as Row[];
-    for (const row of seed.config[table] as Row[]) {
+    for (const row of (seed.config[table] ?? []) as Row[]) {
       const key = definition.key,
         current = rows.find((r) => r[key] === row[key]);
       if (current && canonical(current) === canonical(row)) continue;
-      const baseline = (seed.baseline[table] as Row[]).find(
+      const baseline = ((seed.baseline[table] ?? []) as Row[]).find(
         (r) => r[key] === row[key],
       );
       if (current && (!baseline || canonical(current) !== canonical(baseline)))
@@ -455,6 +463,7 @@ async function writeSeedChange(
         'extension_catalog_settings',
         'review_ai_settings',
         'offer_sharing_settings',
+        'meta_pixel_settings',
       ].includes(table)
     )
       updates.push('version=version+1');
