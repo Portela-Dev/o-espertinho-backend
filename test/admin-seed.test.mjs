@@ -51,6 +51,16 @@ test('seed inicializa as configurações atuais após migrations sem copiar usu�
  assert.equal((await db.query("SELECT count(*)::int AS n FROM audit_logs WHERE action='admin.seed.applied'")).rows[0].n,1);
 });
 
+test('novos snapshots podem configurar o Pixel sem reescrever o seed já publicado',async t=>{
+ const db=await fixture(t),seed=await readAdminSeed();
+ seed.id='admin-config-meta-pixel-test';
+ seed.baseline.meta_pixel_settings=[{id:true,enabled:true,pixel_id:'1918844482826551'}];
+ seed.config.meta_pixel_settings=[{id:true,enabled:false,pixel_id:'123456789012345'}];
+ assert.equal((await applyAdminSeed(db,seed)).status,'applied');
+ const row=(await db.query('SELECT enabled,pixel_id,version FROM meta_pixel_settings')).rows[0];
+ assert.deepEqual(row,{enabled:false,pixel_id:'123456789012345',version:2});
+});
+
 test('reexecução é idempotente e preserva edições futuras e dados novos',async t=>{
  const db=await fixture(t),seed=await readAdminSeed();await applyAdminSeed(db,seed);
  await db.query("UPDATE marketplaces SET name='Nome alterado na VPS' WHERE id='amazon'");await seedProduct(db);
