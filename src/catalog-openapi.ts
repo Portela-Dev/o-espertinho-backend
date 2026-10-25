@@ -1,3 +1,4 @@
+import {categoryOperation,categoryApply} from './category-contracts.js';
 import { publishBatchInput } from './catalog-publication.js';
 import { purgeCriteria, purgeExecute } from './catalog-purge.js';
 import { reviewAiInput, reviewAiResult } from './review-ai.js';
@@ -8,6 +9,9 @@ import { catalogResultInput } from './catalog-results.js';
 export function catalogApiPaths() {
   const paths: Record<string, any> = {};
   const definitions: [string, string, string, any?][] = [
+    ['get','/admin/categories','Listar categorias com paginação, busca e contagem de produtos'],
+    ['post','/admin/categories/preview','Prévia de renomear, mover, unir ou excluir árvore; preserva produtos, ofertas e referências',categoryOperation],
+    ['post','/admin/categories/apply','Aplicar prévia confirmada e atual; exige catalog, XSRF e autenticação administrativa recente',categoryApply],
     [
       'post',
       '/admin/purge/preview',
@@ -201,6 +205,13 @@ export function catalogApiPaths() {
   ];
   for (const [method, path, summary, input] of definitions)
     pathsForOperation(paths, method, path, summary, input);
+  paths['/admin/categories'].get.tags=['Produtos'];
+  paths['/admin/categories'].get.parameters=[
+    {in:'query',name:'q',schema:{type:'string',maxLength:160}},
+    {in:'query',name:'page',schema:{type:'integer',minimum:1,default:1}},
+    {in:'query',name:'pageSize',schema:{type:'integer',minimum:1,maximum:50,default:20}},
+  ];
+  for(const action of ['preview','apply'])paths['/admin/categories/'+action].post.tags=['Produtos'];
   return paths;
 }
 

@@ -1,3 +1,4 @@
+import {registerCategoryAdmin} from './category-admin.js';
 import { registerPublicSharing, registerSharingAdmin } from './sharing.js';
 import {
   registerReviewAiAdmin,
@@ -599,6 +600,7 @@ export function createApp(
   );
   registerUserAdmin(app, db);
   registerProductAdmin(app, db);
+  registerCategoryAdmin(app, db);
   registerCatalogPurge(app, db);
   registerSharingAdmin(app, db);
   registerCatalogSettings(app, db);
