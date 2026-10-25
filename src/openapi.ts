@@ -1,4 +1,5 @@
 import { sharingSettingsInput } from './sharing.js';
+import { metaPixelInput } from './marketing.js';
 import { catalogApiPaths } from './catalog-openapi.js';
 import { urlNormalizationRulesSchema } from './url-normalization.js';
 import { z } from 'zod';
@@ -1468,6 +1469,15 @@ export function createOpenApiDocument(config: Pick<Config, 'APP_ORIGIN'>) {
   );
   const sharingSchema = z.toJSONSchema(sharingSettingsInput, {
     target: 'openapi-3.0',
+  });
+  const pixelSchema = z.toJSONSchema(metaPixelInput, { target: 'openapi-3.0' });
+  add('get', '/marketing', 'Catálogo público', 'Consultar Pixel Meta habilitado em produção', {
+    role: 'public', result: object({ enabled: bool, pixelId: { type: 'string', nullable: true }, allowedOrigin: str() }),
+  });
+  add('get', '/admin/marketing', 'Revisão de ofertas', 'Consultar configuração do Pixel Meta', { result: pixelSchema });
+  add('put', '/admin/marketing', 'Revisão de ofertas', 'Salvar configuração do Pixel Meta', {
+    body: pixelSchema, result: pixelSchema,
+    description: 'Exige permissão catalog, sessão, XSRF, confirmação administrativa recente e versão atual. Aceita somente ID numérico, nunca scripts ou credenciais.',
   });
   add(
     'get',

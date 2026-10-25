@@ -190,6 +190,7 @@ function adminPermissions(parts: string[], method: string): string[] {
   const resource = parts[0];
   const fixed: Record<string, string[]> = {
     sharing: ['catalog'],
+    marketing: ['catalog'],
     purge: ['purge'],
     users: ['users'],
     'access-profiles': ['users'],
@@ -242,6 +243,7 @@ export function requireRecentAdmin(
     !['GET', 'HEAD', 'OPTIONS'].includes(req.method) &&
     [
       'sharing',
+      'marketing',
       'purge',
       'categories',
       'users',

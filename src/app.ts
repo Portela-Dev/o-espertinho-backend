@@ -1,5 +1,6 @@
 import {registerCategoryAdmin} from './category-admin.js';
 import { registerPublicSharing, registerSharingAdmin } from './sharing.js';
+import { registerPublicMarketing, registerMarketingAdmin } from './marketing.js';
 import {
   registerReviewAiAdmin,
   registerReviewAiExtension,
@@ -333,6 +334,7 @@ export function createApp(
   });
   registerPublicProducts(app, db);
   registerPublicSharing(app, db);
+  registerPublicMarketing(app, db, config);
   registerPriceHistory(app, db);
   app.get('/api/marketplaces', async (_req, res) =>
     res.json(
@@ -603,6 +605,7 @@ export function createApp(
   registerCategoryAdmin(app, db);
   registerCatalogPurge(app, db);
   registerSharingAdmin(app, db);
+  registerMarketingAdmin(app, db);
   registerCatalogSettings(app, db);
   registerCatalogAdmin(app, db);
   registerCatalogManual(app, db);
