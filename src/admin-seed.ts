@@ -156,7 +156,7 @@ const configurationSchema = z.strictObject({
     )
     .length(1),
   meta_pixel_settings: z.array(z.strictObject({
-    id: z.literal(true), enabled: z.boolean(), pixel_id: z.string().regex(/^[0-9]{5,30}$/),
+    id: z.literal(true), enabled: z.boolean(), pixel_id: z.string().regex(/^\d{5,30}$/),
   })).max(1).default([]),
   access_profiles: z.array(
     z.strictObject({

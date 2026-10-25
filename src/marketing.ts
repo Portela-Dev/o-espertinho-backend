@@ -7,7 +7,7 @@ import { audit } from './offers.js';
 
 export const metaPixelInput = z.strictObject({
   enabled: z.boolean(),
-  pixelId: z.string().regex(/^[0-9]{5,30}$/),
+  pixelId: z.string().regex(/^\d{5,30}$/),
   version: z.number().int().positive(),
 });
 const settings = (row: any) => ({
