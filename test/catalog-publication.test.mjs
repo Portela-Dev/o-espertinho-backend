@@ -31,3 +31,46 @@ test('publicação exige vínculos revisados e confirmação; repetir não dupli
  assert.equal((await f.db.query('SELECT count(*)::int AS n FROM offers')).rows[0].n,1);
  assert.equal((await f.db.query('SELECT count(*)::int AS n FROM offer_price_history')).rows[0].n,1);
 });
+
+
+test('dados antigos podem ser publicados individualmente e em lote sem falsificar a data da coleta',async t=>{
+ const f=await catalogFixture(t),single=await link(f),batch=await link(f);
+ const collected=new Date('2025-01-10T12:00:00Z');
+ await f.db.query('UPDATE discovery_links SET extracted_at=$1 WHERE id=ANY($2::uuid[])',[collected,[single.id,batch.id]]);
+ const one=await f.browser.mutate('post','/api/admin/discovery/enrichment/review/'+single.id+'/publish',{version:0,authorizedContent:true});
+ assert.equal(one.status,200,JSON.stringify(one.body));
+ const many=await f.browser.mutate('post',endpoint,{authorizedContent:true,items:[batch]});
+ assert.equal(many.body.published,1,JSON.stringify(many.body));
+ const offers=(await f.db.query('SELECT data_updated_at,expires_at,extraction_metadata FROM offers')).rows;
+ for(const offer of offers){
+  assert.equal(new Date(offer.data_updated_at).toISOString(),collected.toISOString());
+  assert.equal(new Date(offer.extraction_metadata.collectedAt).toISOString(),collected.toISOString());
+  assert.ok(new Date(offer.expires_at).getTime()>Date.now());
+ }
+ assert.equal((await f.browser.get('/api/products')).body.total,2);
+});
+
+test('revisão retorna status único e filtra prontos/publicados/invalidos sem misturar extração concluída',async t=>{
+ const f=await catalogFixture(t),ready=await link(f),published=await link(f),invalid=await link(f),unavailable=await link(f,{availability:'unavailable'}),incomplete=await link(f,{priceCents:null}),product=await link(f),affiliate=await link(f),failed=await link(f),pending=await link(f),manual=await link(f);
+ await f.db.query('UPDATE discovery_links SET ai_resolution=$2 WHERE id=$1',[invalid.id,JSON.stringify({product:{action:'invalid',reason:'Dados contraditórios'}})]);
+ await f.db.query('UPDATE discovery_links SET product_id=NULL WHERE id=$1',[product.id]);
+ await f.db.query('UPDATE discovery_links SET affiliate_url=NULL WHERE id=$1',[affiliate.id]);
+ await f.db.query("UPDATE discovery_links SET extraction_status='failed' WHERE id=$1",[failed.id]);
+ await f.db.query("UPDATE discovery_links SET extraction_status='pending',ai_resolution=$2 WHERE id=$1",[pending.id,JSON.stringify({product:{action:'invalid'}})]);
+ await f.db.query('UPDATE discovery_links SET product_id=NULL,ai_resolution=$2 WHERE id=$1',[manual.id,JSON.stringify({product:{action:'needs_review'}})]);
+ const publication=await f.browser.mutate('post',endpoint,{authorizedContent:true,items:[published]});assert.equal(publication.body.published,1);
+ const expected=new Map([[ready.id,'ready'],[published.id,'published'],[invalid.id,'invalid'],[unavailable.id,'unavailable'],[incomplete.id,'incomplete'],[product.id,'awaiting_product'],[affiliate.id,'awaiting_affiliate'],[failed.id,'failed'],[pending.id,'pending'],[manual.id,'needs_review']]);
+ const base='/api/admin/discovery/enrichment/review';
+ const all=await f.browser.get(base);assert.equal(all.status,200,JSON.stringify(all.body));assert.equal(all.body.total,10);
+ for(const row of all.body.items)assert.equal(row.review_status,expected.get(row.id));
+ for(const [id,state]of expected){const filtered=await f.browser.get(base+'?state='+state+'&pageSize=1');assert.equal(filtered.status,200);assert.equal(filtered.body.total,1,state);assert.equal(filtered.body.items[0].id,id,state);}
+ for(const item of [invalid,unavailable,incomplete]){
+  const response=await f.browser.mutate('post',endpoint,{authorizedContent:true,items:[item]});assert.equal(response.body.failed,1);assert.equal(response.body.results[0].status,409);
+ }
+ const archived=await f.browser.mutate('post',base+'/'+product.id+'/archive',{});assert.equal(archived.status,200);
+ assert.equal((await f.browser.get(base)).body.total,9);assert.equal((await f.browser.get(base+'?state=archived')).body.items[0].review_status,'archived');
+ await f.db.query("UPDATE offers SET status='expired' WHERE id=$1",[publication.body.results[0].offerId]);
+ assert.equal((await f.browser.get(base+'?state=published')).body.total,0);
+ assert.equal((await f.browser.get(base+'?state=expired')).body.items[0].id,published.id);
+ assert.equal((await f.browser.get(base+'?state=completed')).status,400);
+});
