@@ -118,7 +118,7 @@ async function applyMappingToPending(
       await c.query('SELECT * FROM discovery_links WHERE id=$1 FOR UPDATE', [candidate.id])
     ).rows[0];
     if (
-      !row || row.status !== 'pending' || row.published_offer_id ||
+      row?.status !== 'pending' || row.published_offer_id ||
       row.extraction_status !== 'completed' || row.confirmed_category_id ||
       row.product_id || invalidAiReview(row) ||
       row.source_category_key !== source.source_category_key ||
