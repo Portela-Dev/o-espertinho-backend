@@ -199,6 +199,7 @@
       },
       {
         "field": "price",
+          "priceSelection": "first_in_range",
         "selectors": [
           "section[aria-live=\"polite\"] .pyzxvq"
         ],

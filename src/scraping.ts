@@ -23,6 +23,7 @@ export const selectorRuleSchema = z
     mode: z.enum(['text', 'attribute', 'pairs', 'json']).default('text'),
     attribute: z.string().trim().max(80).default(''),
     required: z.boolean().default(false),
+    priceSelection: z.enum(['single', 'first_in_range']).optional(),
     imageSource: z.enum(['append', 'fallback']).default('append'),
     attributes: z
       .array(z.string().regex(/^[a-zA-Z][a-zA-Z0-9_-]*$/))
