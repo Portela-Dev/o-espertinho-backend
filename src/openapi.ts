@@ -122,6 +122,7 @@ const profileRule = object(
     jsonMarker: str(200),
     jsonPath: str(200),
     imageProperties: array(str(80)),
+    priceSelection: {type:'string',enum:['single','first_in_range'],description:'Preço único (padrão) ou primeiro valor à esquerda de uma faixa de preços.'},
     wholeSelector: str(600),
     fractionSelector: str(600),
     nameSelector: str(300),
