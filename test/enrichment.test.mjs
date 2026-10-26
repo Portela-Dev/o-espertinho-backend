@@ -11,23 +11,23 @@ before(async()=>{({db}=await testDatabase());const app=createApp(db,testConfig()
 });
 after(async()=>db.end());
 
-test('exact marketplace/full-path mappings only suggest; confirmation and mapping mutation are separate',async()=>{
+test('manual mapping confirms matching pending categories; later mapping edits preserve confirmations',async()=>{
  const path=['Eletrônicos','Áudio','Fones'],key=categoryKey(path);
  const nodes=(await db.query("SELECT * FROM register_category_path(ARRAY['Informática','Acessórios'])")).rows[0];const categoryId=nodes.ids.at(-1),otherId=nodes.ids[0];
  for(const id of ids)await db.query("UPDATE discovery_links SET extraction_status='completed',enrichment_data=$2,source_category_path=$3,source_category_key=$4,enrichment_version=1 WHERE id=$1",[id,JSON.stringify({title:'Fone',priceCents:1000}),path,key]);
  assert.equal((await admin.mutate('post',base+'/review/'+ids[0]+'/category',{categoryId,version:1,saveMapping:true})).status,200);
- let links=(await admin.get(base+'/review')).body.items;const pending=links.find(l=>l.id===ids[1]);assert.equal(pending.suggested_category_id,categoryId);assert.equal(pending.confirmed_category_id,null);assert.deepEqual(pending.source_category_path,path);
+ let links=(await admin.get(base+'/review')).body.items;const pending=links.find(l=>l.id===ids[1]);assert.equal(pending.suggested_category_id,categoryId);assert.equal(pending.confirmed_category_id,categoryId);assert.deepEqual(pending.source_category_path,path);
  assert.equal((await admin.mutate('post',base+'/review/'+ids[0]+'/category',{categoryId,version:1})).status,409);
  const mapping=(await admin.get(base+'/mappings')).body.items[0];assert.equal((await admin.mutate('put',base+'/mappings/'+mapping.id,{categoryId:otherId})).status,200);
  links=(await admin.get(base+'/review')).body.items;assert.equal(links.find(l=>l.id===ids[0]).confirmed_category_id,categoryId);assert.equal(links.find(l=>l.id===ids[1]).suggested_category_id,otherId);
- assert.equal((await admin.mutate('post',base+'/review/'+ids[1]+'/category',{categoryId,version:1,saveMapping:false})).status,200);
+ assert.equal((await admin.mutate('post',base+'/review/'+ids[1]+'/category',{categoryId,version:2,saveMapping:false})).status,200);
  assert.equal((await admin.get(base+'/mappings')).body.items[0].category_id,otherId);
  await db.query("UPDATE discovery_links SET source_category_key=$2 WHERE id=$1",[ids[2],categoryKey(['Outros','Fones'])]);assert.equal((await admin.get(base+'/review')).body.items.find(l=>l.id===ids[2]).suggested_category_id,null);
  assert.equal((await admin.mutate('delete',base+'/mappings/'+mapping.id,{})).status,200);
  assert.equal((await admin.get(base+'/review')).body.items.find(l=>l.id===ids[0]).confirmed_category_id,categoryId);
 });
 test('missing origin allows item-only confirmation and permissions/XSRF/limits remain enforced',async()=>{
- await db.query("UPDATE discovery_links SET source_category_path='{}',source_category_key='' WHERE id=$1",[ids[2]]);
+ await db.query("UPDATE discovery_links SET source_category_path='{}',source_category_key='',confirmed_category_id=NULL,enrichment_version=1 WHERE id=$1",[ids[2]]);
  const categoryId=(await db.query('SELECT id FROM category_nodes LIMIT 1')).rows[0].id;
  assert.equal((await admin.mutate('post',base+'/review/'+ids[2]+'/category',{categoryId,version:1,saveMapping:true})).status,400);
  assert.equal((await admin.mutate('post',base+'/review/'+ids[2]+'/category',{categoryId,version:1})).status,200);
@@ -98,4 +98,24 @@ test('existing products are searched globally and inherit category; product cate
  assert.equal((await db.query('SELECT product_id FROM discovery_links WHERE id=$1',[id])).rows[0].product_id,null);
  await db.query("UPDATE discovery_links SET status='archived' WHERE id=$1",[id]);
  assert.equal((await admin.mutate('post',url+'/product',{mode:'existing',version:row.enrichment_version,productId:existing.id})).status,409);
+});
+
+
+test('saved manual mapping applies only to eligible matching links and finalizes catalog drafts',async()=>{
+ const path=['Teste de propagação','Folha'],key=categoryKey(path);
+ const category=(await db.query("SELECT * FROM register_category_path(ARRAY['Destino de propagação'])")).rows[0].ids.at(-1);
+ const other=(await db.query("SELECT * FROM register_category_path(ARRAY['Preservada'])")).rows[0].ids.at(-1);
+ const make=async(changes={})=>{const id=randomUUID();await db.query("INSERT INTO discovery_links(id,marketplace_id,url,source_category_path,source_category_key,extraction_status,enrichment_data) VALUES($1,'amazon',$2,$3,$4,'completed',$5)",[id,'https://www.amazon.com.br/product/'+id,path,key,JSON.stringify({title:'Item de propagação'})]);for(const [column,value] of Object.entries(changes))await db.query('UPDATE discovery_links SET '+column+'=$2 WHERE id=$1',[id,value]);return id;};
+ const source=await make(),peer=await make(),confirmed=await make({confirmed_category_id:other}),archived=await make({status:'archived'}),failed=await make({extraction_status:'failed'}),pending=await make({extraction_status:'pending'}),invalid=await make({ai_resolution:JSON.stringify({product:{action:'invalid'}})}),differentPath=await make({source_category_key:categoryKey(['Outra árvore','Folha'])});
+ await db.query("INSERT INTO marketplaces(id,name,website_url,allowed_hosts) VALUES('mapping-test','Outro marketplace','https://shop.example.com',ARRAY['shop.example.com'])");
+ const differentMarket=await make({marketplace_id:'mapping-test'});
+ const drafted=await make();const draft=randomUUID();await db.query("INSERT INTO review_ai_product_drafts(id,identity_key,name,description,brand) VALUES($1,$2,'Rascunho propagado','','')",[draft,'propagation-'+draft]);await db.query('UPDATE discovery_links SET product_draft_id=$2 WHERE id=$1',[drafted,draft]);
+ const untouched=[confirmed,archived,failed,pending,invalid,differentPath,differentMarket];
+ const before=(await db.query('SELECT * FROM discovery_links WHERE id=ANY($1::uuid[]) ORDER BY id',[untouched])).rows;
+ assert.equal((await admin.mutate('post',base+'/review/'+source+'/category',{categoryId:category,version:0,saveMapping:false})).status,200);
+ assert.equal((await db.query('SELECT confirmed_category_id FROM discovery_links WHERE id=$1',[peer])).rows[0].confirmed_category_id,null);
+ assert.equal((await admin.mutate('post',base+'/review/'+source+'/category',{categoryId:category,version:1,saveMapping:true})).status,200);
+ for(const id of [peer,drafted]){const row=(await db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];assert.equal(row.confirmed_category_id,category);assert.ok(row.category_confirmed_by);assert.ok(row.category_confirmed_at);assert.equal(row.enrichment_version,1);if(id===drafted)assert.ok(row.product_id);assert.equal(row.published_offer_id,null);}
+ assert.deepEqual((await db.query('SELECT * FROM discovery_links WHERE id=ANY($1::uuid[]) ORDER BY id',[untouched])).rows,before);
+ assert.equal((await admin.mutate('post',base+'/review/'+peer+'/category',{categoryId:category,version:0})).status,409);
 });
