@@ -83,6 +83,51 @@ async function transaction<T>(
     c.release();
   }
 }
+async function confirmUnassignedCategory(
+  c: Pick<Database, 'query'>,
+  row: any,
+  categoryId: string,
+  userId: string,
+) {
+  if (row.product_draft_id) {
+    await finalizeCatalogDraft(c, row.product_draft_id, categoryId, userId);
+  } else {
+    await c.query(
+      'UPDATE discovery_links SET confirmed_category_id=$2,category_confirmed_by=$3,category_confirmed_at=clock_timestamp(),enrichment_version=enrichment_version+1 WHERE id=$1',
+      [row.id, categoryId, userId],
+    );
+  }
+}
+async function applyMappingToPending(
+  c: Pick<Database, 'query'>,
+  source: any,
+  categoryId: string,
+  userId: string,
+) {
+  const candidates = (
+    await c.query(
+      `SELECT id FROM discovery_links WHERE marketplace_id=$1 AND source_category_key=$2
+     AND status='pending' AND published_offer_id IS NULL AND extraction_status='completed'
+     AND confirmed_category_id IS NULL AND product_id IS NULL ORDER BY id`,
+      [source.marketplace_id, source.source_category_key],
+    )
+  ).rows;
+  for (const candidate of candidates) {
+    // Recheck after locking: another confirmation or a shared draft may have resolved this link.
+    const row = (
+      await c.query('SELECT * FROM discovery_links WHERE id=$1 FOR UPDATE', [candidate.id])
+    ).rows[0];
+    if (
+      !row || row.status !== 'pending' || row.published_offer_id ||
+      row.extraction_status !== 'completed' || row.confirmed_category_id ||
+      row.product_id || invalidAiReview(row) ||
+      row.source_category_key !== source.source_category_key ||
+      row.marketplace_id !== source.marketplace_id
+    ) continue;
+    await confirmUnassignedCategory(c, row, categoryId, userId);
+    await audit(c, userId, 'discovery.category.mapping_applied', row.id);
+  }
+}
 export function registerEnrichmentAdmin(app: Express, db: Database) {
   const base = '/api/admin/discovery/enrichment';
   app.post(base + '/review/:id/retry', async (req, res) => {
@@ -281,6 +326,8 @@ export function registerEnrichmentAdmin(app: Express, db: Database) {
         })
         .parse(req.body);
     await transaction(db, async (c) => {
+      // Serialize manual confirmations before taking link locks, including overlapping mappings.
+      await c.query('SELECT pg_advisory_xact_lock(73914203)');
       // Same lock order as the worker prevents a confirmation/extraction race.
       const row = (
         await c.query('SELECT * FROM discovery_links WHERE id=$1 FOR UPDATE', [
@@ -357,19 +404,11 @@ export function registerEnrichmentAdmin(app: Express, db: Database) {
         ).rows[0];
         for (const link of affected)
           await assignCatalogProduct(c, link.id, product, req.user!.id);
-      } else if (row.product_draft_id) {
-        await finalizeCatalogDraft(
-          c,
-          row.product_draft_id,
-          v.categoryId,
-          req.user!.id,
-        );
       } else {
-        await c.query(
-          'UPDATE discovery_links SET confirmed_category_id=$2,category_confirmed_by=$3,category_confirmed_at=clock_timestamp(),enrichment_version=enrichment_version+1 WHERE id=$1',
-          [id, v.categoryId, req.user!.id],
-        );
+        await confirmUnassignedCategory(c, row, v.categoryId, req.user!.id);
       }
+      if (v.saveMapping)
+        await applyMappingToPending(c, row, v.categoryId, req.user!.id);
       await audit(c, req.user!.id, 'discovery.category.confirmed', id);
     });
     res.json({ ok: true });

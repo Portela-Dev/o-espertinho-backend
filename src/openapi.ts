@@ -1594,7 +1594,7 @@ export function createOpenApiDocument(config: Pick<Config, 'APP_ORIGIN'>) {
       ),
       description:
         enrichDescription +
-        ' saveMapping atualiza apenas sugestões dos demais itens; não os aprova. Versão divergente retorna 409.',
+        ' saveMapping salva o mapeamento e confirma a categoria dos demais links pendentes, extraídos e válidos da mesma árvore de origem e marketplace, sem sobrescrever categorias confirmadas nem publicar ofertas. Versão divergente retorna 409.',
     },
   );
   add(
