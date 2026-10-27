@@ -50,12 +50,11 @@ async function reviewableLink(
   if (
     row.status !== 'pending' ||
     row.published_offer_id ||
-    row.extraction_status !== 'completed' ||
-    invalidAiReview(row)
+    row.extraction_status !== 'completed'
   ) {
     throw new HttpError(
       409,
-      'Conclua uma nova extração e análise de anúncios inválidos antes de atribuir um produto.',
+      'Conclua a extração de um link pendente e não publicado antes de atribuir um produto.',
     );
   }
   return row;
@@ -82,6 +81,31 @@ async function transaction<T>(
   } finally {
     c.release();
   }
+}
+async function acceptManualReview(
+  c: Pick<Database, 'query'>,
+  row: any,
+  userId: string,
+  task: 'category' | 'product',
+) {
+  if (!invalidAiReview(row)) return;
+  const resolution = { ...row.ai_resolution };
+  for (const key of ['product', 'category']) {
+    if (resolution[key]?.action !== 'invalid') continue;
+    resolution[key] = {
+      action: 'manual_confirmed',
+      automatic: false,
+      reviewedBy: userId,
+      reviewedAt: new Date().toISOString(),
+      confirmedTask: task,
+      reason: 'Marcação da IA substituída pela revisão manual.',
+      previousDecision: resolution[key],
+    };
+  }
+  await c.query('UPDATE discovery_links SET ai_resolution=$2 WHERE id=$1', [
+    row.id, JSON.stringify(resolution),
+  ]);
+  await audit(c, userId, 'discovery.invalid.overridden', row.id);
 }
 async function confirmUnassignedCategory(
   c: Pick<Database, 'query'>,
@@ -311,6 +335,7 @@ export function registerEnrichmentAdmin(app: Express, db: Database) {
         ).rows[0];
         await audit(c, req.user!.id, 'product.created', product.id);
       }
+      await acceptManualReview(c, row, req.user!.id, 'product');
       await assignCatalogProduct(c, id, product, req.user!.id);
       return product;
     });
@@ -337,12 +362,11 @@ export function registerEnrichmentAdmin(app: Express, db: Database) {
       if (
         row?.status !== 'pending' ||
         row.published_offer_id ||
-        row.extraction_status !== 'completed' ||
-        invalidAiReview(row)
+        row.extraction_status !== 'completed'
       ) {
         throw new HttpError(
           409,
-          'Conclua uma nova extração e análise de anúncios inválidos antes de categorizar.',
+          'Conclua a extração de um link pendente e não publicado antes de categorizar.',
         );
       }
       if (row.enrichment_version !== v.version) {
@@ -366,6 +390,7 @@ export function registerEnrichmentAdmin(app: Express, db: Database) {
           'Sem árvore de origem; aplique apenas neste item.',
         );
       }
+      await acceptManualReview(c, row, req.user!.id, 'category');
       if (v.saveMapping) {
         await c.query(
           'INSERT INTO category_mappings(id,marketplace_id,source_path,source_key,category_id,updated_by) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(marketplace_id,source_key) DO UPDATE SET category_id=$5,updated_by=$6,updated_at=clock_timestamp()',
