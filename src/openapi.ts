@@ -1512,7 +1512,7 @@ export function createOpenApiDocument(config: Pick<Config, 'APP_ORIGIN'>) {
   Object.assign(paths, extensionApiPaths(), catalogApiPaths());
   const enrich = '/admin/discovery/enrichment';
   const enrichDescription =
-    'Exige perfil discovery ou catalog, sessão, XSRF e confirmação recente para escritas. Não agenda nem publica ofertas. Mapeamentos são sugestões; a categoria exige confirmação por item.';
+    'Exige perfil discovery ou catalog, sessão, XSRF e confirmação recente para escritas. Não agenda nem publica ofertas. Consultas não aprovam categorias; alterações exigem confirmação manual.';
   const enrichPage = [
     pageParam,
     parameter('pageSize', { type: 'integer', minimum: 1, maximum: 50 }),
@@ -1595,20 +1595,20 @@ export function createOpenApiDocument(config: Pick<Config, 'APP_ORIGIN'>) {
       ),
       description:
         enrichDescription +
-        ' saveMapping salva o mapeamento e confirma a categoria dos demais links pendentes, extraídos e válidos da mesma árvore de origem e marketplace, sem sobrescrever categorias confirmadas nem publicar ofertas. Versão divergente retorna 409.',
+        ' A confirmação manual substitui a marcação de inválido da IA no item revisado, preservando o motivo anterior e sem publicar. saveMapping salva o mapeamento e confirma a categoria dos demais links pendentes, extraídos e válidos da mesma árvore de origem e marketplace, sem sobrescrever categorias confirmadas nem publicar ofertas. Versão divergente retorna 409.',
     },
   );
   add(
     'get',
     enrich + '/review/{id}/products',
     'Exploração',
-    'Buscar produtos da categoria confirmada e suas subcategorias',
+    'Buscar produtos do catálogo para atribuição manual',
     {
       parameters: [...enrichPage, parameter('q', str(160))],
       result: discoveryPage(product),
       description:
         enrichDescription +
-        ' Exige categoria confirmada; pesquisa por nome ou SKU.',
+        ' Pesquisa todo o catálogo por nome ou SKU, inclusive para anúncios inválidos; não altera a revisão.',
     },
   );
   add(
@@ -1652,7 +1652,7 @@ export function createOpenApiDocument(config: Pick<Config, 'APP_ORIGIN'>) {
       result: object({ product, status: enumeration('ready_for_review') }),
       description:
         enrichDescription +
-        ' Novos produtos herdam a categoria confirmada. Versão divergente retorna 409, sem criar produto. Não gera link nem publica.',
+        ' A confirmação manual substitui a marcação de inválido da IA no item revisado e preserva o motivo anterior. Novos produtos herdam a categoria confirmada. Versão divergente retorna 409, sem criar produto. Não gera link nem publica.',
     },
   );
   add(

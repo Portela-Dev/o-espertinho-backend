@@ -110,7 +110,7 @@ test('anúncio inválido mantém motivo, não é publicado nem atribuído e pode
  const row=(await f.db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];assert.equal(row.ai_resolution.product.action,'invalid');assert.equal(row.product_id,null);
  const list=await f.browser.get(base+'/review?state=invalid');assert.equal(list.body.items.length,1);
  assert.equal((await f.browser.mutate('post',base+'/review/'+id+'/publish',{version:row.enrichment_version,authorizedContent:true})).status,409);
- assert.equal((await f.browser.get(base+'/review/'+id+'/products')).status,409);
+ assert.equal((await f.browser.get(base+'/review/'+id+'/products')).status,200);
  assert.equal((await f.call('get','/catalog/ai/queue?marketplaceId=amazon&task=product&retryReview=true')).body.items.length,0);
  const retry=await f.browser.mutate('post',base+'/review/'+id+'/retry',{});assert.equal(retry.status,202);
  assert.equal((await f.browser.mutate('post',base+'/review/'+id+'/retry',{})).status,409);

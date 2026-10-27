@@ -39,7 +39,7 @@ async function publishCandidate(
     if (invalidAiReview(link))
       throw new HttpError(
         409,
-        'Anúncio inválido. Extraia os dados novamente e refaça a análise antes de publicar.',
+        'Anúncio inválido. Confirme manualmente a categoria ou o produto, ou extraia os dados novamente e refaça a análise antes de publicar.',
       );
     if (link.enrichment_version !== version)
       throw new HttpError(409, 'A oferta foi alterada. Atualize a lista e confirme novamente.');
