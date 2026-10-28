@@ -3,7 +3,7 @@
 `priceReveal` é uma opção da regra de `price`, salva no JSON de seletores existente. Não exige migration nem aceita scripts. Pode existir em apenas uma regra por perfil, nos modos texto ou atributo.
 
 1. A extensão tenta todos os seletores normalmente, incluindo valores únicos e o primeiro preço de faixas configuradas com `first_in_range`.
-2. Se o preço continuar ausente após o tempo normal de extração, retorna ao executor para verificar pausa ou cancelamento antes do clique.
+2. Se não houver preço válido e o botão configurado já estiver visível e habilitado, retorna imediatamente ao executor para verificar pausa ou cancelamento antes do clique. Não espera o timeout geral nessa situação. Se o botão ainda não estiver pronto, mantém a espera normal de hidratação.
 3. A segunda fase verifica novamente os estados de bloqueio e os preços. Caso necessário, clica uma única vez no elemento indicado por `clickSelector`.
 4. Aguarda até `waitTimeoutMs` (100–15000 ms, padrão 8000 ms), lendo os seletores já configurados. Preço inválido ou ausente resulta em falha técnica; não torna o anúncio indisponível.
 5. Login, CAPTCHA e demais bloqueios continuam exigindo intervenção humana. Um indicador configurado de indisponibilidade encerra a leitura sem clicar. Não há repetição automática do clique.
