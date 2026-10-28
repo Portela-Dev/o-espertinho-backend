@@ -1,0 +1,13 @@
+{
+  "field": "price",
+  "mode": "text",
+  "required": false,
+  "selectors": ["#aod-offer-list [id=\"aod-offer\"]:first-child .apex-pricetopay-value"],
+  "wholeSelector": ".a-price-whole",
+  "fractionSelector": ".a-price-fraction",
+  "priceSelection": "first_in_range",
+  "priceReveal": {
+    "clickSelector": "a[title=\"Ver todas as opções de compra\"]",
+    "waitTimeoutMs": 8000
+  }
+}
