@@ -6,18 +6,19 @@ export const extensionConnectPage = (appOrigin: string) => `<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Conectar extensão — O Espertinho</title>
-  <link rel="icon" type="image/png" href="/api/extension/auth/assets/icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="${appOrigin}/brand/espertinho-icon-caramelo-v9-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="${appOrigin}/brand/espertinho-icon-caramelo-v9-180.png">
   <link rel="stylesheet" href="/api/extension/auth/assets/connect.css">
   <script src="/api/extension/auth/connect.js" defer></script>
 </head>
 <body>
-  <header><a class="brand" href="${appOrigin}" aria-label="O Espertinho — página inicial">O Espertinho<span>.</span></a></header>
+  <header><a class="brand" href="${appOrigin}" aria-label="O Espertinho — página inicial"><img src="${appOrigin}/brand/espertinho-mascote-caramelo-v9-384.png" alt="" width="48" height="48">O Espertinho<span>.</span></a></header>
   <main aria-labelledby="title">
     <section class="welcome" aria-label="O Espertinho">
       <span class="eyebrow">SEU CATÁLOGO, MAIS ESPERTO</span>
       <h2>Bons achados.<br><span>Uma só conexão.</span></h2>
       <p>Conecte sua conta à extensão e continue cuidando dos seus achados.</p>
-      <img src="/api/extension/auth/assets/mascot.png" alt="Mascote do Espertinho piscando e apontando para você" width="384" height="384">
+      <img src="${appOrigin}/brand/espertinho-mascote-caramelo-v9-384.png" alt="Mascote do O Espertinho" width="384" height="384">
     </section>
     <section class="connection" aria-labelledby="title">
       <span class="eyebrow">EXTENSÃO DO CHROME</span>
@@ -32,6 +33,6 @@ export const extensionConnectPage = (appOrigin: string) => `<!DOCTYPE html>
       <p class="footnote">A conexão respeita as permissões do seu perfil no O Espertinho.</p>
     </section>
   </main>
-  <footer>Um bom achado começa com uma boa escolha.</footer>
+  <footer>Só é esperto que compara antes de comprar</footer>
 </body>
 </html>`;
