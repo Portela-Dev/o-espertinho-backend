@@ -123,6 +123,10 @@ const profileRule = object(
     jsonPath: str(200),
     imageProperties: array(str(80)),
     priceSelection: {type:'string',enum:['single','first_in_range'],description:'Preço único (padrão) ou primeiro valor à esquerda de uma faixa de preços.'},
+    priceReveal: {...object({
+      clickSelector: {...str(600), minLength: 1},
+      waitTimeoutMs: {type: 'integer', minimum: 100, maximum: 15000, default: 8000},
+    }, ['clickSelector']), additionalProperties: false, description: 'Opcional e exclusivo do preço. Uma única interação por perfil; clica uma vez somente se o preço continuar ausente após a espera normal. Os seletores da regra fornecem o preço após o clique; bloqueios mantêm prioridade.'},
     wholeSelector: str(600),
     fractionSelector: str(600),
     nameSelector: str(300),

@@ -24,6 +24,10 @@ export const selectorRuleSchema = z
     attribute: z.string().trim().max(80).default(''),
     required: z.boolean().default(false),
     priceSelection: z.enum(['single', 'first_in_range']).optional(),
+    priceReveal: z.strictObject({
+      clickSelector: z.string().trim().min(1).max(600),
+      waitTimeoutMs: z.number().int().min(100).max(15000).default(8000),
+    }).optional(),
     imageSource: z.enum(['append', 'fallback']).default('append'),
     attributes: z
       .array(z.string().regex(/^[a-zA-Z][a-zA-Z0-9_-]*$/))
@@ -45,6 +49,8 @@ export const selectorRuleSchema = z
     valueSelector: z.string().trim().max(300).default('td'),
   })
   .superRefine((v, ctx) => {
+    if (v.priceReveal && (v.field !== 'price' || !['text', 'attribute'].includes(v.mode)))
+      ctx.addIssue({code: 'custom', message: 'A interação é exclusiva para regras de preço em texto ou atributo.', path: ['priceReveal']});
     if (v.mode === 'json' && v.field !== 'images')
       ctx.addIssue({
         code: 'custom',
@@ -66,6 +72,8 @@ export const profileSchema = z
     validityMinutes: z.number().int().min(15).max(1440).default(360),
   })
   .superRefine((v, ctx) => {
+    if (v.rules.filter(rule => rule.priceReveal).length > 1)
+      ctx.addIssue({code: 'custom', message: 'Configure apenas uma interação para revelar o preço.', path: ['rules']});
     for (const field of ['title', 'price'])
       if (!v.rules.some((r) => r.field === field))
         ctx.addIssue({

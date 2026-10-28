@@ -1,0 +1,38 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {profileSchema,selectorRuleSchema} from '../dist/scraping.js';
+import {testDatabase,testConfig,client,createApp,identity} from './helpers.mjs';
+const reveal={clickSelector:'#show-options',waitTimeoutMs:8000};
+const price={field:'price',selectors:['#offers > article:first-child .price'],priceSelection:'first_in_range',priceReveal:reveal};
+const title={field:'title',selectors:['h1']};
+test('interação de preço é opcional, limitada e não muda a leitura por faixa',()=>{
+ assert.equal(selectorRuleSchema.parse({...price,priceReveal:undefined}).priceReveal,undefined);
+ assert.deepEqual(selectorRuleSchema.parse(price).priceReveal,reveal);
+ const example=JSON.parse(readFileSync(new URL('../examples/amazon-price-reveal.json',import.meta.url),'utf8').replace(/^\uFEFF/,''));
+ assert.equal(selectorRuleSchema.parse(example).priceReveal.waitTimeoutMs,8000);
+ assert.equal(selectorRuleSchema.parse({...price,priceReveal:{clickSelector:'#show'}}).priceReveal.waitTimeoutMs,8000);
+ for(const bad of [{...reveal,waitTimeoutMs:99},{...reveal,waitTimeoutMs:15001},{...reveal,waitTimeoutMs:1.5},{...reveal,clickSelector:''},{...reveal,script:'alert(1)'}])assert.equal(selectorRuleSchema.safeParse({...price,priceReveal:bad}).success,false);
+ for(const invalid of [{...price,field:'title'},{...price,field:'originalPrice'},{...price,mode:'pairs'}])assert.equal(selectorRuleSchema.safeParse(invalid).success,false);
+ assert.equal(profileSchema.safeParse({version:1,rules:[title,price,{...price,selectors:['.other']}]}).success,false);
+});
+test('admin salva e testa interação com versão e XSRF, sem migração nem execução no backend',async t=>{
+ const {db}=await testDatabase();t.after(()=>db.end());
+ const app=createApp(db,testConfig(),{verifyGoogle:async token=>identity(token)}),admin=client(app);await admin.login('admin');
+ const current=(await admin.get('/api/admin/selectors/amazon')).body;
+ const input={version:current.version,rules:[title,price],waitTimeoutMs:1000,validityMinutes:60};
+ assert.equal((await admin.mutate('put','/api/admin/selectors/amazon',input)).status,200);
+ assert.equal((await admin.mutate('put','/api/admin/selectors/amazon',input)).status,409);
+ const stored=(await admin.get('/api/admin/selectors/amazon')).body;
+ assert.deepEqual(stored.rules.find(r=>r.field==='price').priceReveal,reveal);
+ assert.equal(stored.rules.find(r=>r.field==='price').priceSelection,'first_in_range');
+ const normal=client(app);await normal.login('alice');assert.equal((await normal.get('/api/admin/selectors/amazon')).status,403);
+ assert.equal((await admin.agent.put('/api/admin/selectors/amazon').send({...input,version:stored.version})).status,403);
+ const preview=await admin.mutate('post','/api/admin/selectors/amazon/test',{url:'https://www.amazon.com.br/dp/B000000001',profile:{...input,version:stored.version}});
+ assert.equal(preview.status,202);
+ const run=(await db.query('SELECT snapshot FROM extension_catalog_runs WHERE id=$1',[preview.body.executionId])).rows[0];
+ assert.deepEqual(run.snapshot.profile.rules.find(r=>r.field==='price').priceReveal,reveal);
+ const withoutReveal={...input,version:stored.version,rules:[title,{...price,priceReveal:undefined}]};
+ assert.equal((await admin.mutate('put','/api/admin/selectors/amazon',withoutReveal)).status,200);
+ assert.equal((await admin.get('/api/admin/selectors/amazon')).body.rules.find(r=>r.field==='price').priceReveal,undefined);
+});
