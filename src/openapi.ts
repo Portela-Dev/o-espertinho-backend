@@ -1619,7 +1619,7 @@ export function createOpenApiDocument(config: Pick<Config, 'APP_ORIGIN'>) {
     'post',
     enrich + '/review/{id}/product',
     'Exploração',
-    'Atribuir produto existente ou criar e atribuir atomicamente',
+    'Atribuir produto ou salvar rascunho para categorizar',
     {
       body: {
         oneOf: [
@@ -1653,10 +1653,17 @@ export function createOpenApiDocument(config: Pick<Config, 'APP_ORIGIN'>) {
           ),
         ],
       },
-      result: object({ product, status: enumeration('ready_for_review') }),
+      result: {oneOf: [
+        object({product, status: enumeration('ready_for_review')}),
+        object({
+          draft: object({id: uuid, name: str(300), description: str(4000), brand: str(120), image_url: nullable(url)}, ['id','name']),
+          link: object({id: uuid, enrichment_version: {type:'integer'}, product_draft_id: uuid}, ['id','enrichment_version','product_draft_id']),
+          status: enumeration('awaiting_category'),
+        }, ['draft','link','status']),
+      ]},
       description:
         enrichDescription +
-        ' A confirmação manual substitui a marcação de inválido da IA no item revisado e preserva o motivo anterior. Novos produtos herdam a categoria confirmada. Versão divergente retorna 409, sem criar produto. Não gera link nem publica.',
+        ' A confirmação manual substitui a marcação de inválido da IA no item revisado e preserva o motivo anterior. Com categoria confirmada, cria o produto atomicamente. Sem categoria, salva uma identidade provisória e devolve o link com a nova versão para abrir a categorização; o produto só entra no catálogo após essa confirmação. Rascunhos existentes aparecem no filtro aguardando categoria. A escolha manual de criar novo não vincula silenciosamente outro produto pelo nome. Versão divergente retorna 409, sem criar produto ou rascunho. Não gera link nem publica.',
     },
   );
   add(

@@ -53,7 +53,7 @@ test('review creates reusable category trees up to ten levels without assigning 
  assert.equal((await admin.agent.post(base+'/categories').send({categoryPath:['Sem XSRF']})).status,403);
 });
 
-test('product assignment requires confirmed category, creates atomically and rejects stale retries',async()=>{
+test('manual product creation with confirmed category is atomic and rejects stale retries',async()=>{
  const id=ids[0],url=base+'/review/'+id;
  const row=(await db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];
  const product={name:'Fone revisado',description:'Descrição editada',brand:'Marca editada',imageUrl:'https://example.com/fone.jpg'};
