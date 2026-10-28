@@ -1,3 +1,4 @@
+import helmet from "helmet";
 import { fileURLToPath } from "node:url";
 import { extensionConnectPage } from "./extension-connect-page.js";
 import express, { type Express, type Request } from "express";
@@ -109,7 +110,9 @@ export function registerExtension(
     });
   });
   router.use("/auth/assets", express.static(fileURLToPath(new URL("./extension-connect-assets/", import.meta.url)), { index: false, redirect: false, dotfiles: "deny" }));
-  router.get("/auth/connect", (req, res) => {
+  router.get("/auth/connect", helmet.contentSecurityPolicy({
+    directives: { imgSrc: ["'self'", "data:", new URL(config.APP_ORIGIN).origin] },
+  }), (req, res) => {
     const code = z
       .string()
       .regex(/^[a-f0-9]{16}$/)

@@ -174,3 +174,36 @@ test("renovação gira o token; logout e saída do site invalidam a extensão", 
 });
 
 test('rotas de prova e demonstração não existem; autenticação está disponível sem mocks',async t=>{const f=await fixture(t);const auth=await f.login();for(const path of ['/config','/queue','/session-proof/marketplaces','/affiliate-proof/config'])assert.equal((await f.get(path,auth.token)).status,404);});
+
+for (const appOrigin of ['http://localhost:4200', 'https://oespertinho.com.br']) {
+  test('autorização usa a marca do frontend sem cópias antigas: ' + appOrigin, async (t) => {
+    const {db} = await testDatabase();
+    t.after(() => db.end());
+    const app = createApp(db, {...testConfig(), APP_ORIGIN: appOrigin});
+    const start = await request(app).post('/api/extension/auth/start')
+      .set('X-Espertinho-Extension-Id', extensionId)
+      .set('Origin', 'chrome-extension://' + extensionId)
+      .send({challenge: digest('brand-test')});
+    assert.equal(start.status, 200);
+    const page = await request(app).get('/api/extension/auth/connect?code=' + start.body.deviceCode);
+    assert.equal(page.status, 200);
+    for (const file of ['espertinho-icon-caramelo-v9-32.png', 'espertinho-icon-caramelo-v9-180.png', 'espertinho-mascote-caramelo-v9-384.png']) {
+      assert.ok(page.text.includes(appOrigin + '/brand/' + file));
+    }
+    assert.equal(page.text.includes('/auth/assets/icon.png'), false);
+    assert.equal(page.text.includes('/auth/assets/mascot.png'), false);
+    assert.ok(page.text.includes('Só é esperto que compara antes de comprar'));
+    const policy = page.headers['content-security-policy'];
+    assert.equal(policy.split(';').find(directive => directive.startsWith('img-src ')), "img-src 'self' data: " + appOrigin);
+    assert.ok(policy.includes("script-src 'self'"));
+    assert.equal(page.headers['cache-control'], 'no-store');
+    for (const file of ['icon.png', 'mascot.png']) {
+      assert.equal((await request(app).get('/api/extension/auth/assets/' + file)).status, 404);
+    }
+    const styles = await request(app).get('/api/extension/auth/assets/connect.css');
+    assert.equal(styles.status, 200);
+    assert.match(styles.text, /align-items:center;gap:8px/);
+    assert.equal((await request(app).get('/api/extension/auth/connect?code=' + '0'.repeat(16))).status, 410);
+    assert.equal((await request(app).get('/api/extension/auth/connect')).status, 400);
+  });
+}
