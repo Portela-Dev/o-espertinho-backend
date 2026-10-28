@@ -23,6 +23,14 @@ const reviewCategory=(await db.query("SELECT id FROM category_nodes WHERE path=A
 for(const [id,title] of [['6ef4f2a1-912f-463a-a6e8-43c505976781','Link para produto existente'],['6ef4f2a1-912f-463a-a6e8-43c505976782','Produto descoberto para criar']]){
  await db.query("INSERT INTO discovery_links(id,marketplace_id,url,extraction_status,enrichment_data,confirmed_category_id,category_confirmed_at) VALUES($1,'amazon',$2,'completed',$3,$4,now())",[id,'https://www.amazon.com.br/product/'+id,JSON.stringify({title,description:'Descrição extraída do produto',brand:'Marca extraída',images:['https://example.com/image.jpg']}),reviewCategory]);
 }
+// Product-first review fixtures: provisional identities never enter the public catalog.
+const manualReviewData=(title)=>({title,description:'Descrição manual extraída',brand:'Marca manual',images:['https://example.com/image.jpg'],priceCents:32100,availability:'available',missing:[],specifications:[],conditions:''});
+const manualDraft='6ef4f2a1-912f-463a-a6e8-43c505976785';
+await db.query("INSERT INTO review_ai_product_drafts(id,identity_key,name,description,brand) VALUES($1,'test-manual-draft','Rascunho existente para categorizar','Descrição do rascunho','Marca manual')",[manualDraft]);
+for(const [id,title,draft] of [['6ef4f2a1-912f-463a-a6e8-43c505976783','Cadastro manual sem categoria',null],['6ef4f2a1-912f-463a-a6e8-43c505976784','Rascunho existente para categorizar',manualDraft]]){
+ const url='https://www.amazon.com.br/product/'+id;
+ await db.query("INSERT INTO discovery_links(id,marketplace_id,url,affiliate_url,extraction_status,enrichment_data,extracted_at,product_draft_id) VALUES($1,'amazon',$2,$3,'completed',$4,now(),$5)",[id,url,url+'?tag=test-20',JSON.stringify(manualReviewData(title)),draft]);
+}
 // Daily observations are fictitious and exist only in this isolated test database.
 await db.query(`INSERT INTO offer_price_history(offer_id,product_id,day,price_cents,observed_at)
  SELECT o.id,o.product_id,dates.day,o.price_cents+((g%9)-4)*100,(dates.day+time '15:00') AT TIME ZONE 'UTC'

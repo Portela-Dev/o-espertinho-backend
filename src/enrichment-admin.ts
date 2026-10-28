@@ -107,6 +107,26 @@ async function acceptManualReview(
   ]);
   await audit(c, userId, 'discovery.invalid.overridden', row.id);
 }
+async function createManualProductDraft(
+  c: Pick<Database, 'query'>,
+  row: any,
+  product: z.infer<typeof newProduct>,
+  userId: string,
+) {
+  const id = randomUUID();
+  // A manual "new" decision must not silently match another product by name.
+  const draft = (await c.query(
+    'INSERT INTO review_ai_product_drafts(id,identity_key,name,description,brand,image_url,created_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+    [id, 'manual:' + id, product.name, product.description, product.brand, product.imageUrl, userId],
+  )).rows[0];
+  await acceptManualReview(c, row, userId, 'product');
+  const link = (await c.query(
+    'UPDATE discovery_links SET product_id=NULL,product_draft_id=$2,product_assigned_by=NULL,product_assigned_at=NULL,enrichment_version=enrichment_version+1 WHERE id=$1 RETURNING *',
+    [row.id, draft.id],
+  )).rows[0];
+  await audit(c, userId, 'discovery.product.drafted', row.id);
+  return {draft, link, status: 'awaiting_category'};
+}
 async function confirmUnassignedCategory(
   c: Pick<Database, 'query'>,
   row: any,
@@ -275,7 +295,7 @@ export function registerEnrichmentAdmin(app: Express, db: Database) {
   app.post(base + '/review/:id/product', async (req, res) => {
     const id = uuid.parse(req.params.id),
       v = assignment.parse(req.body);
-    const product = await transaction(db, async (c) => {
+    const result = await transaction(db, async (c) => {
       const row = await reviewableLink(c, id, true);
       if (row.enrichment_version !== v.version) {
         throw new HttpError(
@@ -288,6 +308,8 @@ export function registerEnrichmentAdmin(app: Express, db: Database) {
           row.confirmed_category_id,
         ])
       ).rows[0];
+      if (v.mode === 'new' && !category)
+        return createManualProductDraft(c, row, v.product, req.user!.id);
       let product;
       if (v.mode === 'existing') {
         // NOWAIT avoids a lock cycle with catalog recategorization, which also invalidates assignments.
@@ -311,11 +333,6 @@ export function registerEnrichmentAdmin(app: Express, db: Database) {
           throw new HttpError(404, 'Produto não encontrado.');
         }
       } else {
-        if (!category)
-          throw new HttpError(
-            409,
-            'Escolha uma categoria antes de criar manualmente um produto.',
-          );
         const p = v.product,
           path = category.path;
         product = (
@@ -337,9 +354,9 @@ export function registerEnrichmentAdmin(app: Express, db: Database) {
       }
       await acceptManualReview(c, row, req.user!.id, 'product');
       await assignCatalogProduct(c, id, product, req.user!.id);
-      return product;
+      return { product, status: 'ready_for_review' };
     });
-    res.json({ product, status: 'ready_for_review' });
+    res.json(result);
   });
   app.post(base + '/review/:id/category', async (req, res) => {
     const id = uuid.parse(req.params.id),
