@@ -18,8 +18,9 @@ export const reviewStatusSql = `CASE
    OR COALESCE(l.enrichment_data->>'priceCents','') !~ '^[1-9][0-9]*$'
    OR COALESCE(l.enrichment_data->'missing','[]'::jsonb)<>'[]'::jsonb THEN 'incomplete'
  WHEN COALESCE(l.affiliate_url,'')='' THEN 'awaiting_affiliate'
- WHEN (l.ai_resolution->'product'->>'action'='needs_review' AND l.product_id IS NULL)
+ WHEN (l.ai_resolution->'product'->>'action'='needs_review' AND l.product_id IS NULL AND l.product_draft_id IS NULL)
    OR (l.ai_resolution->'category'->>'action'='needs_review' AND l.confirmed_category_id IS NULL) THEN 'needs_review'
+ WHEN p.id IS NULL AND l.product_draft_id IS NOT NULL THEN 'awaiting_category'
  WHEN p.id IS NULL THEN 'awaiting_product'
  WHEN l.confirmed_category_id IS NULL OR NOT (l.confirmed_category_id=ANY(p.category_ids)) THEN 'awaiting_category'
  ELSE 'ready' END`;
