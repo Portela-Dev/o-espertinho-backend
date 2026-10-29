@@ -699,6 +699,11 @@ export function createOpenApiDocument(config: Pick<Config, 'APP_ORIGIN'>) {
     'Listar categorias com ofertas disponíveis',
     { result: array(str()) },
   );
+  add('get', '/seo/sitemap', 'Catálogo público', 'Identificadores públicos para sitemap paginado', {
+    parameters: [pageParam],
+    result: object({items: array(object({type:{type:'string',enum:['product','category']},id:uuid,updated_at:date},['type','id','updated_at'])),page:{type:'integer'},pageSize:{type:'integer',enum:[1000]},total:{type:'integer'},totalPages:{type:'integer'}},['items','page','pageSize','total','totalPages']),
+    description:'Somente produtos com ofertas publicadas e disponíveis com link de afiliado, e suas categorias ancestrais. Não inclui URLs de afiliados, credenciais, rascunhos ou dados de conta. Ordenação determinística e páginas de até 1000 registros.',
+  });
   add('get', '/products', 'Catálogo público', 'Listar produtos da vitrine', {
     parameters: [...filterParams, pageParam],
     result: ref('ProductPage'),
