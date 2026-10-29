@@ -1,4 +1,4 @@
-import {seedProduct,finishManualFixture} from './helpers.mjs';
+import {seedOffer,seedProduct,finishManualFixture} from './helpers.mjs';
 // Isolated integration-test server. Never imported by src/server.ts.
 // No authentication bypass exists in the production application.
 import express from 'express';
@@ -36,6 +36,23 @@ await db.query(`INSERT INTO offer_price_history(offer_id,product_id,day,price_ce
  SELECT o.id,o.product_id,dates.day,o.price_cents+((g%9)-4)*100,(dates.day+time '15:00') AT TIME ZONE 'UTC'
  FROM offers o CROSS JOIN generate_series(0,364) g CROSS JOIN LATERAL (SELECT (clock_timestamp() AT TIME ZONE 'America/Sao_Paulo')::date-g AS day) dates WHERE o.status='published'`);
 const app=express();app.get('/api/test-image/:name',(req,res)=>res.type('svg').send(`<svg xmlns="http://www.w3.org/2000/svg" width="240" height="190" viewBox="0 0 240 190">${images[req.params.name]||images.monitor}</svg>`));
+// SEO browser fixtures are created and removed only by the isolated E2E server.
+let seoProducts=[];
+app.post('/api/test/seo-fixture',async(_req,res)=>{
+ if(seoProducts.length){res.status(409).end();return;}
+ for(let i=0;i<26;i++){
+  const id=await seedProduct(db,{name:'SEO item '+String(i).padStart(2,'0'),category:'SEO Teste'});seoProducts.push(id);
+  await seedOffer(db,{productId:id,title:'SEO oferta '+i,price:10000+i});
+ }
+ for(let i=0;i<22;i++)await seedOffer(db,{productId:seoProducts[0],title:'SEO oferta extra '+i,price:20000+i});
+ seoProducts.push(await seedProduct(db,{name:'SEO sem ofertas',category:'SEO Teste'}));
+ res.json({products:seoProducts});
+});
+app.delete('/api/test/seo-fixture',async(_req,res)=>{
+ await db.query('DELETE FROM offers WHERE product_id=ANY($1::uuid[])',[seoProducts]);
+ await db.query('DELETE FROM products WHERE id=ANY($1::uuid[])',[seoProducts]);
+ await db.query("DELETE FROM category_nodes WHERE path=ARRAY['SEO Teste']");seoProducts=[];res.json({ok:true});
+});
 app.use(createApp(db,config,{verifyGoogle:async t=>identity(t)}));
 let fixtureBusy=false;
 const fixtureTimer=setInterval(async()=>{if(fixtureBusy)return;fixtureBusy=true;try{const runs=(await db.query("SELECT r.id,r.marketplace_id,m.name AS marketplace_name,i.payload FROM extension_catalog_runs r JOIN marketplaces m ON m.id=r.marketplace_id JOIN extension_catalog_items i ON i.run_id=r.id WHERE r.status='queued' AND r.step IN ('preview','selector_test')")).rows;for(const run of runs){const data={title:'Oferta de teste '+run.marketplace_name,priceCents:Number(/faixa-e2e-(\d+)/.exec(run.payload.url)?.[1]??32100),originalPriceCents:44750,description:'Descrição extraída em ambiente de teste.',category:'Tecnologia',conditions:'Confira as condições da oferta de teste.',externalId:'extracted-'+run.marketplace_id,productUrl:run.payload.url,images:[],specifications:[{name:'Cor',value:'Preto'}],warnings:['Dados fictícios usados somente em testes.'],missing:[],evidence:[{field:'title',selector:'#productTitle'}],collectedAt:new Date().toISOString()};await finishManualFixture(db,run.id,data);}}finally{fixtureBusy=false;}},250);

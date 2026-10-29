@@ -1,3 +1,4 @@
+import {registerPublicSeo} from './seo.js';
 import {registerCategoryAdmin} from './category-admin.js';
 import { registerPublicSharing, registerSharingAdmin } from './sharing.js';
 import { registerPublicMarketing, registerMarketingAdmin } from './marketing.js';
@@ -333,6 +334,7 @@ export function createApp(
     res.json({ ok: true });
   });
   registerPublicProducts(app, db);
+  registerPublicSeo(app, db);
   registerPublicSharing(app, db);
   registerPublicMarketing(app, db, config);
   registerPriceHistory(app, db);
