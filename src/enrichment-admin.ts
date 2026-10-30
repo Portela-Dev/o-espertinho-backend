@@ -137,7 +137,7 @@ async function confirmUnassignedCategory(
     await finalizeCatalogDraft(c, row.product_draft_id, categoryId, userId);
   } else {
     await c.query(
-      'UPDATE discovery_links SET confirmed_category_id=$2,category_confirmed_by=$3,category_confirmed_at=clock_timestamp(),enrichment_version=enrichment_version+1 WHERE id=$1',
+      'UPDATE discovery_links SET catalog_resolution=jsonb_build_object(),confirmed_category_id=$2,category_confirmed_by=$3,category_confirmed_at=clock_timestamp(),enrichment_version=enrichment_version+1 WHERE id=$1',
       [row.id, categoryId, userId],
     );
   }

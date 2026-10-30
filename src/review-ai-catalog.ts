@@ -99,7 +99,7 @@ export async function assignCatalogProduct(
     [linkId, categoryId, userId],
   );
   await c.query(
-    'UPDATE discovery_links SET product_id=$2,product_draft_id=NULL,product_assigned_by=$3,product_assigned_at=clock_timestamp(),enrichment_version=enrichment_version+1 WHERE id=$1',
+    'UPDATE discovery_links SET catalog_resolution=jsonb_build_object(),product_id=$2,product_draft_id=NULL,product_assigned_by=$3,product_assigned_at=clock_timestamp(),enrichment_version=enrichment_version+1 WHERE id=$1',
     [linkId, product.id, userId],
   );
   await audit(c, userId, 'discovery.product.assigned', linkId);
