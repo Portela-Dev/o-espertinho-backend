@@ -507,3 +507,9 @@ test('IDs e categorias fora do contexto, alterações de política e controle de
     409,
   );
 });
+
+test('modo de simulação impede clientes antigos de aplicar decisões pelo endpoint legado',async t=>{
+ const f=await catalogFixture(t);await f.db.query('UPDATE review_ai_settings SET product_enabled=true');const id=await seed(f);
+ const response=await f.call('post','/catalog/ai/context',{id,task:'product',inventoryRevision:'1'});assert.equal(response.status,409);assert.match(response.body.error,/Atualize a extensão/);
+ assert.equal((await f.db.query('SELECT count(*)::int AS n FROM review_ai_suggestions')).rows[0].n,0);
+});

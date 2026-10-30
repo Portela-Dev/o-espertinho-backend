@@ -7,7 +7,7 @@ async function seed(f,title='Headset Modelo X'){
  const id=randomUUID(),url='https://www.amazon.com.br/product/'+id,data={title,brand:'Marca',description:'Descrição',priceCents:12345,originalPriceCents:null,images:['https://example.com/photo.jpg'],missing:[],conditions:'',specifications:[],availability:'available'};
  await f.db.query("INSERT INTO discovery_links(id,marketplace_id,url,affiliate_url,extraction_status,enrichment_data,source_category_path,extracted_at) VALUES($1,'amazon',$2,$3,'completed',$4,ARRAY['Tecnologia','Áudio'],clock_timestamp())",[id,url,url+'?tag=test-20',JSON.stringify(data)]);return id;
 }
-async function settings(f,changes={}){const value=(await f.browser.get(base+'/ai/settings')).body;const r=await f.browser.mutate('put',base+'/ai/settings',{...value,categoryEnabled:true,productEnabled:true,...changes});assert.equal(r.status,200,JSON.stringify(r.body));return r.body;}
+async function settings(f,changes={}){await f.db.query("UPDATE catalog_resolver_settings SET mode='legacy'");const value=(await f.browser.get(base+'/ai/settings')).body;const r=await f.browser.mutate('put',base+'/ai/settings',{...value,categoryEnabled:true,productEnabled:true,...changes});assert.equal(r.status,200,JSON.stringify(r.body));return r.body;}
 async function revision(f){return (await f.db.query('SELECT revision::text AS r FROM review_ai_inventory_state')).rows[0].r;}
 async function context(f,id,task){const r=await f.call('post','/catalog/ai/context',{id,task,inventoryRevision:await revision(f)});assert.equal(r.status,200,JSON.stringify(r.body));return r.body;}
 const decision=(action,extra={})=>({action,category:'',categoryId:null,productId:null,product:null,reason:'Identidade verificada nos candidatos.',...extra});
