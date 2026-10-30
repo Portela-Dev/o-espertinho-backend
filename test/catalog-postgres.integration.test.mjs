@@ -30,12 +30,13 @@ test('PostgreSQL isolado: concorrência, cancelamento e backup/restauração com
   const item=claims.find(r=>r.body.item).body.item;await post(`/catalog/runs/${run.id}/action`,{action:'cancel'});
   assert.equal((await post(`/catalog/runs/${run.id}/results`,{itemId:item.id,leaseToken:item.lease_token,outcome:'success',links:['https://shop.example.com/p'],done:true})).status,409);
   // Structured resolver uses the same disposable database; simultaneous requests must not duplicate identities.
-  await db.query("UPDATE catalog_resolver_settings SET mode='active'");
+  await db.query("UPDATE catalog_resolver_settings SET mode='active',concurrency=2");
   const sample={title:'Celular Marca Modelo X 128 GB 8 GB',brand:'Marca',description:'Modelo X 128 GB 8 GB',specifications:[],images:[],priceCents:10000,availability:'available'};
-  for(let i=0;i<2;i++)await db.query("INSERT INTO discovery_links(id,marketplace_id,url,extraction_status,enrichment_data) VALUES($1,'amazon',$2,'completed',$3)",[randomUUID(),'https://shop.example.com/'+randomUUID(),JSON.stringify(sample)]);
+  for(let i=0;i<3;i++)await db.query("INSERT INTO discovery_links(id,marketplace_id,url,extraction_status,enrichment_data) VALUES($1,'amazon',$2,'completed',$3)",[randomUUID(),'https://shop.example.com/'+randomUUID(),JSON.stringify(sample)]);
   const resolverStart=()=>post('/catalog/resolver/start',{marketplaceId:'amazon',task:'product',limit:10,requestKey:randomUUID()});
   const resolverStarts=await Promise.all([resolverStart(),resolverStart()]);assert.ok(resolverStarts.every(r=>r.status===200),JSON.stringify(resolverStarts.map(r=>r.body)));assert.equal(resolverStarts[0].body.id,resolverStarts[1].body.id);
   const resolverId=resolverStarts[0].body.id,leased=await Promise.all([post('/catalog/resolver/claim',{runId:resolverId}),post('/catalog/resolver/claim',{runId:resolverId})]);assert.ok(leased.every(r=>r.body.item),JSON.stringify(leased.map(r=>r.body)));assert.notEqual(leased[0].body.item.id,leased[1].body.item.id);
+  assert.equal((await post('/catalog/resolver/claim',{runId:resolverId})).body.item,null);
   const decision={policyId:'smartphone',facts:{brand:{value:'Marca',evidence:'Marca'},model:{value:'Modelo X',evidence:'Modelo X'},storage:{value:'128 GB',evidence:'128 GB'},ram:{value:'8 GB',evidence:'8 GB'}},exclude:false,reason:''};
   const completed=await Promise.all(leased.map(r=>post('/catalog/resolver/complete',{runId:resolverId,itemId:r.body.item.id,leaseId:r.body.item.leaseId,decision})));assert.ok(completed.every(r=>r.status===200),JSON.stringify(completed.map(r=>r.body)));assert.equal((await db.query("SELECT count(*)::int AS n FROM catalog_resolver_drafts")).rows[0].n,1);
   const dump=spawnSync('docker',['exec',container,'pg_dump','-U','catalog_test_admin','-d',url.pathname.slice(1),'-Fc','--no-owner','--no-acl'],{windowsHide:true,maxBuffer:20*1024*1024});assert.equal(dump.status,0);

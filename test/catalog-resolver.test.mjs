@@ -563,3 +563,7 @@ test('preparação usa fila incremental: desconhecidos não são varridos de nov
     0,
   );
 });
+
+test('limite de simultaneidade é compartilhado por todos os painéis da mesma execução',async t=>{
+ const f=await catalogFixture(t);await mode(f);await seed(f);await seed(f);const run=await start(f),first=await claim(f,run);assert.ok(first.item);assert.equal((await claim(f,run)).item,null);assert.equal((await complete(f,run,first.item,input)).status,200);assert.ok((await claim(f,run)).item);
+});

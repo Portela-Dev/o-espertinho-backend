@@ -323,6 +323,14 @@ export async function claimResolver(
       "UPDATE catalog_resolver_items SET status=CASE WHEN attempts >= $2 THEN 'failed' ELSE 'queued' END,lease_id=NULL WHERE run_id=$1 AND status='leased' AND lease_until<clock_timestamp()",
       [id, settings.max_attempts],
     );
+    const inFlight = (
+      await c.query(
+        "SELECT count(*)::int AS n FROM catalog_resolver_items WHERE run_id=$1 AND status='leased' AND lease_until>clock_timestamp()",
+        [id],
+      )
+    ).rows[0].n;
+    if (inFlight >= settings.concurrency)
+      return { run: await runSummary(c, run), item: null };
     const item = (
       await c.query(
         "SELECT i.* FROM catalog_resolver_items i WHERE i.run_id=$1 AND i.status='queued' AND (i.retry_at IS NULL OR i.retry_at<=clock_timestamp()) AND NOT EXISTS(SELECT 1 FROM catalog_resolver_items other WHERE other.link_id=i.link_id AND other.id<>i.id AND other.status='leased' AND other.lease_until>clock_timestamp()) ORDER BY (i.product_id IS NOT NULL) DESC,i.id LIMIT 1 FOR UPDATE SKIP LOCKED",
