@@ -127,8 +127,8 @@ export async function startResolver(
       )
     ).rows[0];
     await c.query(
-      `INSERT INTO catalog_resolver_items(id,run_id,link_id) SELECT gen_random_uuid(),$1,l.id FROM discovery_links l WHERE l.marketplace_id=$2 AND l.status='pending' AND l.published_offer_id IS NULL AND l.extraction_status='completed' AND (($3='product' AND l.product_id IS NULL AND l.product_draft_id IS NULL) OR ($3='category' AND l.product_draft_id IS NOT NULL AND l.product_id IS NULL)) ORDER BY l.first_seen_at,l.id LIMIT $4`,
-      [run.id, v.marketplaceId, v.task, v.limit],
+      `INSERT INTO catalog_resolver_items(id,run_id,link_id) SELECT gen_random_uuid(),$1,l.id FROM discovery_links l WHERE l.marketplace_id=$2 AND l.status='pending' AND l.published_offer_id IS NULL AND l.extraction_status='completed' AND (($3='product' AND l.product_id IS NULL AND l.product_draft_id IS NULL) OR ($3='category' AND l.product_id IS NULL AND (l.product_draft_id IS NOT NULL OR ($5='shadow' AND EXISTS(SELECT 1 FROM catalog_resolver_receipts receipt WHERE receipt.link_id=l.id AND receipt.task='product' AND receipt.result->>'mode'='shadow' AND receipt.result->>'outcome'='drafted'))))) ORDER BY l.first_seen_at,l.id LIMIT $4`,
+      [run.id, v.marketplaceId, v.task, v.limit, run.mode],
     );
     if (v.task === 'product')
       await c.query(
@@ -222,12 +222,7 @@ async function contextFor(c: Query, run: any, link: any) {
     ).rows[0],
     policies = await resolverPolicies(c);
   if (run.task === 'category') {
-    const draft = (
-      await c.query(
-        'SELECT d.*,i.identity,i.policy_id,i.policy_version FROM review_ai_product_drafts d LEFT JOIN catalog_resolver_drafts i ON i.draft_id=d.id WHERE d.id=$1',
-        [link.product_draft_id],
-      )
-    ).rows[0];
+    const draft = await categoryDraft(c, run, link);
     if (!draft) return { skip: true };
     if (draft.product_id) return { skip: true, productId: draft.product_id };
     const policy = policies.find((p) => p.id === draft.policy_id),
@@ -268,8 +263,8 @@ async function contextFor(c: Query, run: any, link: any) {
       categories,
       policy,
       defaultCategoryId: policy?.categoryId ?? null,
-      draftId: draft.id,
-      draftVersion: draft.version,
+      draftId: draft.id ?? null,
+      draftVersion: draft.version ?? null,
       prompt: settings.category_prompt,
       promptVersion: settings.category_version,
       enabled: settings.category_enabled,
@@ -338,7 +333,7 @@ async function claimLink(c: Query, run: any, item: any, userId: string) {
       item.link_id,
     ])
   ).rows[0];
-  if (!link || link.status !== 'pending' || link.published_offer_id) {
+  if (link?.status !== 'pending' || link.published_offer_id) {
     await finishItem(c, item, 'excluded', {
       outcome: 'excluded',
       reason: 'Item deixou a revisão.',
@@ -589,7 +584,12 @@ async function acceptProduct(
     'UPDATE discovery_links SET product_draft_id=$2,enrichment_version=enrichment_version+1 WHERE id=$1',
     [link.id, draft.id],
   );
-  return { outcome: 'drafted', applied: true, draftId: draft.id, identity };
+  return {
+    outcome: 'drafted',
+    applied: true,
+    draftId: draft.id ?? null,
+    identity,
+  };
 }
 const categoryResult = z.strictObject({
   categoryId: z.uuid().nullable(),
@@ -614,24 +614,7 @@ async function acceptCategory(
       link,
       value.reason || 'Categoria sem evidência suficiente.',
     );
-  if (
-    value.categoryId &&
-    !context.categories.some((x: any) => x.id === value.categoryId) &&
-    context.defaultCategoryId !== value.categoryId
-  )
-    throw new HttpError(400, 'Categoria fora dos candidatos.');
-  if (value.categoryId) {
-    const current = (
-        await c.query('SELECT path FROM category_nodes WHERE id=$1 FOR SHARE', [
-          value.categoryId,
-        ])
-      ).rows[0],
-      snapshot = context.categories.find((x: any) => x.id === value.categoryId);
-    if (!current || !snapshot || digest(current.path) !== digest(snapshot.path))
-      throw new HttpError(409, 'Categoria alterada durante a análise.');
-  }
-  if (!value.categoryId && !value.path.length)
-    throw new HttpError(400, 'Categoria vazia.');
+  await validateCategoryChoice(c, value, context);
   if (run.mode === 'shadow')
     return { outcome: 'categorized', applied: false, ...value };
   const draft = (
@@ -946,8 +929,7 @@ async function validateContext(c: Query, run: any, context: any) {
 
 function validateLinkSnapshot(run: any, item: any, link: any, settings: any) {
   if (
-    !link ||
-    link.status !== 'pending' ||
+    link?.status !== 'pending' ||
     link.published_offer_id ||
     sourceHash(link) !== item.source_hash ||
     settings.version !== run.settings_version ||
@@ -959,4 +941,59 @@ function validateLinkSnapshot(run: any, item: any, link: any, settings: any) {
     );
   if (run.task === 'product' && (link.product_id || link.product_draft_id))
     throw new HttpError(409, 'Vínculo alterado durante a análise.');
+}
+
+async function categoryDraft(c: Query, run: any, link: any) {
+  if (link.product_draft_id)
+    return (
+      await c.query(
+        'SELECT d.*,i.identity,i.policy_id,i.policy_version FROM review_ai_product_drafts d LEFT JOIN catalog_resolver_drafts i ON i.draft_id=d.id WHERE d.id=$1',
+        [link.product_draft_id],
+      )
+    ).rows[0];
+  if (run.mode !== 'shadow') return null;
+  const receipt = (
+    await c.query(
+      "SELECT * FROM catalog_resolver_receipts WHERE link_id=$1 AND task='product'",
+      [link.id],
+    )
+  ).rows[0];
+  if (
+    receipt?.source_hash !== sourceHash(link) ||
+    receipt?.result?.outcome !== 'drafted' ||
+    receipt?.result?.mode !== 'shadow'
+  )
+    return null;
+  return {
+    ...sourceData(link),
+    id: null,
+    version: null,
+    policy_id: receipt.result.identity.policyId,
+    policy_version: receipt.policy_version,
+  };
+}
+
+async function validateCategoryChoice(
+  c: Query,
+  value: z.infer<typeof categoryResult>,
+  context: any,
+) {
+  if (
+    value.categoryId &&
+    !context.categories.some((x: any) => x.id === value.categoryId) &&
+    context.defaultCategoryId !== value.categoryId
+  )
+    throw new HttpError(400, 'Categoria fora dos candidatos.');
+  if (value.categoryId) {
+    const current = (
+        await c.query('SELECT path FROM category_nodes WHERE id=$1 FOR SHARE', [
+          value.categoryId,
+        ])
+      ).rows[0],
+      snapshot = context.categories.find((x: any) => x.id === value.categoryId);
+    if (!current || !snapshot || digest(current.path) !== digest(snapshot.path))
+      throw new HttpError(409, 'Categoria alterada durante a análise.');
+  }
+  if (!value.categoryId && !value.path.length)
+    throw new HttpError(400, 'Categoria vazia.');
 }

@@ -168,6 +168,25 @@ test('simulação é padrão e não cria rascunhos, produtos, categorias ou vín
     0,
   );
   assert.equal((await claim(f, run)).run.status, 'completed');
+  const beforeCategories = (
+    await f.db.query('SELECT count(*)::int AS n FROM category_nodes')
+  ).rows[0].n;
+  const categoryRun = await start(f, 'category'),
+    categoryItem = await claim(f, categoryRun);
+  assert.ok(categoryItem.item);
+  const projected = await complete(f, categoryRun, categoryItem.item, {
+    categoryId: null,
+    path: ['Tecnologia', 'Celulares'],
+    exclude: false,
+    reason: '',
+  });
+  assert.equal(projected.status, 200, JSON.stringify(projected.body));
+  assert.equal(projected.body.applied, false);
+  assert.equal(
+    (await f.db.query('SELECT count(*)::int AS n FROM category_nodes')).rows[0]
+      .n,
+    beforeCategories,
+  );
 });
 test('fluxo ativo cria rascunho único por identidade, conta links e categoriza sem publicar; replay não duplica', async (t) => {
   const f = await catalogFixture(t);
