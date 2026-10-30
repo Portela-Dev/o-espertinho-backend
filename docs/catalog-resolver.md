@@ -28,3 +28,8 @@ A migration 043 é aditiva; preserva IDs, vínculos e histórico. O modo inicial
 Testes de identidade/evidências/unidades/kits, pipeline em memória, contratos/CSRF/permissões, cache, reenvio, fonte alterada, modo simulação, índices antigos, paginação e integração real concorrente no PostgreSQL descartável do CI. O banco real nunca é usado para os testes.
 
 Publicar o backend/migration antes dos clientes. Nenhum deploy faz parte desta entrega. O Docker local estava indisponível durante a implementação; a validação concorrente real é executada pelo CI. A latência e precisão reais do modelo precisam de amostra com a sessão do administrador; testes automatizados não gastam sua assinatura.
+# Correção da preparação sob demanda
+
+As execuções de catalogação não incluem mais todos os produtos antigos com identidade incompleta. Primeiro o link recebe uma identidade; somente os candidatos encontrados pela busca indexada (até 20) podem gerar preparação por IA. Essa dependência é preparada uma vez na execução e o link reutiliza sua identidade em cache. Falhas/ambiguidades dos candidatos continuam impedindo duplicação; produtos sem relação não atrasam o lote. Reservas antigas de preparação global são descartadas sem análise quando retomadas.
+
+Erros de preparação agora contabilizam chamadas, tempo e motivo sanitizado, como os erros dos links. O modo de simulação continua sem gravar vínculos. Alterar para ativo exige encerrar execuções antigas e iniciar uma nova, pois a configuração é congelada por execução.
