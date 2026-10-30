@@ -36,7 +36,7 @@ async function publishCandidate(
     if (!link) throw new HttpError(404, 'Link não encontrado.');
     if (link.published_offer_id)
       return { offerId: link.published_offer_id, alreadyPublished: true };
-    if (invalidAiReview(link))
+    if (invalidAiReview(link) || link.catalog_resolution?.outcome === 'excluded')
       throw new HttpError(
         409,
         'Anúncio inválido. Confirme manualmente a categoria ou o produto, ou extraia os dados novamente e refaça a análise antes de publicar.',

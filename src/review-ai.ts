@@ -1,3 +1,4 @@
+import { resolverSettings } from './catalog-resolver.js';
 import {
   inventoryPage,
   inventoryRevision,
@@ -506,6 +507,7 @@ export function registerReviewAiExtension(
       )
     ).rows[0];
     res.json({
+      resolver: await resolverSettings(db),
       settings: await reviewAiSettings(db),
       category: { completed: stats.categorized, total: stats.cataloged },
       product: { completed: stats.cataloged, total: stats.total },

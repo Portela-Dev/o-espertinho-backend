@@ -1,4 +1,6 @@
-import {categoryOperation,categoryApply} from './category-contracts.js';
+import { startInput, completeInput } from './catalog-resolver.js';
+import { policyInput } from './catalog-identity.js';
+import { categoryOperation, categoryApply } from './category-contracts.js';
 import { reviewStates } from './review-status.js';
 import { publishBatchInput } from './catalog-publication.js';
 import { purgeCriteria, purgeExecute } from './catalog-purge.js';
@@ -10,10 +12,29 @@ import { catalogResultInput } from './catalog-results.js';
 export function catalogApiPaths() {
   const paths: Record<string, any> = {};
   const definitions: [string, string, string, any?][] = [
-    ['get','/admin/discovery/enrichment/review','Listar revisões por status operacional único, incluindo prontas e publicadas'],
-    ['get','/admin/categories','Listar categorias com paginação, busca e contagem de produtos'],
-    ['post','/admin/categories/preview','Prévia de renomear, mover, unir ou excluir árvore; preserva produtos, ofertas e referências',categoryOperation],
-    ['post','/admin/categories/apply','Aplicar prévia confirmada e atual; exige catalog, XSRF e autenticação administrativa recente',categoryApply],
+    ...resolverDefinitions(),
+    [
+      'get',
+      '/admin/discovery/enrichment/review',
+      'Listar revisões por status operacional único, incluindo prontas e publicadas',
+    ],
+    [
+      'get',
+      '/admin/categories',
+      'Listar categorias com paginação, busca e contagem de produtos',
+    ],
+    [
+      'post',
+      '/admin/categories/preview',
+      'Prévia de renomear, mover, unir ou excluir árvore; preserva produtos, ofertas e referências',
+      categoryOperation,
+    ],
+    [
+      'post',
+      '/admin/categories/apply',
+      'Aplicar prévia confirmada e atual; exige catalog, XSRF e autenticação administrativa recente',
+      categoryApply,
+    ],
     [
       'post',
       '/admin/purge/preview',
@@ -207,19 +228,42 @@ export function catalogApiPaths() {
   ];
   for (const [method, path, summary, input] of definitions)
     pathsForOperation(paths, method, path, summary, input);
-  paths['/admin/categories'].get.tags=['Produtos'];
-  paths['/admin/categories'].get.parameters=[
-    {in:'query',name:'q',schema:{type:'string',maxLength:160}},
-    {in:'query',name:'page',schema:{type:'integer',minimum:1,default:1}},
-    {in:'query',name:'pageSize',schema:{type:'integer',minimum:1,maximum:50,default:20}},
+  paths['/admin/categories'].get.tags = ['Produtos'];
+  paths['/admin/categories'].get.parameters = [
+    { in: 'query', name: 'q', schema: { type: 'string', maxLength: 160 } },
+    {
+      in: 'query',
+      name: 'page',
+      schema: { type: 'integer', minimum: 1, default: 1 },
+    },
+    {
+      in: 'query',
+      name: 'pageSize',
+      schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
+    },
   ];
-  for(const action of ['preview','apply'])paths['/admin/categories/'+action].post.tags=['Produtos'];
+  for (const action of ['preview', 'apply'])
+    paths['/admin/categories/' + action].post.tags = ['Produtos'];
   paths['/admin/discovery/enrichment/review'].get.parameters = [
-    {in:'query',name:'state',schema:{type:'string',enum:['',...reviewStates]},description:'O mesmo review_status retornado em cada item. Sem filtro, arquivados ficam ocultos.'},
-    {in:'query',name:'marketplaceId',schema:{type:'string'}},
-    {in:'query',name:'sourceCategory',schema:{type:'string'}},
-    {in:'query',name:'page',schema:{type:'integer',minimum:1,default:1}},
-    {in:'query',name:'pageSize',schema:{type:'integer',minimum:1,maximum:50,default:20}},
+    {
+      in: 'query',
+      name: 'state',
+      schema: { type: 'string', enum: ['', ...reviewStates] },
+      description:
+        'O mesmo review_status retornado em cada item. Sem filtro, arquivados ficam ocultos.',
+    },
+    { in: 'query', name: 'marketplaceId', schema: { type: 'string' } },
+    { in: 'query', name: 'sourceCategory', schema: { type: 'string' } },
+    {
+      in: 'query',
+      name: 'page',
+      schema: { type: 'integer', minimum: 1, default: 1 },
+    },
+    {
+      in: 'query',
+      name: 'pageSize',
+      schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
+    },
   ];
   return paths;
 }
@@ -382,4 +426,97 @@ function pathsForOperation(
     };
   paths[path] ??= {};
   paths[path][method] = operation;
+}
+
+function resolverDefinitions(): [string, string, string, any?][] {
+  const base = '/admin/discovery/enrichment/resolver',
+    run = z.strictObject({ runId: z.uuid() }),
+    action = z.enum(['pause', 'resume', 'cancel']);
+  return [
+    [
+      'patch',
+      base + '/items/{id}/evaluation',
+      'Avaliar decisão em amostra de referência',
+      z.strictObject({
+        evaluation: z.enum([
+          'correct',
+          'false_merge',
+          'duplicate',
+          'wrong_category',
+          'excluded_valid',
+        ]),
+      }),
+    ],
+    [
+      'get',
+      base + '/settings',
+      'Modo e políticas de identidade. Exige catalog.',
+    ],
+    [
+      'put',
+      base + '/settings',
+      'Alterar modo legacy/shadow/active e tentativas; XSRF e login recente.',
+      z.strictObject({
+        version: z.number().int().positive(),
+        mode: z.enum(['legacy', 'shadow', 'active']),
+        maxAttempts: z.number().int().min(1).max(5),
+        concurrency: z.number().int().min(1).max(2),
+      }),
+    ],
+    [
+      'put',
+      base + '/policies/{id}',
+      'Criar ou versionar política por tipo, sem regras por marketplace.',
+      z.strictObject({
+        version: z.number().int().nonnegative(),
+        enabled: z.boolean(),
+        definition: policyInput,
+      }),
+    ],
+    ['get', base + '/runs', 'Execuções paginadas.'],
+    ['get', base + '/runs/{id}', 'Métricas e estado da execução.'],
+    ['get', base + '/items', 'Resultados paginados por runId e status.'],
+    [
+      'post',
+      base + '/prepare',
+      'Preparar índices, sem alterar dados públicos.',
+      z.strictObject({ cursor: z.uuid().nullable().default(null) }),
+    ],
+    [
+      'post',
+      base + '/runs/{id}/action',
+      'Pausar, permitir retomada ou cancelar.',
+      z.strictObject({ action }),
+    ],
+    [
+      'post',
+      '/extension/catalog/resolver/prepare',
+      'Preparação incremental de identidades.',
+      z.strictObject({ cursor: z.uuid().nullable().default(null) }),
+    ],
+    [
+      'post',
+      '/extension/catalog/resolver/start',
+      'Iniciar ou retomar execução idempotente.',
+      startInput,
+    ],
+    [
+      'post',
+      '/extension/catalog/resolver/claim',
+      'Reservar um item com snapshot relevante.',
+      run,
+    ],
+    [
+      'post',
+      '/extension/catalog/resolver/complete',
+      'Validar evidências e aplicar ou excluir; não publica.',
+      completeInput,
+    ],
+    [
+      'post',
+      '/extension/catalog/resolver/action',
+      'Controle de execução do próprio usuário.',
+      z.strictObject({ runId: z.uuid(), action }),
+    ],
+  ];
 }

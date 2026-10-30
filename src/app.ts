@@ -1,3 +1,4 @@
+import { registerResolverAdmin, registerResolverExtension } from './catalog-resolver-routes.js';
 import {registerPublicSeo} from './seo.js';
 import {registerCategoryAdmin} from './category-admin.js';
 import { registerPublicSharing, registerSharingAdmin } from './sharing.js';
@@ -181,6 +182,7 @@ export function createApp(
   registerExtension(app, db, config, (router, account) => {
     registerCatalogRuns(router, db, account);
     registerReviewAiExtension(router, db, account);
+    registerResolverExtension(router, db, account);
     registerCatalogResults(router, db, account);
   });
   app.use('/api', csrfMiddleware(config));
@@ -615,6 +617,7 @@ export function createApp(
   registerDiscoveryRuns(app, db);
   registerEnrichmentAdmin(app, db);
   registerReviewAiAdmin(app, db);
+  registerResolverAdmin(app, db);
   registerCatalogPublication(app, db);
   registerScrapingAdmin(app, db);
   app.get('/api/admin/category-options', async (_req, res) =>
