@@ -1,3 +1,4 @@
+import { resolverSettings } from './catalog-resolver.js';
 import {
   inventoryPage,
   inventoryRevision,
@@ -54,6 +55,19 @@ export const invalidAiReview = (row: any) =>
     (task) => row.ai_resolution?.[task]?.action === 'invalid',
   );
 type Query = Pick<Database, 'query'>;
+async function legacyMode(c: Query) {
+  const row = (
+    await c.query(
+      'SELECT mode FROM catalog_resolver_settings WHERE id=true FOR SHARE',
+    )
+  ).rows[0];
+  if (row.mode !== 'legacy')
+    throw new HttpError(
+      409,
+      'Atualize a extensão para o resolvedor estruturado ou selecione o fluxo anterior no admin.',
+    );
+}
+
 export async function reviewAiSettings(db: Query, lock = false) {
   const r = (
     await db.query(
@@ -132,6 +146,7 @@ export async function aiQueue(db: Query, actor: CatalogActor, input: unknown) {
       })
       .parse(input),
     settings = await reviewAiSettings(db);
+  await legacyMode(db);
   enabled(settings, v.task);
   const revision = await taskVersion(db, v.task);
   const links = (
@@ -158,6 +173,7 @@ export async function aiContext(
 ) {
   allowed(actor);
   return catalogTransaction(db, async (c) => {
+    await legacyMode(c);
     const settings = await reviewAiSettings(c, true);
     enabled(settings, task);
     const revision = await taskVersion(c, task),
@@ -356,6 +372,7 @@ export async function saveAiSuggestion(
       await c.query(
         'SELECT id FROM review_ai_settings WHERE id=true FOR UPDATE',
       );
+      await legacyMode(c);
       const settings = await reviewAiSettings(c);
       const snapshot = (
         await c.query(
@@ -506,6 +523,7 @@ export function registerReviewAiExtension(
       )
     ).rows[0];
     res.json({
+      resolver: await resolverSettings(db),
       settings: await reviewAiSettings(db),
       category: { completed: stats.categorized, total: stats.cataloged },
       product: { completed: stats.cataloged, total: stats.total },

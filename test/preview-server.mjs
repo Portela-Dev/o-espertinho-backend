@@ -53,6 +53,16 @@ app.delete('/api/test/seo-fixture',async(_req,res)=>{
  await db.query('DELETE FROM products WHERE id=ANY($1::uuid[])',[seoProducts]);
  await db.query("DELETE FROM category_nodes WHERE path=ARRAY['SEO Teste']");seoProducts=[];res.json({ok:true});
 });
+// Resolver fixtures are isolated, explicitly requested, and removed by the browser test.
+let resolverFixture=null;
+app.post('/api/test/resolver-fixture',async(_req,res)=>{
+ if(resolverFixture){res.status(409).end();return;}
+ const user=(await db.query("SELECT id FROM users WHERE role='admin' LIMIT 1")).rows[0].id,run=randomUUID(),links=[];
+ await db.query("INSERT INTO catalog_resolver_runs(id,request_key,created_by,extension_session_id,marketplace_id,task,mode,settings_version,status) VALUES($1,$2,$3,$4,'amazon','product','shadow',1,'paused')",[run,randomUUID(),user,randomUUID()]);
+ for(let n=0;n<12;n++){const id=randomUUID();links.push(id);await db.query("INSERT INTO discovery_links(id,marketplace_id,url,extraction_status,enrichment_data) VALUES($1,'amazon',$2,'completed',$3)",[id,'https://www.amazon.com.br/resolver-fixture/'+id,JSON.stringify({title:'Amostra do resolvedor '+n})]);await db.query("INSERT INTO catalog_resolver_items(id,run_id,link_id,status,decision,calls,tokens,elapsed_ms) VALUES($1,$2,$3,$4,$5,1,25,200)",[randomUUID(),run,id,n%2?'excluded':'accepted',JSON.stringify({outcome:n%2?'excluded':'drafted',reason:n%2?'RAM física não informada.':'Identidade completa.'})]);}
+ resolverFixture={run,links};res.json({run});
+});
+app.delete('/api/test/resolver-fixture',async(_req,res)=>{if(resolverFixture){await db.query('DELETE FROM catalog_resolver_runs WHERE id=$1',[resolverFixture.run]);await db.query('DELETE FROM discovery_links WHERE id=ANY($1::uuid[])',[resolverFixture.links]);resolverFixture=null;}await db.query("UPDATE catalog_resolver_settings SET mode='shadow'");res.json({ok:true});});
 app.use(createApp(db,config,{verifyGoogle:async t=>identity(t)}));
 let fixtureBusy=false;
 const fixtureTimer=setInterval(async()=>{if(fixtureBusy)return;fixtureBusy=true;try{const runs=(await db.query("SELECT r.id,r.marketplace_id,m.name AS marketplace_name,i.payload FROM extension_catalog_runs r JOIN marketplaces m ON m.id=r.marketplace_id JOIN extension_catalog_items i ON i.run_id=r.id WHERE r.status='queued' AND r.step IN ('preview','selector_test')")).rows;for(const run of runs){const data={title:'Oferta de teste '+run.marketplace_name,priceCents:Number(/faixa-e2e-(\d+)/.exec(run.payload.url)?.[1]??32100),originalPriceCents:44750,description:'Descrição extraída em ambiente de teste.',category:'Tecnologia',conditions:'Confira as condições da oferta de teste.',externalId:'extracted-'+run.marketplace_id,productUrl:run.payload.url,images:[],specifications:[{name:'Cor',value:'Preto'}],warnings:['Dados fictícios usados somente em testes.'],missing:[],evidence:[{field:'title',selector:'#productTitle'}],collectedAt:new Date().toISOString()};await finishManualFixture(db,run.id,data);}}finally{fixtureBusy=false;}},250);

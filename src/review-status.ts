@@ -1,5 +1,5 @@
 // One operational status per review; extraction completion is not publication.
-export const reviewStates = ['pending','running','failed','invalid','needs_review','unavailable','incomplete','awaiting_affiliate','awaiting_product','awaiting_category','marketplace_disabled','ready','published','offer_pending','expired','rejected','archived'] as const;
+export const reviewStates = ['pending','running','failed','invalid','needs_review','excluded','unavailable','incomplete','awaiting_affiliate','awaiting_product','awaiting_category','marketplace_disabled','ready','published','offer_pending','expired','rejected','archived'] as const;
 
 // Aliases belong to the review query. Filtering and display share this expression.
 export const reviewStatusSql = `CASE
@@ -9,6 +9,7 @@ export const reviewStatusSql = `CASE
    WHEN 'rejected' THEN 'rejected' ELSE 'offer_pending' END
  WHEN l.extraction_status='running' THEN 'running'
  WHEN l.extraction_status NOT IN ('completed','failed') THEN 'pending'
+ WHEN l.catalog_resolution->>'outcome'='excluded' THEN 'excluded'
  WHEN l.ai_resolution->'product'->>'action'='invalid' OR l.ai_resolution->'category'->>'action'='invalid' THEN 'invalid'
  WHEN l.extraction_status='failed' THEN 'failed'
  WHEN l.enrichment_data->>'availability'='unavailable' THEN 'unavailable'
