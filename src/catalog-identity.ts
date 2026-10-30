@@ -57,10 +57,10 @@ export const sourceHash = (row: any) => digest(sourceData(row));
 export function normalizeAttribute(value: string, unit: string) {
   const s = canonical(value);
   if (unit === 'text') return s;
-  const match = value
-    .replace(',', '.')
-    .match(
-      /^(?:\s*)(\d+(?:\.\d+)?)\s*(tb|gb|mb|pol|polegadas|inches|inch|["”])?\s*$/i,
+  const normalized = value.trim().replaceAll(/\s+/gu, ' ').replace(',', '.');
+  const match =
+    /^(\d+(?:\.\d+)?) ?(tb|gb|mb|pol|polegadas|inches|inch|["”])?$/i.exec(
+      normalized,
     );
   if (!match) return '';
   let n = Number(match[1]);
@@ -87,9 +87,9 @@ export function deterministicIdentity(
 ) {
   const facts: Record<string, { value: string; evidence: string }> = {};
   for (const a of policy.attributes) {
-    const aliases = [a.key, a.label, ...a.aliases].map(canonical);
+    const aliases = new Set([a.key, a.label, ...a.aliases].map(canonical));
     const values = data.specifications.filter((s: any) =>
-      aliases.includes(canonical(s.name)),
+      aliases.has(canonical(s.name)),
     );
     if (a.key === 'brand' && data.brand)
       values.push({ name: 'brand', value: data.brand });

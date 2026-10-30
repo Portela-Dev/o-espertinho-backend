@@ -10,6 +10,7 @@ import {
   resolveAiCategory,
 } from './review-ai-catalog.js';
 import {
+  canonical,
   sourceData,
   sourceHash,
   digest,
@@ -230,8 +231,8 @@ async function contextFor(c: Query, run: any, link: any) {
     if (!draft) return { skip: true };
     if (draft.product_id) return { skip: true, productId: draft.product_id };
     const policy = policies.find((p) => p.id === draft.policy_id),
-      terms = sourceData(draft)
-        .title.split(/\s+/)
+      terms = canonical(sourceData(draft).title)
+        .split(' ')
         .filter((s) => s.length > 2)
         .slice(0, 12)
         .join(' | ');
@@ -247,11 +248,23 @@ async function contextFor(c: Query, run: any, link: any) {
         [link.marketplace_id, link.source_category_key],
       )
     ).rows[0];
+    if (policy?.categoryId) {
+      const preset = (
+        await c.query('SELECT id,path FROM category_nodes WHERE id=$1', [
+          policy.categoryId,
+        ])
+      ).rows[0];
+      if (preset && !categories.some((x) => x.id === preset.id))
+        categories.push(preset);
+    }
     if (mapping && !categories.some((x) => x.id === mapping.id))
       categories.push(mapping);
     return {
       stage: 'category',
-      offer: sourceData(draft),
+      offer: {
+        ...sourceData(draft),
+        sourceCategory: (link.source_category_path ?? []).join(' > '),
+      },
       categories,
       policy,
       defaultCategoryId: policy?.categoryId ?? null,
@@ -298,104 +311,140 @@ export async function claimResolver(
         [id],
       )
     ).rows[0];
-    if (!item) {
-      const pending = (
-        await c.query(
-          "SELECT count(*)::int AS n FROM catalog_resolver_items WHERE run_id=$1 AND status IN ('queued','leased')",
-          [id],
-        )
-      ).rows[0].n;
-      if (!pending) {
-        run.status = 'completed';
-        await c.query(
-          "UPDATE catalog_resolver_runs SET status='completed',updated_at=clock_timestamp() WHERE id=$1",
-          [id],
-        );
-      }
-      return { run: await runSummary(c, run), item: null };
-    }
+    if (!item) return emptyClaim(c, run);
     if (item.product_id) return claimPreparation(c, run, item);
-    const link = (
-      await c.query('SELECT * FROM discovery_links WHERE id=$1 FOR UPDATE', [
-        item.link_id,
-      ])
-    ).rows[0];
-    if (!link || link.status !== 'pending' || link.published_offer_id) {
-      await finishItem(c, item, 'excluded', {
-        outcome: 'excluded',
-        reason: 'Item deixou a revisão.',
-      });
-      return { run: await runSummary(c, run), advance: true };
-    }
-    if (run.task === 'product' && (link.product_id || link.product_draft_id)) {
-      await finishItem(c, item, 'accepted', {
-        outcome: 'reused',
-        reason: 'Vínculo já confirmado.',
-      });
-      return { run: await runSummary(c, run), advance: true };
-    }
-    const context = await contextFor(c, run, link),
-      lease = randomUUID();
-    if (context.skip) {
-      if (context.productId && run.mode === 'active') {
-        const p = (
-          await c.query('SELECT * FROM products WHERE id=$1', [
-            context.productId,
-          ])
-        ).rows[0];
-        if (p) await assignCatalogProduct(c, link.id, p, actor.id);
-      }
-      await finishItem(c, item, 'accepted', { outcome: 'reused' });
-      return { run: await runSummary(c, run), advance: true };
-    }
-    if (context.stage === 'identity' && !context.policy) {
-      await excluded(
-        c,
-        run,
-        item,
-        link,
-        'Tipo ausente ou ambíguo nas políticas cadastradas.',
-      );
-      return { run: await runSummary(c, run), advance: true };
-    }
-    await c.query(
-      "UPDATE catalog_resolver_items SET status='leased',attempts=attempts+1,lease_id=$2,lease_until=clock_timestamp()+interval '5 minutes',source_hash=$3,context=$4 WHERE id=$1",
-      [item.id, lease, sourceHash(link), JSON.stringify(context)],
-    );
-    const receipt = (
-      await c.query(
-        'SELECT * FROM catalog_resolver_receipts WHERE link_id=$1 AND task=$2',
-        [link.id, run.task],
-      )
-    ).rows[0];
-    const cached =
-      receipt?.source_hash === sourceHash(link) &&
-      receipt?.policy_version === context.policy?.version &&
-      receipt?.result?.promptVersion === context.promptVersion
-        ? receipt.result.identity
-        : null;
-    const identity =
-      context.policy && context.stage === 'identity'
-        ? (cached ?? deterministicIdentity(context.offer, context.policy))
-        : null;
-    return {
-      run: await runSummary(c, run),
-      item: {
-        id: item.id,
-        leaseId: lease,
-        context,
-        deterministic: identity?.fingerprint
-          ? {
-              policyId: context.policy!.id,
-              facts: identity.facts,
-              exclude: false,
-              reason: '',
-            }
-          : null,
-      },
-    };
+    return claimLink(c, run, item, actor.id);
   });
 }
+async function emptyClaim(c: Query, run: any) {
+  const pending = (
+    await c.query(
+      "SELECT count(*)::int AS n FROM catalog_resolver_items WHERE run_id=$1 AND status IN ('queued','leased')",
+      [run.id],
+    )
+  ).rows[0].n;
+  if (!pending) {
+    run.status = 'completed';
+    await c.query(
+      "UPDATE catalog_resolver_runs SET status='completed',updated_at=clock_timestamp() WHERE id=$1",
+      [run.id],
+    );
+  }
+  return { run: await runSummary(c, run), item: null };
+}
+async function claimLink(c: Query, run: any, item: any, userId: string) {
+  const link = (
+    await c.query('SELECT * FROM discovery_links WHERE id=$1 FOR UPDATE', [
+      item.link_id,
+    ])
+  ).rows[0];
+  if (!link || link.status !== 'pending' || link.published_offer_id) {
+    await finishItem(c, item, 'excluded', {
+      outcome: 'excluded',
+      reason: 'Item deixou a revisão.',
+    });
+    return { run: await runSummary(c, run), advance: true };
+  }
+  if (await otherLinkLease(c, link.id, item.id))
+    return { run: await runSummary(c, run), item: null };
+  if (run.task === 'product' && (link.product_id || link.product_draft_id)) {
+    await finishItem(c, item, 'accepted', {
+      outcome: 'reused',
+      reason: 'Vínculo já confirmado.',
+    });
+    return { run: await runSummary(c, run), advance: true };
+  }
+  const context = await contextFor(c, run, link);
+  if (context.skip) return reuseDraft(c, run, item, link, context, userId);
+  if (context.stage === 'identity' && !context.policy) {
+    await excluded(
+      c,
+      run,
+      item,
+      link,
+      'Tipo ausente ou ambíguo nas políticas cadastradas.',
+    );
+    return { run: await runSummary(c, run), advance: true };
+  }
+  return leaseLink(c, run, item, link, context);
+}
+async function otherLinkLease(c: Query, linkId: string, itemId: string) {
+  await c.query(
+    "UPDATE catalog_resolver_items SET status='queued',lease_id=NULL,lease_until=NULL WHERE link_id=$1 AND status='leased' AND lease_until<clock_timestamp()",
+    [linkId],
+  );
+  return (
+    (
+      await c.query(
+        "SELECT id FROM catalog_resolver_items WHERE link_id=$1 AND id<>$2 AND status='leased'",
+        [linkId, itemId],
+      )
+    ).rows.length > 0
+  );
+}
+async function reuseDraft(
+  c: Query,
+  run: any,
+  item: any,
+  link: any,
+  context: any,
+  userId: string,
+) {
+  if (context.productId && run.mode === 'active') {
+    const product = (
+      await c.query('SELECT * FROM products WHERE id=$1', [context.productId])
+    ).rows[0];
+    if (product) await assignCatalogProduct(c, link.id, product, userId);
+  }
+  await finishItem(c, item, 'accepted', { outcome: 'reused' });
+  return { run: await runSummary(c, run), advance: true };
+}
+async function leaseLink(
+  c: Query,
+  run: any,
+  item: any,
+  link: any,
+  context: any,
+) {
+  const lease = randomUUID();
+  await c.query(
+    "UPDATE catalog_resolver_items SET status='leased',attempts=attempts+1,lease_id=$2,lease_until=clock_timestamp()+interval '5 minutes',source_hash=$3,context=$4 WHERE id=$1",
+    [item.id, lease, sourceHash(link), JSON.stringify(context)],
+  );
+  const receipt = (
+    await c.query(
+      'SELECT * FROM catalog_resolver_receipts WHERE link_id=$1 AND task=$2',
+      [link.id, run.task],
+    )
+  ).rows[0];
+  const cached =
+    receipt?.source_hash === sourceHash(link) &&
+    receipt?.policy_version === context.policy?.version &&
+    receipt?.result?.promptVersion === context.promptVersion
+      ? receipt?.result.identity
+      : null;
+  const identity =
+    context.policy && context.stage === 'identity'
+      ? (cached ?? deterministicIdentity(context.offer, context.policy))
+      : null;
+  return {
+    run: await runSummary(c, run),
+    item: {
+      id: item.id,
+      leaseId: lease,
+      context,
+      deterministic: identity?.fingerprint
+        ? {
+            policyId: context.policy.id,
+            facts: identity.facts,
+            exclude: false,
+            reason: '',
+          }
+        : null,
+    },
+  };
+}
+
 async function candidateProducts(
   c: Query,
   identity: any,
@@ -483,8 +532,23 @@ async function acceptProduct(
     await assignCatalogProduct(c, link.id, known, run.created_by);
     return { outcome: 'linked', applied: true, productId: known.id, identity };
   }
-  const title = String(link.enrichment_data.title).slice(0, 300),
-    brand = String(link.enrichment_data.brand ?? '').slice(0, 120),
+  const title = [
+      policy.name,
+      ...policy.attributes
+        .filter((a) => a.required)
+        .map((a) => identity.facts[a.key]?.value)
+        .filter(Boolean),
+    ]
+      .join(' ')
+      .slice(0, 300),
+    description = policy.attributes
+      .filter((a) => identity.facts[a.key])
+      .map((a) => a.label + ': ' + identity.facts[a.key].value)
+      .join('. ')
+      .slice(0, 4000),
+    brand = String(
+      identity.facts.brand?.value ?? link.enrichment_data.brand ?? '',
+    ).slice(0, 120),
     image =
       (link.enrichment_data.images ?? []).find((x: string) =>
         x.startsWith('https://'),
@@ -496,7 +560,7 @@ async function acceptProduct(
         randomUUID(),
         'structured:' + identity.fingerprint,
         title,
-        title,
+        description,
         brand,
         image,
         run.created_by,
@@ -556,6 +620,16 @@ async function acceptCategory(
     context.defaultCategoryId !== value.categoryId
   )
     throw new HttpError(400, 'Categoria fora dos candidatos.');
+  if (value.categoryId) {
+    const current = (
+        await c.query('SELECT path FROM category_nodes WHERE id=$1 FOR SHARE', [
+          value.categoryId,
+        ])
+      ).rows[0],
+      snapshot = context.categories.find((x: any) => x.id === value.categoryId);
+    if (!current || !snapshot || digest(current.path) !== digest(snapshot.path))
+      throw new HttpError(409, 'Categoria alterada durante a análise.');
+  }
   if (!value.categoryId && !value.path.length)
     throw new HttpError(400, 'Categoria vazia.');
   if (run.mode === 'shadow')
@@ -662,71 +736,12 @@ export async function completeResolver(
         item.link_id,
       ])
     ).rows[0];
-    if (link) {
-      await c.query(
-        "UPDATE catalog_resolver_items SET status='queued',lease_id=NULL,lease_until=NULL WHERE link_id=$1 AND status='leased' AND lease_until<clock_timestamp()",
-        [link.id],
-      );
-      const active = (
-        await c.query(
-          "SELECT id FROM catalog_resolver_items WHERE link_id=$1 AND id<>$2 AND status='leased'",
-          [link.id, item.id],
-        )
-      ).rows.length;
-      if (active) return { run: await runSummary(c, run), item: null };
-    }
-    if (
-      !link ||
-      link.status !== 'pending' ||
-      link.published_offer_id ||
-      sourceHash(link) !== item.source_hash ||
-      settings.version !== run.settings_version ||
-      settings.mode !== run.mode
-    )
-      throw new HttpError(
-        409,
-        'Fonte ou configuração alterada. Inicie nova execução.',
-      );
-    if (v.error) {
-      await c.query(
-        'UPDATE catalog_resolver_items SET calls=calls+$2,tokens=tokens+$3,elapsed_ms=elapsed_ms+$4 WHERE id=$1',
-        [item.id, v.model ? 1 : 0, v.tokens, v.elapsedMs],
-      );
-      const failed = item.attempts >= settings.max_attempts;
-      await c.query(
-        "UPDATE catalog_resolver_items SET status=$2,lease_id=NULL,lease_until=NULL,retry_at=clock_timestamp()+interval '2 seconds',decision=$3 WHERE id=$1",
-        [
-          item.id,
-          failed ? 'failed' : 'queued',
-          JSON.stringify({
-            outcome: 'technical_retry',
-            reason: 'Falha técnica; repetição automática limitada.',
-          }),
-        ],
-      );
-      return { outcome: failed ? 'failed' : 'retry' };
-    }
-    if (run.task === 'product' && (link.product_id || link.product_draft_id))
-      throw new HttpError(409, 'Vínculo alterado durante a análise.');
-    const context = item.context,
-      current = (
-        await c.query('SELECT * FROM review_ai_settings WHERE id=true')
-      ).rows[0];
-    if (
-      context.promptVersion !==
-      current[run.task === 'product' ? 'product_version' : 'category_version']
-    )
-      throw new HttpError(409, 'Instrução alterada. Inicie nova execução.');
-    if (context.policy) {
-      const p = (
-        await c.query(
-          'SELECT version FROM catalog_identity_policies WHERE id=$1 AND enabled',
-          [context.policy.id],
-        )
-      ).rows[0];
-      if (p?.version !== context.policy.version)
-        throw new HttpError(409, 'Política alterada.');
-    }
+    if (settings.version !== run.settings_version || settings.mode !== run.mode)
+      throw new HttpError(409, 'Configuração alterada. Inicie nova execução.');
+    if (v.error) return technicalRetry(c, item, v, settings);
+    validateLinkSnapshot(run, item, link, settings);
+    const context = item.context;
+    await validateContext(c, run, context);
     const result =
       run.task === 'product'
         ? await acceptProduct(c, run, item, link, context, v.decision)
@@ -886,4 +901,62 @@ async function completePreparation(
     [item.id, hash, v.model ? 1 : 0, v.tokens, v.elapsedMs],
   );
   return result;
+}
+
+async function technicalRetry(c: Query, item: any, v: any, settings: any) {
+  await c.query(
+    'UPDATE catalog_resolver_items SET calls=calls+$2,tokens=tokens+$3,elapsed_ms=elapsed_ms+$4 WHERE id=$1',
+    [item.id, v.model ? 1 : 0, v.tokens, v.elapsedMs],
+  );
+  const failed = item.attempts >= settings.max_attempts;
+  await c.query(
+    "UPDATE catalog_resolver_items SET status=$2,lease_id=NULL,lease_until=NULL,retry_at=clock_timestamp()+interval '2 seconds',decision=$3 WHERE id=$1",
+    [
+      item.id,
+      failed ? 'failed' : 'queued',
+      JSON.stringify({
+        outcome: 'technical_retry',
+        reason: 'Falha técnica; repetição automática limitada.',
+      }),
+    ],
+  );
+  return { outcome: failed ? 'failed' : 'retry' };
+}
+
+async function validateContext(c: Query, run: any, context: any) {
+  const current = (
+    await c.query('SELECT * FROM review_ai_settings WHERE id=true')
+  ).rows[0];
+  if (
+    context.promptVersion !==
+    current[run.task === 'product' ? 'product_version' : 'category_version']
+  )
+    throw new HttpError(409, 'Instrução alterada. Inicie nova execução.');
+  if (context.policy) {
+    const p = (
+      await c.query(
+        'SELECT version FROM catalog_identity_policies WHERE id=$1 AND enabled',
+        [context.policy.id],
+      )
+    ).rows[0];
+    if (p?.version !== context.policy.version)
+      throw new HttpError(409, 'Política alterada.');
+  }
+}
+
+function validateLinkSnapshot(run: any, item: any, link: any, settings: any) {
+  if (
+    !link ||
+    link.status !== 'pending' ||
+    link.published_offer_id ||
+    sourceHash(link) !== item.source_hash ||
+    settings.version !== run.settings_version ||
+    settings.mode !== run.mode
+  )
+    throw new HttpError(
+      409,
+      'Fonte ou configuração alterada. Inicie nova execução.',
+    );
+  if (run.task === 'product' && (link.product_id || link.product_draft_id))
+    throw new HttpError(409, 'Vínculo alterado durante a análise.');
 }

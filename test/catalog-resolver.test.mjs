@@ -172,6 +172,11 @@ test('simulação é padrão e não cria rascunhos, produtos, categorias ou vín
 test('fluxo ativo cria rascunho único por identidade, conta links e categoriza sem publicar; replay não duplica', async (t) => {
   const f = await catalogFixture(t);
   await mode(f);
+  const categoryId = await category(f);
+  await f.db.query(
+    "UPDATE catalog_identity_policies SET definition=jsonb_set(definition,'{categoryId}',to_jsonb($1::text)) WHERE id='smartphone'",
+    [categoryId],
+  );
   const ids = [await seed(f), await seed(f)],
     run = await start(f);
   for (let i = 0; i < 2; i++) {
@@ -189,18 +194,12 @@ test('fluxo ativo cria rascunho único por identidade, conta links e categoriza 
     ).rows[0].n,
     1,
   );
-  const categoryId = await category(f),
-    categorize = await start(f, 'category');
+  const categorize = await start(f, 'category');
   for (let i = 0; i < 2; i++) {
     const claimed = await claim(f, categorize);
     if (claimed.advance) continue;
     const { item } = claimed;
     assert.ok(item, JSON.stringify(claimed));
-    // Context candidate search is deterministic and includes the configured default category.
-    await f.db.query(
-      "UPDATE catalog_resolver_items SET context=jsonb_set(context,'{defaultCategoryId}',to_jsonb($2::text)) WHERE id=$1",
-      [item.id, categoryId],
-    );
     const r = await complete(f, categorize, item, {
       categoryId,
       path: [],
@@ -395,6 +394,26 @@ test('preparação incremental, reutilização global, cache e candidatos incomp
       '&status=accepted&pageSize=5',
   );
   assert.equal(items.body.total, 1);
+  const evaluated = await f.browser.mutate(
+    'patch',
+    '/api/admin/discovery/enrichment/resolver/items/' +
+      items.body.items[0].id +
+      '/evaluation',
+    { evaluation: 'correct' },
+  );
+  assert.equal(evaluated.status, 200);
+  assert.equal(
+    (
+      await f.browser.mutate(
+        'patch',
+        '/api/admin/discovery/enrichment/resolver/items/' +
+          randomUUID() +
+          '/evaluation',
+        { evaluation: 'correct' },
+      )
+    ).status,
+    404,
+  );
   assert.equal(
     (
       await f.browser.get(

@@ -9,13 +9,11 @@ import { catalogTransaction } from './catalog-runs.js';
 import { policyInput } from './catalog-identity.js';
 import {
   resolverSettings,
-  resolverPolicies,
   prepareIdentities,
   startResolver,
   claimResolver,
   completeResolver,
   resolverAction,
-  ownedRun,
   runSummary,
   resolverAllowed,
 } from './catalog-resolver.js';
