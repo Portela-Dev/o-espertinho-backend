@@ -14,7 +14,7 @@ CREATE TABLE catalog_identity_policies (
 );
 CREATE TABLE catalog_product_identities (
  product_id uuid PRIMARY KEY REFERENCES products(id) ON DELETE CASCADE,
- policy_id text NOT NULL REFERENCES catalog_identity_policies(id), policy_version integer NOT NULL,
+ policy_id text REFERENCES catalog_identity_policies(id), policy_version integer NOT NULL,
  fingerprint text, identity jsonb NOT NULL, source_hash text NOT NULL,
  prepared_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
@@ -71,3 +71,24 @@ CREATE UNIQUE INDEX catalog_one_link_lease ON catalog_resolver_items(link_id) WH
 CREATE UNIQUE INDEX catalog_one_product_lease ON catalog_resolver_items(product_id) WHERE status='leased' AND product_id IS NOT NULL;
 
 ALTER TABLE catalog_resolver_items ADD COLUMN evaluation text CHECK(evaluation IN ('correct','false_merge','duplicate','wrong_category','excluded_valid'));
+
+-- Incremental preparation: no full inventory scan on every extension execution.
+CREATE TABLE catalog_identity_pending (
+ product_id uuid PRIMARY KEY REFERENCES products(id) ON DELETE CASCADE,
+ version bigint NOT NULL DEFAULT 1
+);
+INSERT INTO catalog_identity_pending(product_id) SELECT id FROM products;
+CREATE FUNCTION enqueue_catalog_identity() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ INSERT INTO catalog_identity_pending(product_id) VALUES(NEW.id) ON CONFLICT(product_id) DO UPDATE SET version=catalog_identity_pending.version+1;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER catalog_identity_created AFTER INSERT ON products FOR EACH ROW EXECUTE FUNCTION enqueue_catalog_identity();
+CREATE TRIGGER catalog_identity_changed AFTER UPDATE OF name,description,brand,model ON products FOR EACH ROW WHEN ((OLD.name,OLD.description,OLD.brand,OLD.model) IS DISTINCT FROM (NEW.name,NEW.description,NEW.brand,NEW.model)) EXECUTE FUNCTION enqueue_catalog_identity();
+CREATE FUNCTION enqueue_catalog_policy() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ INSERT INTO catalog_identity_pending(product_id) SELECT id FROM products ON CONFLICT(product_id) DO UPDATE SET version=catalog_identity_pending.version+1;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER catalog_policy_changed AFTER INSERT OR UPDATE ON catalog_identity_policies FOR EACH ROW EXECUTE FUNCTION enqueue_catalog_policy();
+CREATE INDEX catalog_identity_preparation ON catalog_product_identities(product_id) WHERE fingerprint IS NULL AND identity->>'preparation'='pending';

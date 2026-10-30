@@ -63,6 +63,13 @@ export function normalizeAttribute(value: string, unit: string) {
       normalized,
     );
   if (!match) return '';
+  const suffix = match[2]?.toLowerCase();
+  const allowed: Record<string, string[]> = {
+    gb: ['gb', 'tb', 'mb'],
+    inch: ['pol', 'polegadas', 'inches', 'inch', '"', '”'],
+    number: [],
+  };
+  if (suffix && !allowed[unit]?.includes(suffix)) return '';
   let n = Number(match[1]);
   if (unit === 'gb' && match[2]?.toLowerCase() === 'tb') n *= 1024;
   if (unit === 'gb' && match[2]?.toLowerCase() === 'mb') n /= 1024;

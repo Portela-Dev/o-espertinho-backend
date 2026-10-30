@@ -27,9 +27,12 @@ export function resolverAllowed(actor: CatalogActor) {
   )
     throw new HttpError(403, 'Permissões de catálogo e links necessárias.');
 }
-export async function resolverSettings(c: Query) {
+export async function resolverSettings(c: Query, lock = false) {
   return (
-    await c.query('SELECT * FROM catalog_resolver_settings WHERE id=true')
+    await c.query(
+      'SELECT * FROM catalog_resolver_settings WHERE id=true' +
+        (lock ? ' FOR SHARE' : ''),
+    )
   ).rows[0];
 }
 export async function resolverPolicies(c: Query): Promise<IdentityPolicy[]> {
@@ -46,39 +49,59 @@ export async function prepareIdentities(
   const policies = await resolverPolicies(c),
     rows = (
       await c.query(
-        'SELECT p.* FROM products p LEFT JOIN catalog_product_identities i ON i.product_id=p.id LEFT JOIN catalog_identity_policies pol ON pol.id=i.policy_id WHERE ($1::uuid IS NULL OR p.id>$1) AND (i.product_id IS NULL OR i.prepared_at<p.updated_at OR i.policy_version<>pol.version) ORDER BY p.id LIMIT 100',
+        `SELECT p.*,q.version AS pending_version,i.source_hash AS prior_hash,i.policy_id AS prior_policy,i.policy_version AS prior_version FROM catalog_identity_pending q JOIN products p ON p.id=q.product_id LEFT JOIN catalog_product_identities i ON i.product_id=p.id WHERE ($1::uuid IS NULL OR p.id>$1) ORDER BY p.id LIMIT 100`,
         [cursor],
       )
     ).rows;
-  let prepared = 0;
-  for (const p of rows) {
-    const data = sourceData(p),
-      hash = sourceHash(p),
-      policy = selectPolicy(data, policies);
-    if (!policy) continue;
-    const identity = deterministicIdentity(data, policy);
-    await c.query(
-      `INSERT INTO catalog_product_identities(product_id,policy_id,policy_version,fingerprint,identity,source_hash) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(product_id) DO UPDATE SET policy_id=$2,policy_version=$3,fingerprint=$4,identity=$5,source_hash=$6,prepared_at=clock_timestamp() WHERE catalog_product_identities.source_hash<>$6 OR catalog_product_identities.policy_version<>$3`,
-      [
-        p.id,
-        policy.id,
-        policy.version,
-        identity.fingerprint,
-        JSON.stringify({
-          ...identity,
-          preparation: identity.fingerprint ? 'completed' : 'pending',
-        }),
-        hash,
-      ],
-    );
-    prepared++;
-  }
+  for (const product of rows) await prepareIdentity(c, product, policies);
   return {
-    prepared,
+    prepared: rows.length,
     scanned: rows.length,
     nextCursor: rows.length === 100 ? rows.at(-1).id : null,
   };
 }
+async function prepareIdentity(
+  c: Query,
+  product: any,
+  policies: IdentityPolicy[],
+) {
+  const data = sourceData(product),
+    hash = sourceHash(product),
+    policy = selectPolicy(data, policies);
+  if (
+    product.prior_hash === hash &&
+    product.prior_policy === (policy?.id ?? null) &&
+    product.prior_version === (policy?.version ?? 0)
+  ) {
+    await c.query(
+      'UPDATE catalog_product_identities SET prepared_at=clock_timestamp() WHERE product_id=$1',
+      [product.id],
+    );
+  } else {
+    const identity = policy
+      ? deterministicIdentity(data, policy)
+      : { fingerprint: null, missing: ['type'] };
+    const preparation =
+      policy && !identity.fingerprint ? 'pending' : 'completed';
+    await c.query(
+      `INSERT INTO catalog_product_identities(product_id,policy_id,policy_version,fingerprint,identity,source_hash) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(product_id) DO UPDATE SET policy_id=$2,policy_version=$3,fingerprint=$4,identity=$5,source_hash=$6,prepared_at=clock_timestamp()`,
+      [
+        product.id,
+        policy?.id ?? null,
+        policy?.version ?? 0,
+        identity.fingerprint,
+        JSON.stringify({ ...identity, preparation }),
+        hash,
+      ],
+    );
+  }
+  // A concurrent edit increments the queue version and must remain pending.
+  await c.query(
+    'DELETE FROM catalog_identity_pending WHERE product_id=$1 AND version=$2',
+    [product.id, product.pending_version],
+  );
+}
+
 export const startInput = z.strictObject({
   marketplaceId: z.string().regex(/^[a-z][a-z0-9_-]{1,39}$/),
   task: z.enum(['product', 'category']),
@@ -448,7 +471,7 @@ async function candidateProducts(
   // Exact prepared identities are indexed. Legacy candidates are bounded by brand/model tokens globally, never category.
   const exact = (
     await c.query(
-      'SELECT p.*,i.identity,i.source_hash,i.policy_version FROM catalog_product_identities i JOIN products p ON p.id=i.product_id WHERE i.fingerprint=$1 ORDER BY p.id LIMIT 3',
+      'SELECT p.*,i.identity,i.source_hash,i.policy_version FROM catalog_product_identities i JOIN products p ON p.id=i.product_id WHERE i.fingerprint=$1 ORDER BY p.id LIMIT 3 FOR SHARE OF p',
       [identity.fingerprint],
     )
   ).rows;
@@ -528,7 +551,7 @@ async function acceptProduct(
     return { outcome: 'linked', applied: true, productId: known.id, identity };
   }
   const title = [
-      policy.name,
+      policy.terms[0],
       ...policy.attributes
         .filter((a) => a.required)
         .map((a) => identity.facts[a.key]?.value)
@@ -711,7 +734,7 @@ export async function completeResolver(
       new Date(item.lease_until).getTime() < Date.now()
     )
       throw new HttpError(409, 'Reserva expirada ou execução interrompida.');
-    const settings = await resolverSettings(c);
+    const settings = await resolverSettings(c, true);
     if (item.product_id)
       return completePreparation(c, run, item, v, hash, settings);
     const link = (
@@ -825,7 +848,7 @@ async function completePreparation(
     ).rows[0],
     policy = (
       await c.query(
-        'SELECT version FROM catalog_identity_policies WHERE id=$1 AND enabled',
+        'SELECT version FROM catalog_identity_policies WHERE id=$1 AND enabled FOR SHARE',
         [item.context.policy.id],
       )
     ).rows[0],
@@ -908,7 +931,7 @@ async function technicalRetry(c: Query, item: any, v: any, settings: any) {
 
 async function validateContext(c: Query, run: any, context: any) {
   const current = (
-    await c.query('SELECT * FROM review_ai_settings WHERE id=true')
+    await c.query('SELECT * FROM review_ai_settings WHERE id=true FOR SHARE')
   ).rows[0];
   if (
     context.promptVersion !==
@@ -918,7 +941,7 @@ async function validateContext(c: Query, run: any, context: any) {
   if (context.policy) {
     const p = (
       await c.query(
-        'SELECT version FROM catalog_identity_policies WHERE id=$1 AND enabled',
+        'SELECT version FROM catalog_identity_policies WHERE id=$1 AND enabled FOR SHARE',
         [context.policy.id],
       )
     ).rows[0];

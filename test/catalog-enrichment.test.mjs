@@ -36,6 +36,7 @@ test('indisponibilidade explícita conclui enriquecimento sem falha e persiste e
 
 test('nova extração libera anúncio inválido para análise futura sem confirmar nem publicar automaticamente',async t=>{
  const f=await catalogFixture(t),id=randomUUID();
+ await f.db.query("UPDATE catalog_resolver_settings SET mode='legacy'");
  await f.db.query("UPDATE marketplaces SET scraping_enabled=true,allowed_hosts=ARRAY['shop.example.com'] WHERE id='amazon'");
  await f.db.query("INSERT INTO discovery_links(id,marketplace_id,url,affiliate_url,ai_resolution) VALUES($1,'amazon','https://shop.example.com/p','https://shop.example.com/affiliate',$2)",[id,JSON.stringify({product:{action:'invalid',reason:'128 GB contra 256 GB.'}})]);
  const settings=(await f.browser.get('/api/admin/discovery/enrichment/ai/settings')).body;
@@ -44,5 +45,5 @@ test('nova extração libera anúncio inválido para análise futura sem confirm
  const item=(await f.call('post',`/catalog/runs/${run.body.id}/claim`,{})).body.item;
  const result=await f.call('post',`/catalog/runs/${run.body.id}/results`,{itemId:item.id,leaseToken:item.lease_token,outcome:'success',data,sourceCategoryPath:[]});assert.equal(result.status,200,JSON.stringify(result.body));
  const link=(await f.db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];assert.deepEqual(link.ai_resolution,{});assert.equal(link.product_id,null);assert.equal(link.published_offer_id,null);
- const queue=await f.call('get','/catalog/ai/queue?marketplaceId=amazon&task=product');assert.deepEqual(queue.body.items.map(i=>i.id),[id]);
+ const queue=await f.call('get','/catalog/ai/queue?marketplaceId=amazon&task=product');assert.equal(queue.status,200,JSON.stringify(queue.body));assert.deepEqual(queue.body.items.map(i=>i.id),[id]);
 });

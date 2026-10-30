@@ -91,6 +91,8 @@ async function category(f) {
 }
 test('identidade tipada normaliza unidades, exige evidência e separa modelos/armazenamento; acessórios e kits não viram telefones', () => {
   assert.equal(normalizeAttribute('1 TB', 'gb'), '1024');
+  assert.equal(normalizeAttribute('128 GB', 'inch'), '');
+  assert.equal(normalizeAttribute('6.5 inch', 'gb'), '');
   assert.equal(normalizeAttribute('128/256 GB', 'gb'), '');
   const a = validateIdentity(input, sourceData(data), policy, 'a');
   assert.ok(a.fingerprint);
@@ -239,6 +241,18 @@ test('fluxo ativo cria rascunho único por identidade, conta links e categoriza 
   assert.equal(
     (await f.db.query('SELECT count(*)::int AS n FROM products')).rows[0].n,
     1,
+  );
+  assert.equal(
+    (await f.call('post', '/catalog/resolver/prepare', {})).body.scanned,
+    1,
+  );
+  assert.equal(
+    (await f.call('post', '/catalog/resolver/prepare', {})).body.scanned,
+    0,
+  );
+  assert.ok(
+    (await f.db.query('SELECT fingerprint FROM catalog_product_identities'))
+      .rows[0].fingerprint,
   );
 });
 test('ambiguidade é exclusão explícita, não inválido/revisão, e publicação não avança; nova extração remove exclusão', async (t) => {
@@ -508,8 +522,44 @@ test('IDs e categorias fora do contexto, alterações de política e controle de
   );
 });
 
-test('modo de simulação impede clientes antigos de aplicar decisões pelo endpoint legado',async t=>{
- const f=await catalogFixture(t);await f.db.query('UPDATE review_ai_settings SET product_enabled=true');const id=await seed(f);
- const response=await f.call('post','/catalog/ai/context',{id,task:'product',inventoryRevision:'1'});assert.equal(response.status,409);assert.match(response.body.error,/Atualize a extensão/);
- assert.equal((await f.db.query('SELECT count(*)::int AS n FROM review_ai_suggestions')).rows[0].n,0);
+test('modo de simulação impede clientes antigos de aplicar decisões pelo endpoint legado', async (t) => {
+  const f = await catalogFixture(t);
+  await f.db.query('UPDATE review_ai_settings SET product_enabled=true');
+  const id = await seed(f);
+  const response = await f.call('post', '/catalog/ai/context', {
+    id,
+    task: 'product',
+    inventoryRevision: '1',
+  });
+  assert.equal(response.status, 409);
+  assert.match(response.body.error, /Atualize a extensão/);
+  assert.equal(
+    (await f.db.query('SELECT count(*)::int AS n FROM review_ai_suggestions'))
+      .rows[0].n,
+    0,
+  );
+});
+
+test('preparação usa fila incremental: desconhecidos não são varridos de novo e mudanças relevantes reenfileiram', async (t) => {
+  const f = await catalogFixture(t),
+    id = randomUUID();
+  await f.db.query(
+    "INSERT INTO products(id,name,category) VALUES($1,'Produto sem tipo reconhecido','Tecnologia')",
+    [id],
+  );
+  let r = await f.call('post', '/catalog/resolver/prepare', {});
+  assert.equal(r.status, 200);
+  assert.equal(r.body.scanned, 1);
+  r = await f.call('post', '/catalog/resolver/prepare', {});
+  assert.equal(r.body.scanned, 0);
+  await f.db.query(
+    "UPDATE products SET name='Nome atualizado sem tipo' WHERE id=$1",
+    [id],
+  );
+  r = await f.call('post', '/catalog/resolver/prepare', {});
+  assert.equal(r.body.scanned, 1);
+  assert.equal(
+    (await f.call('post', '/catalog/resolver/prepare', {})).body.scanned,
+    0,
+  );
 });
