@@ -14,6 +14,14 @@ test('alternativa distingue modelos e capacidades e reutiliza títulos equivalen
   assert.deepEqual(fallbackCategory({offer:{},categories:[]}).path, ['Outros']);
   assert.equal(fallbackCategory({offer:{},mappedCategoryId:'a',categories:[{id:'a',path:['Áudio']}]}).categoryId,'a');
 });
+test('a identidade de último recurso não pode ser desativada por configuração de tipos',async t=>{
+ const f=await catalogFixture(t);await setup(f);
+ const settings=await f.browser.get('/api/admin/discovery/enrichment/resolver/settings');
+ assert.ok(!settings.body.policies.some(p=>p.id==='_title'));
+ assert.equal((await f.browser.mutate('put','/api/admin/discovery/enrichment/resolver/policies/_title',{version:1,enabled:false,definition:{}})).status,400);
+ await link(f,{title:'Produto de tipo desconhecido'});
+ assert.equal((await drive(f,'product',()=>({error:'technical'}))).stats.accepted,1);
+});
 test('todos os links são catalogados e categorizados quando a IA falha sempre; replay não duplica e publicação continua manual',async t=>{
   const f=await catalogFixture(t); await setup(f);
   const cases=[
