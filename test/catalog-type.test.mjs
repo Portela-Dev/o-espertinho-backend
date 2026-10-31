@@ -41,8 +41,8 @@ test('IA cria tipo sem política e cataloga/categoriza; outro marketplace reutil
  assert.equal((await f.db.query('SELECT count(*)::int AS n FROM products')).rows[0].n,1);
 });
 test('simulação identifica tipo novo sem persistir política, produto ou categoria',async t=>{
- const f=await catalogFixture(t);await seed(f);const run=await start(f),first=await claim(f,run),done=await complete(f,run,first.item,typeDecision);assert.equal(done.applied,false);assert.equal(done.outcome,'drafted');await claim(f,run);
- assert.equal((await f.db.query('SELECT count(*)::int AS n FROM catalog_identity_policies')).rows[0].n,3);
+ const f=await catalogFixture(t);const before=(await f.db.query('SELECT count(*)::int AS n FROM catalog_identity_policies')).rows[0].n;await seed(f);const run=await start(f),first=await claim(f,run),done=await complete(f,run,first.item,typeDecision);assert.equal(done.applied,false);assert.equal(done.outcome,'drafted');await claim(f,run);
+ assert.equal((await f.db.query('SELECT count(*)::int AS n FROM catalog_identity_policies')).rows[0].n,before);
  const cats=await start(f,'category'),c=await claim(f,cats);const result=await complete(f,cats,c.item,{categoryId:null,path:['Fotografia'],reason:'Título'});assert.equal(result.applied,false);
  assert.equal((await f.db.query('SELECT count(*)::int AS n FROM products')).rows[0].n,0);
 });
@@ -70,10 +70,10 @@ test('resposta antiga de exclusão não gera estado negativo nem bloqueia o cada
  const p=defaultPolicies.find(p=>p.id==='smartphone');const value=catalogIdentity({policyId:p.id,facts:{},exclude:true,reason:'Dados ausentes'},sourceData({title:'Celular sem especificações'}),p,'link');assert.ok(value.fingerprint);assert.equal(value.exclude,false);
 });
 test('política equivalente por nome é reutilizada sem sobrescrever a regra já cadastrada',async t=>{
- const f=await catalogFixture(t);await active(f);await seed(f);const run=await start(f),{item}=await claim(f,run);
+ const f=await catalogFixture(t);const before=(await f.db.query('SELECT count(*)::int AS n FROM catalog_identity_policies')).rows[0].n;await active(f);await seed(f);const run=await start(f),{item}=await claim(f,run);
  const result=await complete(f,run,item,{...typeDecision,policy:{...definition,name:'smartphones'}});
  assert.equal(result.identity.policyId,'smartphone');
- assert.equal((await f.db.query('SELECT count(*)::int AS n FROM catalog_identity_policies')).rows[0].n,3);
+ assert.equal((await f.db.query('SELECT count(*)::int AS n FROM catalog_identity_policies')).rows[0].n,before);
  const policy=(await f.db.query("SELECT definition FROM catalog_identity_policies WHERE id='smartphone'")).rows[0].definition;
  assert.equal(policy.name,'Smartphones');assert.ok(policy.attributes.some(a=>a.key==='ram'));
 });
