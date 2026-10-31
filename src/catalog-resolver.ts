@@ -37,10 +37,10 @@ export async function resolverSettings(c: Query, lock = false) {
   ).rows[0];
   return { ...row, protocolVersion: 3 };
 }
-export async function resolverPolicies(c: Query): Promise<IdentityPolicy[]> {
+export async function resolverPolicies(c: Query, includeInternal = false): Promise<IdentityPolicy[]> {
   return (
     await c.query(
-      "SELECT * FROM catalog_identity_policies WHERE enabled AND id<>'_title' ORDER BY id",
+      'SELECT * FROM catalog_identity_policies WHERE enabled' + (includeInternal ? '' : " AND id<>'_title'") + ' ORDER BY id',
     )
   ).rows.map((p) => ({ ...p.definition, id: p.id, version: p.version }));
 }
@@ -48,7 +48,7 @@ export async function prepareIdentities(
   c: Query,
   cursor: string | null = null,
 ) {
-  const policies = await resolverPolicies(c),
+  const policies = await resolverPolicies(c, true),
     rows = (
       await c.query(
         `SELECT p.*,q.version AS pending_version,i.source_hash AS prior_hash,i.policy_id AS prior_policy,i.policy_version AS prior_version FROM catalog_identity_pending q JOIN products p ON p.id=q.product_id LEFT JOIN catalog_product_identities i ON i.product_id=p.id WHERE ($1::uuid IS NULL OR p.id>$1) ORDER BY p.id LIMIT 100`,
@@ -69,7 +69,7 @@ async function prepareIdentity(
 ) {
   const data = sourceData(product),
     hash = sourceHash(product),
-    policy = policies.find(p => p.id === product.prior_policy && p.version === product.prior_version && product.prior_hash === hash) ?? selectPolicy(data, policies);
+    policy = policies.find(p => p.id === product.prior_policy && p.version === product.prior_version && product.prior_hash === hash) ?? selectPolicy(data, policies.filter(p => p.id !== '_title'));
   if (
     product.prior_hash === hash &&
     product.prior_policy === (policy?.id ?? null) &&

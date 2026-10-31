@@ -48,6 +48,9 @@ test('respostas de invalidação, política malformada e categoria vazia são su
   const categories=await drive(f,'category',()=>({decision:{categoryId:null,path:[],reason:''}}));
   assert.equal(categories.stats.accepted,1);
   assert.deepEqual((await f.db.query('SELECT category_path FROM products')).rows[0].category_path,['Outros']);
+  const identity=(await f.db.query('SELECT fingerprint,policy_id FROM catalog_product_identities')).rows[0];
+  await f.call('post','/catalog/resolver/prepare',{});
+  assert.deepEqual((await f.db.query('SELECT fingerprint,policy_id FROM catalog_product_identities')).rows[0],identity);
 });
 test('títulos iguais compartilham rascunho e produto; kits preservam identidade própria',async t=>{
   const f=await catalogFixture(t);await setup(f);
