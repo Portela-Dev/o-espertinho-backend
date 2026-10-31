@@ -255,29 +255,15 @@ test('fluxo ativo cria rascunho único por identidade, conta links e categoriza 
       .rows[0].fingerprint,
   );
 });
-test('ambiguidade é exclusão explícita, não inválido/revisão, e publicação não avança; nova extração remove exclusão', async (t) => {
-  const f = await catalogFixture(t);
-  await mode(f);
-  const id = await seed(f, {
-      ...data,
-      title: 'Produto sem tipo identificável',
-    }),
-    run = await start(f);
-  const r = await claim(f, run);
-  assert.equal(r.advance, true);
-  let row = (
-    await f.db.query('SELECT * FROM discovery_links WHERE id=$1', [id])
-  ).rows[0];
-  assert.equal(row.catalog_resolution.outcome, 'excluded');
-  assert.deepEqual(row.ai_resolution, {});
-  await f.db.query(
-    "UPDATE discovery_links SET enrichment_data=jsonb_set(enrichment_data,'{title}','\"Novo título\"') WHERE id=$1",
-    [id],
-  );
-  row = (await f.db.query('SELECT * FROM discovery_links WHERE id=$1', [id]))
-    .rows[0];
-  assert.deepEqual(row.catalog_resolution, {});
+test('dados incompletos não excluem: título permite catalogar e categorizar sem inventar atributos', async t => {
+ const f=await catalogFixture(t);await mode(f);const id=await seed(f,{...data,title:'Celular Modelo X',brand:'',description:'',specifications:[],availability:'unavailable',priceCents:null});
+ const run=await start(f),r=await claim(f,run);assert.equal(r.item.context.stage,'identity');
+ const result=await complete(f,run,r.item,{policyId:'smartphone',facts:{},exclude:true,reason:'Informação incompleta'});assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.outcome,'drafted');assert.equal(result.body.identity.partial,true);
+ await claim(f,run);const categories=await start(f,'category'),c=await claim(f,categories);const done=await complete(f,categories,c.item,{categoryId:null,path:['Telefonia','Celulares'],reason:'Título do produto'});assert.equal(done.status,200,JSON.stringify(done.body));
+ const row=(await f.db.query('SELECT * FROM discovery_links WHERE id=$1',[id])).rows[0];assert.ok(row.product_id);assert.ok(row.confirmed_category_id);assert.deepEqual(row.catalog_resolution,{});assert.deepEqual(row.ai_resolution,{});
+ const product=(await f.db.query('SELECT * FROM products WHERE id=$1',[row.product_id])).rows[0];assert.equal(product.name,'Celular Modelo X');assert.equal(product.brand,'');assert.equal((await claim(f,categories)).run.stats.accepted,1);
 });
+
 test('alteração irrelevante no catálogo não invalida; fonte/política alterada e evidência inventada são recusadas', async (t) => {
   const f = await catalogFixture(t);
   await mode(f);
@@ -392,17 +378,10 @@ test('preparação incremental, reutilização global, cache e candidatos incomp
   assert.equal(first.item.context.preparation, undefined);
   r = await complete(f, run, first.item, input, { model: 'fixture', tokens: 15 });
   assert.equal(r.status, 200, JSON.stringify(r.body));
-  assert.equal(r.body.outcome, 'preparing');
+  assert.equal(r.body.outcome, 'matching');
   first = await claim(f, run);
-  assert.equal(first.item.context.preparation, true);
-  r = await complete(f, run, first.item, input, {
-    model: 'fixture',
-    tokens: 15,
-  });
-  assert.equal(r.status, 200, JSON.stringify(r.body));
-  first = await claim(f, run);
-  assert.deepEqual(first.item.deterministic, input);
-  r = await complete(f, run, first.item, input);
+  assert.equal(first.item.context.stage, 'match');
+  r = await complete(f, run, first.item, {productId,reason:'Mesmo título/modelo'}, {model:'fixture',tokens:15});
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.equal(r.body.productId, productId);
   await claim(f, run);
@@ -496,40 +475,12 @@ test('links não aguardam a preparação global nem analisam produtos sem relaç
   assert.equal((await f.db.query('SELECT count(*)::int AS n FROM catalog_resolver_items WHERE run_id=$1 AND product_id IS NOT NULL', [run.id])).rows[0].n, 0);
 });
 
-test('preparação sob demanda registra falhas, limita tentativas e reutiliza a identidade do link', async (t) => {
-  const f = await catalogFixture(t);
-  await mode(f);
-  await f.db.query(
-    "INSERT INTO products(id,name,description,brand,category_path) VALUES($1,$2,$3,$4,ARRAY['Tecnologia','Celulares'])",
-    [randomUUID(), data.title, data.description, data.brand],
-  );
-  await f.call('post', '/catalog/resolver/prepare', {});
-  await seed(f);
-  const run = await start(f);
-  let leased = await claim(f, run);
-  const waiting = await complete(f, run, leased.item, input);
-  assert.equal(waiting.body.outcome, 'preparing');
-  for (let i = 0; i < 2; i++) {
-    leased = await claim(f, run);
-    assert.equal(leased.item.context.preparation, true);
-    const result = await complete(f, run, leased.item, undefined, {
-      error: 'technical', errorCode: 'result_rejected', model: 'fixture', elapsedMs: 1200,
-    });
-    assert.equal(result.status, 200, JSON.stringify(result.body));
-    assert.equal(result.body.outcome, i === 0 ? 'retry' : 'failed');
-    await f.db.query("UPDATE catalog_resolver_items SET retry_at=clock_timestamp()-interval '1 second' WHERE run_id=$1", [run.id]);
-  }
-  const failed = (await f.db.query("SELECT * FROM catalog_resolver_items WHERE run_id=$1 AND status='failed'", [run.id])).rows[0];
-  assert.equal(failed.calls, 2);
-  assert.equal(failed.elapsed_ms, 2400);
-  assert.equal(failed.decision.errorCode, 'result_rejected');
-  leased = await claim(f, run);
-  assert.equal(leased.item.context.preparation, undefined);
-  assert.deepEqual(leased.item.deterministic, input);
-  const result = await complete(f, run, leased.item, input);
-  assert.equal(result.body.outcome, 'excluded');
-  assert.equal((await claim(f, run)).run.status, 'completed');
-  assert.equal((await f.db.query('SELECT count(*)::int AS n FROM review_ai_product_drafts')).rows[0].n, 0);
+test('comparação registra falhas técnicas e permite criar produto quando não há equivalente', async t=>{
+ const f=await catalogFixture(t);await mode(f);await f.db.query("INSERT INTO products(id,name,description,brand,category_path) VALUES($1,$2,$3,$4,ARRAY['Tecnologia'])",[randomUUID(),data.title,data.description,data.brand]);
+ await seed(f);const run=await start(f);let leased=await claim(f,run);assert.equal((await complete(f,run,leased.item,input)).body.outcome,'matching');
+ leased=await claim(f,run);assert.equal(leased.item.context.stage,'match');let r=await complete(f,run,leased.item,undefined,{error:'technical',errorCode:'analysis_failed',model:'fixture',elapsedMs:1200});assert.equal(r.body.outcome,'retry');
+ await f.db.query("UPDATE catalog_resolver_items SET retry_at=clock_timestamp()-interval '1 second' WHERE run_id=$1",[run.id]);leased=await claim(f,run);r=await complete(f,run,leased.item,{productId:null,reason:'Nenhum equivalente'});assert.equal(r.status,200,JSON.stringify(r.body));assert.equal(r.body.outcome,'drafted');
+ const end=await claim(f,run);assert.equal(end.run.stats.accepted,1);assert.equal(end.run.stats.excluded,0);assert.equal(end.run.stats.calls,1);assert.equal(end.run.stats.elapsed_ms,1200);
 });
 
 test('retomar fila antiga descarta preparação global sem gastar IA', async (t) => {

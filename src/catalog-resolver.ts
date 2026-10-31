@@ -5,6 +5,7 @@ import type { CatalogActor } from './catalog-contracts.js';
 import { catalogTransaction } from './catalog-runs.js';
 import { HttpError } from './security.js';
 import { audit } from './offers.js';
+import { catalogIdentity, catalogOffer, inferCatalogPolicy, policyChoices, titleProvesIdentity } from './catalog-type.js';
 import {
   assignCatalogProduct,
   resolveAiCategory,
@@ -16,7 +17,6 @@ import {
   digest,
   selectPolicy,
   deterministicIdentity,
-  validateIdentity,
   type IdentityPolicy,
 } from './catalog-identity.js';
 type Query = Pick<Database, 'query'>;
@@ -28,12 +28,13 @@ export function resolverAllowed(actor: CatalogActor) {
     throw new HttpError(403, 'Permissões de catálogo e links necessárias.');
 }
 export async function resolverSettings(c: Query, lock = false) {
-  return (
+  const row = (
     await c.query(
       'SELECT * FROM catalog_resolver_settings WHERE id=true' +
         (lock ? ' FOR SHARE' : ''),
     )
   ).rows[0];
+  return { ...row, protocolVersion: 2 };
 }
 export async function resolverPolicies(c: Query): Promise<IdentityPolicy[]> {
   return (
@@ -67,7 +68,7 @@ async function prepareIdentity(
 ) {
   const data = sourceData(product),
     hash = sourceHash(product),
-    policy = selectPolicy(data, policies);
+    policy = policies.find(p => p.id === product.prior_policy && p.version === product.prior_version && product.prior_hash === hash) ?? selectPolicy(data, policies);
   if (
     product.prior_hash === hash &&
     product.prior_policy === (policy?.id ?? null) &&
@@ -179,7 +180,7 @@ export async function ownedRun(
 export async function runSummary(c: Query, run: any) {
   const stats = (
     await c.query(
-      `SELECT count(*) FILTER(WHERE link_id IS NOT NULL)::int AS total,count(*) FILTER(WHERE product_id IS NOT NULL AND status IN ('accepted','excluded'))::int AS prepared,count(*) FILTER(WHERE status='accepted' AND link_id IS NOT NULL)::int AS accepted,count(*) FILTER(WHERE status='excluded' AND link_id IS NOT NULL)::int AS excluded,count(*) FILTER(WHERE status='failed' AND link_id IS NOT NULL)::int AS failed,sum(calls)::int AS calls,sum(tokens)::int AS tokens,sum(elapsed_ms)::int AS elapsed_ms,count(evaluation)::int AS evaluated,count(*) FILTER(WHERE evaluation='false_merge')::int AS false_merges,count(*) FILTER(WHERE evaluation='duplicate')::int AS duplicates,count(*) FILTER(WHERE evaluation='wrong_category')::int AS wrong_categories,count(*) FILTER(WHERE evaluation='excluded_valid')::int AS excluded_valid FROM catalog_resolver_items WHERE run_id=$1`,
+      `SELECT count(*) FILTER(WHERE link_id IS NOT NULL)::int AS total,count(*) FILTER(WHERE product_id IS NOT NULL AND status IN ('accepted','excluded'))::int AS prepared,count(*) FILTER(WHERE status='accepted' AND link_id IS NOT NULL)::int AS accepted,count(*) FILTER(WHERE status='excluded' AND link_id IS NOT NULL)::int AS excluded,count(*) FILTER(WHERE status='skipped' AND link_id IS NOT NULL)::int AS skipped,count(*) FILTER(WHERE status='failed' AND link_id IS NOT NULL)::int AS failed,sum(calls)::int AS calls,sum(tokens)::int AS tokens,sum(elapsed_ms)::int AS elapsed_ms,count(evaluation)::int AS evaluated,count(*) FILTER(WHERE evaluation='false_merge')::int AS false_merges,count(*) FILTER(WHERE evaluation='duplicate')::int AS duplicates,count(*) FILTER(WHERE evaluation='wrong_category')::int AS wrong_categories,count(*) FILTER(WHERE evaluation='excluded_valid')::int AS excluded_valid FROM catalog_resolver_items WHERE run_id=$1`,
       [run.id],
     )
   ).rows[0];
@@ -215,26 +216,6 @@ async function finishItem(c: Query, item: any, status: string, decision: any) {
     'UPDATE catalog_resolver_items SET status=$2,decision=$3,lease_until=NULL,updated_at=clock_timestamp() WHERE id=$1',
     [item.id, status, JSON.stringify(decision)],
   );
-}
-async function excluded(
-  c: Query,
-  run: any,
-  item: any,
-  link: any,
-  reason: string,
-) {
-  const result = {
-    outcome: 'excluded',
-    reason,
-    applied: run.mode === 'active',
-  };
-  if (run.mode === 'active')
-    await c.query(
-      'UPDATE discovery_links SET catalog_resolution=$2 WHERE id=$1',
-      [link.id, JSON.stringify({ ...result, sourceHash: sourceHash(link) })],
-    );
-  await finishItem(c, item, 'excluded', result);
-  return result;
 }
 async function contextFor(c: Query, run: any, link: any) {
   const settings = (
@@ -277,7 +258,7 @@ async function contextFor(c: Query, run: any, link: any) {
     return {
       stage: 'category',
       offer: {
-        ...sourceData(draft),
+        ...catalogOffer(draft),
         sourceCategory: (link.source_category_path ?? []).join(' > '),
       },
       categories,
@@ -290,12 +271,13 @@ async function contextFor(c: Query, run: any, link: any) {
       enabled: settings.category_enabled,
     };
   }
-  const offer = sourceData(link),
+  const offer = catalogOffer(link),
     policy = selectPolicy(offer, policies);
   return {
-    stage: 'identity',
+    stage: policy ? 'identity' : 'type',
     offer,
     policy,
+    policies: policy ? undefined : policyChoices(policies, offer),
     prompt: settings.product_prompt,
     promptVersion: settings.product_version,
     enabled: settings.product_enabled,
@@ -335,7 +317,10 @@ export async function claimResolver(
       )
     ).rows[0];
     if (!item) return emptyClaim(c, run);
-    if (item.product_id) return claimPreparation(c, run, item);
+    if (item.product_id) {
+      await skipPreparation(c, item);
+      return { run: await runSummary(c, run), advance: true };
+    }
     return claimLink(c, run, item, actor.id);
   });
 }
@@ -362,8 +347,8 @@ async function claimLink(c: Query, run: any, item: any, userId: string) {
     ])
   ).rows[0];
   if (link?.status !== 'pending' || link.published_offer_id) {
-    await finishItem(c, item, 'excluded', {
-      outcome: 'excluded',
+    await finishItem(c, item, 'skipped', {
+      outcome: 'skipped',
       reason: 'Item deixou a revisão.',
     });
     return { run: await runSummary(c, run), advance: true };
@@ -377,19 +362,17 @@ async function claimLink(c: Query, run: any, item: any, userId: string) {
     });
     return { run: await runSummary(c, run), advance: true };
   }
-  const context = await contextFor(c, run, link);
+  const fresh = await contextFor(c, run, link);
+  const context = await resumeMatchingContext(c, item, link, fresh);
   if (context.skip) return reuseDraft(c, run, item, link, context, userId);
-  if (context.stage === 'identity' && !context.policy) {
-    await excluded(
-      c,
-      run,
-      item,
-      link,
-      'Tipo ausente ou ambíguo nas políticas cadastradas.',
-    );
-    return { run: await runSummary(c, run), advance: true };
-  }
   return leaseLink(c, run, item, link, context);
+}
+async function resumeMatchingContext(c: Query, item: any, link: any, fresh: any) {
+  const saved = item.context;
+  if (saved?.stage !== 'match' || item.source_hash !== sourceHash(link) || saved.promptVersion !== fresh.promptVersion) return fresh;
+  if (saved.ephemeralPolicy) return saved;
+  const row = (await c.query('SELECT version FROM catalog_identity_policies WHERE id=$1 AND enabled', [saved.policy.id])).rows[0];
+  return row?.version === saved.policy.version ? saved : fresh;
 }
 async function otherLinkLease(c: Query, linkId: string, itemId: string) {
   await c.query(
@@ -441,6 +424,7 @@ async function leaseLink(
     )
   ).rows[0];
   const cached =
+    receipt?.result?.contractVersion === 2 &&
     receipt?.source_hash === sourceHash(link) &&
     receipt?.policy_version === context.policy?.version &&
     receipt?.result?.promptVersion === context.promptVersion
@@ -456,10 +440,11 @@ async function leaseLink(
       id: item.id,
       leaseId: lease,
       context,
-      deterministic: identity?.fingerprint
+      deterministic: identity?.fingerprint && (cached || titleProvesIdentity(identity, context.offer))
         ? {
             policyId: context.policy.id,
             facts: identity.facts,
+            name: identity.name,
             exclude: false,
             reason: '',
           }
@@ -485,14 +470,15 @@ async function candidateProducts(
       p.source_hash === sourceHash(p) && p.policy_version === policy.version,
   );
   if (valid.length) return { exact: valid, unknown: [] };
-  const terms = [identity.attrs.brand, identity.attrs.model]
+  const preciseTerms = [identity.attrs.brand, identity.attrs.model]
     .filter(Boolean)
     .join(' ');
+  const terms = preciseTerms || canonical(identity.name).split(' ').filter(w => w.length > 1).slice(0, 10).join(' | ');
   if (!terms) return { exact: [], unknown: [] };
   const unknown = (
     await c.query(
-      "SELECT p.*,i.identity,i.source_hash,i.policy_version FROM products p LEFT JOIN catalog_product_identities i ON i.product_id=p.id WHERE NOT p.personalized_kit AND to_tsvector('simple',coalesce(p.name,'')||' '||coalesce(p.brand,'')||' '||coalesce(p.model,'')) @@ plainto_tsquery('simple',$1) ORDER BY p.id LIMIT 21",
-      [terms],
+      "SELECT p.*,i.identity,i.source_hash,i.policy_version FROM products p LEFT JOIN catalog_product_identities i ON i.product_id=p.id WHERE NOT p.personalized_kit AND to_tsvector('simple',coalesce(p.name,'')||' '||coalesce(p.brand,'')||' '||coalesce(p.model,'')) @@ CASE WHEN $2 THEN plainto_tsquery('simple',$1) ELSE to_tsquery('simple',$1) END ORDER BY ts_rank_cd(to_tsvector('simple',coalesce(p.name,'')||' '||coalesce(p.brand,'')||' '||coalesce(p.model,'')),CASE WHEN $2 THEN plainto_tsquery('simple',$1) ELSE to_tsquery('simple',$1) END) DESC,p.id LIMIT 20",
+      [terms, !!preciseTerms],
     )
   ).rows;
   return {
@@ -516,36 +502,19 @@ async function acceptProduct(
   context: any,
   raw: any,
 ) {
-  const identity = validateIdentity(
+  const identity = catalogIdentity(
     raw,
     context.offer,
     context.policy,
     link.id,
   );
-  if (identity.exclude || !identity.fingerprint)
-    return excluded(
-      c,
-      run,
-      item,
-      link,
-      identity.reason ||
-        'Identidade incompleta: ' + identity.missing.join(', '),
-    );
   const policy = context.policy as IdentityPolicy,
     candidates = policy.exclusive
       ? { exact: [], unknown: [] }
       : await candidateProducts(c, identity, policy);
-  if (await prepareCandidates(c, run, item, candidates.unknown, policy))
-    return { outcome: 'preparing', applied: false, identity };
-  if (candidates.exact.length > 1 || candidates.unknown.length)
-    return excluded(
-      c,
-      run,
-      item,
-      link,
-      'Candidatos existentes precisam de identidade completa; criação automática bloqueada para evitar duplicação.',
-    );
   const known = candidates.exact[0];
+  if (!known && candidates.unknown.length)
+    return beginMatching(c, item, context, identity, candidates.unknown);
   if (run.mode === 'shadow')
     return {
       outcome: known ? 'linked' : 'drafted',
@@ -557,20 +526,17 @@ async function acceptProduct(
     await assignCatalogProduct(c, link.id, known, run.created_by);
     return { outcome: 'linked', applied: true, productId: known.id, identity };
   }
-  const title = [
-      policy.terms[0],
-      ...policy.attributes
-        .filter((a) => a.required)
-        .map((a) => identity.facts[a.key]?.value)
-        .filter(Boolean),
-    ]
-      .join(' ')
-      .slice(0, 300),
+  return createProductDraft(c, run, link, context, identity);
+}
+async function createProductDraft(c: Query, run: any, link: any, context: any, identity: any) {
+  const policy = context.policy as IdentityPolicy;
+  if (run.mode === 'shadow') return { outcome: 'drafted', applied: false, identity, productId: null };
+  const title = identity.name,
     description = policy.attributes
       .filter((a) => identity.facts[a.key])
       .map((a) => a.label + ': ' + identity.facts[a.key].value)
       .join('. ')
-      .slice(0, 4000),
+      .slice(0, 4000) || title,
     brand = String(
       identity.facts.brand?.value ?? link.enrichment_data.brand ?? '',
     ).slice(0, 120),
@@ -621,53 +587,42 @@ async function acceptProduct(
     identity,
   };
 }
-async function prepareCandidates(
-  c: Query,
-  run: any,
-  item: any,
-  candidates: any[],
-  policy: IdentityPolicy,
-) {
-  // An overflowing or ambiguous candidate set is not an invitation to scan it.
-  if (!candidates.length || candidates.length > 20) return false;
-  const policies = await resolverPolicies(c);
-  let pending = false;
-  for (const product of candidates) {
-    if (selectPolicy(sourceData(product), policies)?.id !== policy.id) continue;
-    if (
-      product.source_hash === sourceHash(product) &&
-      product.policy_version === policy.version &&
-      product.identity?.preparation === 'completed'
-    ) continue;
-    const previous = (
-      await c.query(
-        'SELECT status FROM catalog_resolver_items WHERE run_id=$1 AND product_id=$2 LIMIT 1',
-        [run.id, product.id],
-      )
-    ).rows[0];
-    if (previous) {
-      pending ||= ['queued', 'leased'].includes(previous.status);
-      continue;
-    }
-    // A failed/incomplete preparation is tried at most once per run. A later
-    // run can retry it without creating another identity or product.
-    await c.query(
-      'INSERT INTO catalog_resolver_items(id,run_id,product_id,context) VALUES($1,$2,$3,$4)',
-      [randomUUID(), run.id, product.id, JSON.stringify({ dependency: true })],
-    );
-    pending = true;
+async function beginMatching(c: Query, item: any, context: any, identity: any, candidates: any[]) {
+  const next = { ...context, stage: 'match', policies: undefined, identity,
+    candidates: candidates.map(p => ({ id: p.id, title: p.name, brand: p.brand ?? '', description: String(p.description ?? '').slice(0, 300), sourceHash: sourceHash(p) })) };
+  await c.query("UPDATE catalog_resolver_items SET status='queued',lease_until=NULL,attempts=greatest(0,attempts-1),context=$2 WHERE id=$1", [item.id, JSON.stringify(next)]);
+  return { outcome: 'matching', applied: false, identity };
+}
+async function acceptMatch(c: Query, run: any, link: any, context: any, raw: unknown) {
+  const v = z.strictObject({ productId: z.uuid().nullable(), reason: z.string().max(240) }).parse(raw);
+  if (!v.productId) return createProductDraft(c, run, link, context, context.identity);
+  const candidate = context.candidates.find((p: any) => p.id === v.productId);
+  if (!candidate) throw new HttpError(400, 'Produto fora dos candidatos da análise.');
+  const product = (await c.query('SELECT * FROM products WHERE id=$1 FOR SHARE', [v.productId])).rows[0];
+  if (!product || sourceHash(product) !== candidate.sourceHash) throw new HttpError(409, 'Produto alterado durante a comparação.');
+  if (run.mode === 'active') {
+    const identity = context.identity;
+    await c.query('INSERT INTO catalog_product_identities(product_id,policy_id,policy_version,fingerprint,identity,source_hash) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(product_id) DO UPDATE SET policy_id=$2,policy_version=$3,fingerprint=$4,identity=$5,source_hash=$6 WHERE catalog_product_identities.fingerprint IS NULL',
+      [product.id, context.policy.id, context.policy.version, identity.fingerprint, JSON.stringify({ ...identity, preparation:'completed' }), sourceHash(product)]);
+    await assignCatalogProduct(c, link.id, product, run.created_by);
   }
-  if (pending)
-    await c.query(
-      "UPDATE catalog_resolver_items SET status='queued',lease_until=NULL,attempts=greatest(0,attempts-1) WHERE id=$1",
-      [item.id],
-    );
-  return pending;
+  return { outcome: 'linked', applied: run.mode === 'active', productId: product.id, identity: context.identity, reason: v.reason };
+}
+async function acceptProductStep(c: Query, run: any, item: any, link: any, context: any, raw: unknown) {
+  if (context.stage === 'match') return acceptMatch(c, run, link, context, raw);
+  let decision = raw;
+  if (context.stage === 'type') {
+    const inferred = await inferCatalogPolicy(c, context, raw, run.mode);
+    Object.assign(context, { stage: 'identity', policy: inferred.policy, policies: undefined, ephemeralPolicy: inferred.ephemeralPolicy });
+    decision = inferred.decision;
+    await c.query('UPDATE catalog_resolver_items SET context=$2 WHERE id=$1', [item.id, JSON.stringify(context)]);
+  }
+  return acceptProduct(c, run, item, link, context, decision);
 }
 const categoryResult = z.strictObject({
   categoryId: z.uuid().nullable(),
   path: z.array(z.string().trim().min(1).max(80)).max(10),
-  exclude: z.boolean(),
+  exclude: z.boolean().optional(),
   reason: z.string().max(240),
 });
 async function acceptCategory(
@@ -679,14 +634,6 @@ async function acceptCategory(
   raw: any,
 ) {
   const value = categoryResult.parse(raw);
-  if (value.exclude)
-    return excluded(
-      c,
-      run,
-      item,
-      link,
-      value.reason || 'Categoria sem evidência suficiente.',
-    );
   await validateCategoryChoice(c, value, context);
   if (run.mode === 'shadow')
     return { outcome: 'categorized', applied: false, ...value };
@@ -787,7 +734,7 @@ export async function completeResolver(
       throw new HttpError(409, 'Reserva expirada ou execução interrompida.');
     const settings = await resolverSettings(c, true);
     if (item.product_id)
-      return completePreparation(c, run, item, v, hash, settings);
+      return skipPreparation(c, item);
     const link = (
       await c.query('SELECT * FROM discovery_links WHERE id=$1 FOR UPDATE', [
         item.link_id,
@@ -801,9 +748,9 @@ export async function completeResolver(
     await validateContext(c, run, context);
     const result =
       run.task === 'product'
-        ? await acceptProduct(c, run, item, link, context, v.decision)
+        ? await acceptProductStep(c, run, item, link, context, v.decision)
         : await acceptCategory(c, run, item, link, context, v.decision);
-    const resolved = !['excluded', 'preparing'].includes(result.outcome);
+    const resolved = result.outcome !== 'matching';
     if (resolved)
       await finishItem(c, item, 'accepted', result);
     if (run.mode === 'active' && resolved)
@@ -825,6 +772,7 @@ export async function completeResolver(
         JSON.stringify({
           ...result,
           mode: run.mode,
+          contractVersion: 2,
           promptVersion: context.promptVersion,
         }),
       ],
@@ -834,134 +782,9 @@ export async function completeResolver(
   });
 }
 
-async function claimPreparation(c: Query, run: any, item: any) {
-  // Discard the obsolete global preparation queue on resumed pre-fix runs.
-  if (!item.context?.dependency) {
-    await finishItem(c, item, 'excluded', {
-      outcome: 'excluded', reason: 'Preparação global substituída por candidatos sob demanda.',
-    });
-    return { run: await runSummary(c, run), advance: true };
-  }
-  const product = (
-      await c.query('SELECT * FROM products WHERE id=$1 FOR UPDATE', [
-        item.product_id,
-      ])
-    ).rows[0],
-    policies = await resolverPolicies(c),
-    data = sourceData(product),
-    policy = selectPolicy(data, policies);
-  await c.query(
-    "UPDATE catalog_resolver_items SET status='queued',lease_id=NULL,lease_until=NULL WHERE product_id=$1 AND status='leased' AND lease_until<clock_timestamp()",
-    [item.product_id],
-  );
-  if (
-    (
-      await c.query(
-        "SELECT id FROM catalog_resolver_items WHERE product_id=$1 AND id<>$2 AND status='leased'",
-        [item.product_id, item.id],
-      )
-    ).rows.length
-  )
-    return { run: await runSummary(c, run), item: null };
-  if (!policy) {
-    await finishItem(c, item, 'excluded', {
-      outcome: 'excluded',
-      reason: 'Tipo do produto existente sem política.',
-    });
-    return { run: await runSummary(c, run), advance: true };
-  }
-  const settings = (
-      await c.query('SELECT * FROM review_ai_settings WHERE id=true')
-    ).rows[0],
-    context = {
-      stage: 'identity',
-      offer: data,
-      policy,
-      prompt: settings.product_prompt,
-      promptVersion: settings.product_version,
-      enabled: settings.product_enabled,
-      preparation: true,
-      dependency: true,
-    };
-  const lease = randomUUID();
-  await c.query(
-    "UPDATE catalog_resolver_items SET status='leased',attempts=attempts+1,lease_id=$2,lease_until=clock_timestamp()+interval '5 minutes',source_hash=$3,context=$4 WHERE id=$1",
-    [item.id, lease, sourceHash(product), JSON.stringify(context)],
-  );
-  return {
-    run: await runSummary(c, run),
-    item: { id: item.id, leaseId: lease, context, deterministic: null },
-  };
-}
-async function completePreparation(
-  c: Query,
-  run: any,
-  item: any,
-  v: any,
-  hash: string,
-  settings: any,
-) {
-  const product = (
-      await c.query('SELECT * FROM products WHERE id=$1 FOR SHARE', [
-        item.product_id,
-      ])
-    ).rows[0],
-    policy = (
-      await c.query(
-        'SELECT version FROM catalog_identity_policies WHERE id=$1 AND enabled FOR SHARE',
-        [item.context.policy.id],
-      )
-    ).rows[0],
-    prompt = (
-      await c.query(
-        'SELECT product_version FROM review_ai_settings WHERE id=true',
-      )
-    ).rows[0];
-  if (
-    !product ||
-    sourceHash(product) !== item.source_hash ||
-    policy?.version !== item.context.policy.version ||
-    prompt.product_version !== item.context.promptVersion ||
-    settings.version !== run.settings_version
-  )
-    throw new HttpError(
-      409,
-      'Produto ou política alterada durante a preparação.',
-    );
-  if (v.error) {
-    return technicalRetry(c, item, v, settings);
-  }
-  const identity = validateIdentity(
-      v.decision,
-      item.context.offer,
-      item.context.policy,
-      product.id,
-    ),
-    result = {
-      outcome: identity.fingerprint ? 'prepared' : 'excluded',
-      reason: identity.reason || identity.missing.join(', '),
-      applied: false,
-    };
-  await c.query(
-    'UPDATE catalog_product_identities SET fingerprint=$2,identity=$3,source_hash=$4,policy_version=$5,prepared_at=clock_timestamp() WHERE product_id=$1',
-    [
-      product.id,
-      identity.fingerprint,
-      JSON.stringify({ ...identity, preparation: 'completed' }),
-      item.source_hash,
-      policy.version,
-    ],
-  );
-  await finishItem(
-    c,
-    item,
-    identity.fingerprint ? 'accepted' : 'excluded',
-    result,
-  );
-  await c.query(
-    'UPDATE catalog_resolver_items SET result_hash=$2,calls=calls+$3,tokens=tokens+$4,elapsed_ms=elapsed_ms+$5 WHERE id=$1',
-    [item.id, hash, v.model ? 1 : 0, v.tokens, v.elapsedMs],
-  );
+async function skipPreparation(c: Query, item: any) {
+  const result = { outcome: 'skipped', applied: false, reason: 'Preparação antiga substituída por comparação direta dos candidatos.' };
+  await finishItem(c, item, 'skipped', result);
   return result;
 }
 
@@ -972,7 +795,7 @@ async function technicalRetry(c: Query, item: any, v: any, settings: any) {
   );
   const failed = item.attempts >= settings.max_attempts;
   await c.query(
-    "UPDATE catalog_resolver_items SET status=$2,lease_id=NULL,lease_until=NULL,retry_at=clock_timestamp()+interval '2 seconds',decision=$3 WHERE id=$1",
+    "UPDATE catalog_resolver_items SET status=$2,lease_id=NULL,lease_until=NULL,retry_at=clock_timestamp()+interval '2 seconds',decision=$3,context=CASE WHEN $4='result_rejected' THEN NULL ELSE context END WHERE id=$1",
     [
       item.id,
       failed ? 'failed' : 'queued',
@@ -983,6 +806,7 @@ async function technicalRetry(c: Query, item: any, v: any, settings: any) {
           : 'A análise de IA falhou; repetição automática limitada.',
         errorCode: v.errorCode ?? 'analysis_failed',
       }),
+      v.errorCode ?? 'analysis_failed',
     ],
   );
   return { outcome: failed ? 'failed' : 'retry' };
@@ -997,7 +821,7 @@ async function validateContext(c: Query, run: any, context: any) {
     current[run.task === 'product' ? 'product_version' : 'category_version']
   )
     throw new HttpError(409, 'Instrução alterada. Inicie nova execução.');
-  if (context.policy) {
+  if (context.policy && !context.ephemeralPolicy) {
     const p = (
       await c.query(
         'SELECT version FROM catalog_identity_policies WHERE id=$1 AND enabled FOR SHARE',
