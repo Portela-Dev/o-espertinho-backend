@@ -61,7 +61,7 @@ export function registerResolverAdmin(app: Express, db: Database) {
       settings: await resolverSettings(db),
       policies: (
         await db.query(
-          'SELECT id,version,enabled,definition FROM catalog_identity_policies ORDER BY id',
+          "SELECT id,version,enabled,definition FROM catalog_identity_policies WHERE id<>'_title' ORDER BY id",
         )
       ).rows,
     }),
@@ -70,13 +70,13 @@ export function registerResolverAdmin(app: Express, db: Database) {
     const v = z
       .strictObject({
         version: z.number().int().positive(),
-        mode: z.enum(['legacy', 'shadow', 'active']),
-        maxAttempts: z.number().int().min(1).max(5),
+        mode: z.enum(['shadow', 'active']),
+        maxAttempts: z.number().int().min(1).max(5).optional(),
         concurrency: z.number().int().min(1).max(2),
       })
       .parse(req.body);
     const r = await db.query(
-      'UPDATE catalog_resolver_settings SET version=version+1,mode=$2,max_attempts=$3,concurrency=$4,updated_by=$5,updated_at=clock_timestamp() WHERE id=true AND version=$1 RETURNING *',
+      'UPDATE catalog_resolver_settings SET version=version+1,mode=$2,max_attempts=COALESCE($3,max_attempts),concurrency=$4,updated_by=$5,updated_at=clock_timestamp() WHERE id=true AND version=$1 RETURNING *',
       [v.version, v.mode, v.maxAttempts, v.concurrency, req.user!.id],
     );
     if (!r.rows.length)

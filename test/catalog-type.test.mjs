@@ -12,11 +12,12 @@ const offer={title:'Câmera Digital Lumen C100 24 MP',brand:'Lumen',description:
 const facts={model:{value:'C100',evidence:'C100'},resolution:{value:'24 MP',evidence:'24 MP'}};
 const typeDecision={policyId:null,policy:definition,facts,name:offer.title,reason:'Câmera identificada pelo título'};
 const api='/catalog/resolver';
-async function active(f) {await f.db.query("UPDATE catalog_resolver_settings SET mode='active'");}
+async function active(f) {await f.db.query("UPDATE review_ai_settings SET product_enabled=true,category_enabled=true");await f.db.query("UPDATE catalog_resolver_settings SET mode='active'");}
 async function seed(f,market='amazon',data=offer) {
  const id=randomUUID();await f.db.query("INSERT INTO discovery_links(id,marketplace_id,url,affiliate_url,extraction_status,enrichment_data) VALUES($1,$2,$3,$3,'completed',$4)",[id,market,'https://example.com/'+id,JSON.stringify(data)]);return id;
 }
 async function start(f,task='product',marketplaceId='amazon') {
+ await f.db.query("UPDATE review_ai_settings SET product_enabled=true,category_enabled=true");
  const r=await f.call('post',api+'/start',{marketplaceId,task,limit:100,requestKey:randomUUID()});assert.equal(r.status,200,JSON.stringify(r.body));return r.body;
 }
 async function claim(f,run) {const r=await f.call('post',api+'/claim',{runId:run.id});assert.equal(r.status,200,JSON.stringify(r.body));return r.body;}
@@ -50,14 +51,14 @@ test('nova política não reenfileira todo o catálogo e uma alteração afeta s
  await seed(f);const run=await start(f),i=await claim(f,run);await complete(f,run,i.item,typeDecision);
  assert.equal((await f.db.query('SELECT count(*)::int AS n FROM catalog_identity_pending')).rows[0].n,0);
 });
-test('tipo e atributos inventados são recusados transacionalmente, sem criar política órfã',async t=>{
- const f=await catalogFixture(t);await active(f);await seed(f);const run=await start(f),{item}=await claim(f,run);
- const send=decision=>f.call('post',api+'/complete',{runId:run.id,itemId:item.id,leaseId:item.leaseId,decision});
- assert.equal((await send({...typeDecision,policyId:'not-offered',policy:null})).status,400);
- assert.equal((await send({...typeDecision,facts:{model:{value:'Inexistente',evidence:'Inexistente'}}})).status,400);
- assert.equal((await f.db.query('SELECT count(*)::int AS n FROM catalog_identity_policies')).rows[0].n,3);
- const r=await send(typeDecision);assert.equal(r.status,200,JSON.stringify(r.body));
+test('política inválida não fica órfã e a oferta é catalogada por título',async t=>{
+ const f=await catalogFixture(t);await active(f);await seed(f);const run=await start(f),first=await claim(f,run);
+ const result=await complete(f,run,first.item,{...typeDecision,policy:{...definition,attributes:[]}});
+ assert.equal(result.outcome,'drafted');assert.equal(result.fallback.diagnostic,'invalid_response');
+ assert.equal((await f.db.query("SELECT count(*)::int AS n FROM catalog_identity_policies WHERE definition->>'name'=$1",[definition.name])).rows[0].n,0);
+ assert.ok((await f.db.query('SELECT product_draft_id FROM discovery_links')).rows[0].product_draft_id);
 });
+
 test('título tem prioridade: dados ausentes geram identidade sem inventar RAM ou marca',()=>{
  const policy=defaultPolicies.find(p=>p.id==='smartphone'),source=sourceData({title:'Celular Modelo A28 128 GB',brand:'',description:'Modelo A28B 256 GB',specifications:[]});
  const identity=catalogIdentity({policyId:'smartphone',facts:{model:{value:'A28',evidence:'A28'},storage:{value:'128 GB',evidence:'128 GB'}},name:'Celular Modelo A28 128 GB',reason:'Título prioritário'},source,policy,'link');

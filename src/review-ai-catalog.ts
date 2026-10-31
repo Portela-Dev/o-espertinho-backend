@@ -15,77 +15,6 @@ export const identityKey = (name: string, brand = '') =>
         .trim(),
     )
     .join('|');
-const categoryKey = (path: string[]) =>
-  path
-    .map((s) =>
-      identityKey(s)
-        .split('|')[0]
-        .split(' ')
-        .map((t) => (t.length > 4 ? t.replace(/s$/, '') : t))
-        .join(' '),
-    )
-    .join('>');
-export async function inventoryRevision(c: CatalogQuery, lock = false) {
-  return (
-    await c.query(
-      'SELECT revision::text AS revision FROM review_ai_inventory_state WHERE id=true' +
-        (lock ? ' FOR UPDATE' : ''),
-    )
-  ).rows[0].revision as string;
-}
-export const inventoryInput = z.strictObject({
-  kind: z.enum(['categories', 'products', 'drafts']),
-  cursor: z.uuid().optional(),
-  revision: z.string().regex(/^\d+$/).optional(),
-  limit: z.coerce.number().int().min(1).max(500).default(250),
-});
-export async function inventoryPage(c: CatalogQuery, input: unknown) {
-  const v = inventoryInput.parse(input),
-    revision = await inventoryRevision(c);
-  if (v.revision && v.revision !== revision)
-    throw new HttpError(
-      409,
-      'O catálogo mudou. Atualize o inventário e inicie o lote novamente.',
-    );
-  const table = {
-    categories: 'category_nodes',
-    products: 'products',
-    drafts: 'review_ai_product_drafts',
-  }[v.kind];
-  let columns = 'id,path';
-  if (v.kind !== 'categories')
-    columns =
-      'id,name,brand,description,image_url,personalized_kit' +
-      (v.kind === 'products' ? ',category_path' : '');
-  const rows = (
-    await c.query(
-      'SELECT ' +
-        columns +
-        ' FROM ' +
-        table +
-        ' WHERE ($1::uuid IS NULL OR id>$1::uuid)' +
-        (v.kind === 'drafts' ? ' AND product_id IS NULL' : '') +
-        ' ORDER BY id LIMIT $2',
-      [v.cursor ?? null, v.limit + 1],
-    )
-  ).rows;
-  if ((await inventoryRevision(c)) !== revision)
-    throw new HttpError(
-      409,
-      'O catálogo mudou durante a leitura. Carregue o inventário novamente.',
-    );
-  const items = rows.slice(0, v.limit).map((row) => ({
-    ...row,
-    ...(v.kind === 'categories'
-      ? {}
-      : { kind: v.kind === 'drafts' ? 'draft' : 'product' }),
-  }));
-  return {
-    items,
-    revision,
-    nextCursor: rows.length > v.limit ? items.at(-1)!.id : null,
-  };
-}
 export async function assignCatalogProduct(
   c: CatalogQuery,
   linkId: string,
@@ -103,60 +32,6 @@ export async function assignCatalogProduct(
     [linkId, product.id, userId],
   );
   await audit(c, userId, 'discovery.product.assigned', linkId);
-}
-export async function catalogDraft(
-  c: CatalogQuery,
-  link: any,
-  product: any,
-  userId: string,
-) {
-  const kit = product.personalizedKit === true,
-    key =
-      identityKey(product.name, product.brand) + (kit ? '|kit:' + link.id : ''),
-    known = kit
-      ? null
-      : (
-          await c.query(
-            'SELECT * FROM products WHERE personalized_kit=false ORDER BY id',
-          )
-        ).rows.find((p) => identityKey(p.name, p.brand) === key);
-  if (known) {
-    await assignCatalogProduct(c, link.id, known, userId);
-    return { outcome: 'linked', product: known };
-  }
-  const image =
-    (link.enrichment_data.images ?? []).find((url: string) =>
-      url.startsWith('https://'),
-    ) ?? null;
-  const draft = (
-    await c.query(
-      `INSERT INTO review_ai_product_drafts(id,identity_key,name,description,brand,image_url,created_by,personalized_kit) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
- ON CONFLICT(identity_key) DO UPDATE SET identity_key=EXCLUDED.identity_key RETURNING *`,
-      [
-        randomUUID(),
-        key,
-        product.name,
-        product.description,
-        product.brand,
-        image,
-        userId,
-        kit,
-      ],
-    )
-  ).rows[0];
-  if (draft.product_id) {
-    const p = (
-      await c.query('SELECT * FROM products WHERE id=$1', [draft.product_id])
-    ).rows[0];
-    await assignCatalogProduct(c, link.id, p, userId);
-    return { outcome: 'linked', product: p };
-  }
-  await c.query(
-    'UPDATE discovery_links SET product_draft_id=$2,enrichment_version=enrichment_version+1 WHERE id=$1',
-    [link.id, draft.id],
-  );
-  await audit(c, userId, 'review_ai.product_draft', draft.id);
-  return { outcome: 'drafted', draft };
 }
 export async function finalizeCatalogDraft(
   c: CatalogQuery,
@@ -246,8 +121,8 @@ export async function resolveAiCategory(c: CatalogQuery, suggestion: any) {
     .max(10)
     .parse(suggestion.category.split('>').map((p: string) => p.trim()));
   const existing = (
-    await c.query('SELECT id,path FROM category_nodes ORDER BY normalized_path')
-  ).rows.find((node) => categoryKey(node.path) === categoryKey(path));
+    await c.query('SELECT id,path FROM category_nodes WHERE catalog_category_key(path)=catalog_category_key($1::text[]) ORDER BY id LIMIT 1', [path])
+  ).rows[0];
   if (existing) return existing;
   const registered = (
     await c.query('SELECT names,ids FROM register_category_path($1::text[])', [
@@ -255,21 +130,4 @@ export async function resolveAiCategory(c: CatalogQuery, suggestion: any) {
     ])
   ).rows[0];
   return { id: registered.ids.at(-1), path: registered.names };
-}
-export async function inventoryDelta(c: CatalogQuery, result: any) {
-  const categories = result.product
-    ? (
-        await c.query(
-          'SELECT id,path FROM category_nodes WHERE id=ANY($1::uuid[])',
-          [result.product.category_ids],
-        )
-      ).rows
-    : [];
-  return {
-    revision: await inventoryRevision(c),
-    categories,
-    products: result.product ? [{ ...result.product, kind: 'product' }] : [],
-    drafts: result.draft ? [{ ...result.draft, kind: 'draft' }] : [],
-    removeDraftIds: result.removeDraftIds ?? [],
-  };
 }

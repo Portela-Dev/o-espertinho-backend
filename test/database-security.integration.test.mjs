@@ -18,6 +18,7 @@ test('PostgreSQL real: provisionamento preserva dados e restringe runtime, DDL e
   const appUrl=new URL(ownerUrl);appUrl.username=role;appUrl.password='test-only-random-application-password';
   await assert.rejects(()=>provisionDatabase(owner,ownerUrl.href));
   await provisionDatabase(owner,appUrl.href);app=createDatabase(appUrl.href);await assertRestrictedDatabase(app);
+  assert.equal((await app.query("SELECT catalog_category_key(ARRAY['Eletrônicos','Fones']) AS key")).rows[0].key,'eletronico>fone');
   const seed=await readAdminSeed();
   const previewCli=spawnSync(process.execPath,['dist/admin-seed-cli.js','--dry-run'],{env:{...process.env,MIGRATION_DATABASE_URL:ownerUrl.href},encoding:'utf8',windowsHide:true,timeout:20000});
   assert.equal(previewCli.status,0,previewCli.stderr);assert.equal(JSON.parse(previewCli.stdout).status,'preview');

@@ -46,7 +46,7 @@ export function sourceData(row: any) {
     title: String(d.title ?? d.name ?? '').slice(0, 500),
     brand: String(d.brand ?? '').slice(0, 120),
     description: String(d.description ?? '').slice(0, 6000),
-    specifications: (d.specifications ?? []).slice(0, 80).map((s: any) => ({
+    specifications: (Array.isArray(d.specifications) ? d.specifications.filter((s: any) => s && typeof s === 'object') : []).slice(0, 80).map((s: any) => ({
       name: String(s.name).slice(0, 100),
       value: String(s.value).slice(0, 500),
     })),
