@@ -509,7 +509,7 @@ function resolverDefinitions(): [string, string, string, any?][] {
     [
       'post',
       '/extension/catalog/resolver/complete',
-      'Validar evidências e aplicar ou excluir; não publica.',
+      'Identificar tipos por IA, validar evidências e catalogar/categorizar todos os itens; não publica.',
       completeInput,
     ],
     [

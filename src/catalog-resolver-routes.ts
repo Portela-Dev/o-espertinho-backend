@@ -148,7 +148,7 @@ export function registerResolverAdmin(app: Express, db: Database) {
       .object({
         runId: z.uuid(),
         status: z
-          .enum(['', 'accepted', 'excluded', 'failed', 'queued', 'leased'])
+          .enum(['', 'accepted', 'excluded', 'failed', 'queued', 'leased', 'skipped'])
           .default(''),
       })
       .parse(req.query);
