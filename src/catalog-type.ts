@@ -40,26 +40,29 @@ export function policyChoices(policies: IdentityPolicy[], offer: ReturnType<type
   const score = (p: IdentityPolicy) => canonical(p.name + ' ' + p.terms.join(' ')).split(' ').filter(w => words.has(w)).length;
   return [...policies].sort((a,b) => score(b)-score(a) || a.id.localeCompare(b.id)).slice(0, 30);
 }
+async function storedPolicy(c: Pick<Database,'query'>, id: string) {
+  const row = (await c.query('SELECT * FROM catalog_identity_policies WHERE id=$1 AND enabled FOR SHARE', [id])).rows[0];
+  if (!row) throw new HttpError(409, 'A política deste tipo foi alterada ou desativada no admin.');
+  return { ...row.definition, id: row.id, version: row.version } as IdentityPolicy;
+}
 async function choosePolicy(c: Pick<Database,'query'>, context: any, id: string, proposed: unknown) {
   const chosen = context.policies.find((p: IdentityPolicy) => p.id === id);
   if (!chosen || proposed) throw new HttpError(400, 'Escolha somente uma política oferecida no contexto.');
-  const row = (await c.query('SELECT * FROM catalog_identity_policies WHERE id=$1 AND enabled FOR SHARE', [id])).rows[0];
-  if (!row || row.version !== chosen.version) throw new HttpError(409, 'Política alterada durante a identificação do tipo.');
-  return { ...row.definition, id: row.id, version: row.version } as IdentityPolicy;
+  const policy = await storedPolicy(c,id);
+  if (policy.version !== chosen.version) throw new HttpError(409, 'Política alterada durante a identificação do tipo.');
+  return policy;
 }
 async function createPolicy(c: Pick<Database,'query'>, proposed: z.infer<typeof policyInput> | null, mode: string) {
   if (!proposed || proposed.categoryId || proposed.attributes.length > 8)
     throw new HttpError(400, 'A nova política precisa ser limitada a oito atributos e sem categoria fixa.');
   const existing = (await c.query('SELECT * FROM catalog_identity_policies WHERE enabled ORDER BY id')).rows
     .find(p => canonical(p.definition.name) === canonical(proposed.name));
-  if (existing) return { ...existing.definition, id: existing.id, version: existing.version } as IdentityPolicy;
+  if (existing) return storedPolicy(c,existing.id);
   const definition = { ...proposed, categoryId: null, priority: 0 };
   const id = 'ai-' + digest(canonical(definition.name)).slice(0,24);
   if (mode === 'shadow') return { ...definition, id, version: 1 };
   await c.query('INSERT INTO catalog_identity_policies(id,definition) VALUES($1,$2) ON CONFLICT(id) DO NOTHING', [id, JSON.stringify(definition)]);
-  const row = (await c.query('SELECT * FROM catalog_identity_policies WHERE id=$1 AND enabled FOR SHARE', [id])).rows[0];
-  if (!row) throw new HttpError(409, 'A política deste tipo foi desativada no admin.');
-  return { ...row.definition, id, version: row.version } as IdentityPolicy;
+  return storedPolicy(c,id);
 }
 export async function inferCatalogPolicy(c: Pick<Database, 'query'>, context: any, raw: unknown, mode: string) {
   const v = typeDecision.parse(raw);

@@ -379,6 +379,8 @@ test('preparação incremental, reutilização global, cache e candidatos incomp
   r = await complete(f, run, first.item, input, { model: 'fixture', tokens: 15 });
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.equal(r.body.outcome, 'matching');
+  const replay = await complete(f, run, first.item, input, { model:'fixture', tokens:15 });
+  assert.deepEqual(replay.body, r.body);
   first = await claim(f, run);
   assert.equal(first.item.context.stage, 'match');
   r = await complete(f, run, first.item, {productId,reason:'Mesmo título/modelo'}, {model:'fixture',tokens:15});

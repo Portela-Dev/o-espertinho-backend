@@ -68,3 +68,11 @@ test('título tem prioridade: dados ausentes geram identidade sem inventar RAM o
 test('resposta antiga de exclusão não gera estado negativo nem bloqueia o cadastro',()=>{
  const p=defaultPolicies.find(p=>p.id==='smartphone');const value=catalogIdentity({policyId:p.id,facts:{},exclude:true,reason:'Dados ausentes'},sourceData({title:'Celular sem especificações'}),p,'link');assert.ok(value.fingerprint);assert.equal(value.exclude,false);
 });
+test('política equivalente por nome é reutilizada sem sobrescrever a regra já cadastrada',async t=>{
+ const f=await catalogFixture(t);await active(f);await seed(f);const run=await start(f),{item}=await claim(f,run);
+ const result=await complete(f,run,item,{...typeDecision,policy:{...definition,name:'smartphones'}});
+ assert.equal(result.identity.policyId,'smartphone');
+ assert.equal((await f.db.query('SELECT count(*)::int AS n FROM catalog_identity_policies')).rows[0].n,3);
+ const policy=(await f.db.query("SELECT definition FROM catalog_identity_policies WHERE id='smartphone'")).rows[0].definition;
+ assert.equal(policy.name,'Smartphones');assert.ok(policy.attributes.some(a=>a.key==='ram'));
+});

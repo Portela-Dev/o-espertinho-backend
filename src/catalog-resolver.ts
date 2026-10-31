@@ -217,12 +217,32 @@ async function finishItem(c: Query, item: any, status: string, decision: any) {
     [item.id, status, JSON.stringify(decision)],
   );
 }
+async function saveStep(c: Query, item: any, result: any) {
+  if (result.outcome === 'matching') {
+    await c.query('UPDATE catalog_resolver_items SET decision=$2 WHERE id=$1', [item.id, JSON.stringify(result)]);
+    return;
+  }
+  await finishItem(c, item, 'accepted', result);
+}
 async function contextFor(c: Query, run: any, link: any) {
   const settings = (
       await c.query('SELECT * FROM review_ai_settings WHERE id=true')
     ).rows[0],
     policies = await resolverPolicies(c);
-  if (run.task === 'category') {
+  if (run.task === 'category') return categoryContext(c,run,link,settings,policies);
+  const offer = catalogOffer(link),
+    policy = selectPolicy(offer, policies);
+  return {
+    stage: policy ? 'identity' : 'type',
+    offer,
+    policy,
+    policies: policy ? undefined : policyChoices(policies, offer),
+    prompt: settings.product_prompt,
+    promptVersion: settings.product_version,
+    enabled: settings.product_enabled,
+  };
+}
+async function categoryContext(c: Query, run: any, link: any, settings: any, policies: IdentityPolicy[]) {
     const draft = await categoryDraft(c, run, link);
     if (!draft) return { skip: true };
     if (draft.product_id) return { skip: true, productId: draft.product_id };
@@ -270,19 +290,8 @@ async function contextFor(c: Query, run: any, link: any) {
       promptVersion: settings.category_version,
       enabled: settings.category_enabled,
     };
-  }
-  const offer = catalogOffer(link),
-    policy = selectPolicy(offer, policies);
-  return {
-    stage: policy ? 'identity' : 'type',
-    offer,
-    policy,
-    policies: policy ? undefined : policyChoices(policies, offer),
-    prompt: settings.product_prompt,
-    promptVersion: settings.product_version,
-    enabled: settings.product_enabled,
-  };
 }
+
 export async function claimResolver(
   db: Database,
   actor: CatalogActor,
@@ -614,6 +623,7 @@ async function acceptProductStep(c: Query, run: any, item: any, link: any, conte
   if (context.stage === 'type') {
     const inferred = await inferCatalogPolicy(c, context, raw, run.mode);
     Object.assign(context, { stage: 'identity', policy: inferred.policy, policies: undefined, ephemeralPolicy: inferred.ephemeralPolicy });
+    await audit(c, run.created_by, 'catalog_resolver.type_identified', inferred.policy.id);
     decision = inferred.decision;
     await c.query('UPDATE catalog_resolver_items SET context=$2 WHERE id=$1', [item.id, JSON.stringify(context)]);
   }
@@ -751,8 +761,7 @@ export async function completeResolver(
         ? await acceptProductStep(c, run, item, link, context, v.decision)
         : await acceptCategory(c, run, item, link, context, v.decision);
     const resolved = result.outcome !== 'matching';
-    if (resolved)
-      await finishItem(c, item, 'accepted', result);
+    await saveStep(c, item, result);
     if (run.mode === 'active' && resolved)
       await c.query(
         "UPDATE discovery_links SET catalog_resolution='{}',ai_resolution='{}' WHERE id=$1",
