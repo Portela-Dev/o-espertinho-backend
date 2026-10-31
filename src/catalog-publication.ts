@@ -36,7 +36,6 @@ async function publishCandidate(
     if (!link) throw new HttpError(404, 'Link não encontrado.');
     if (link.published_offer_id)
       return { offerId: link.published_offer_id, alreadyPublished: true };
-    if(link.catalog_resolution?.outcome==='excluded')throw new HttpError(409,'Oferta excluída da resolução automática. Reprocesse com dados suficientes ou confirme uma revisão manual antes de publicar.');
     if (invalidAiReview(link))
       throw new HttpError(
         409,

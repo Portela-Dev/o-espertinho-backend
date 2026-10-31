@@ -1,35 +1,22 @@
-# Resolvedor estruturado de catálogo
+# Catalogação de todos os tipos de produto
 
-A migration 043 é aditiva; preserva IDs, vínculos e histórico. O modo inicial é **simulação**. Credenciais do provedor permanecem na extensão. Publicação continua manual.
+O fluxo ativo cataloga e categoriza todos os itens com link de afiliado, sem decisões automáticas de inválido, revisão ou exclusão. Publicação permanece manual. Os estados de excluído de execuções antigas são apenas histórico, não bloqueiam publicação ou reprocessamento.
 
-## Configurar e operar
+O título prevalece sobre informações conflitantes da descrição/ficha. Atributos ausentes não são inventados: a identidade usa os fatos comprovados e o nome baseado no título quando a identidade tipada é parcial. Modelos, RAM, armazenamento e tela explicitamente distintos continuam diferenciando produtos; cor, tensão e tamanho de roupa/calçado isoladamente não distinguem. Kits mantêm identidade própria por anúncio.
 
-1. Em Revisão de ofertas → Configurações de IA, confira o modo de operação.
-2. Edite políticas por tipo de produto: termos no título, prioridade, atributos obrigatórios, aliases, unidades, equivalências e categoria padrão opcional. Não há regras por marketplace. Kits podem exigir identidade exclusiva por anúncio.
-3. Prepare os índices existentes. A fila incremental é alimentada por inserção/alteração relevante de produto e mudança de políticas; itens desconhecidos também ficam registrados e não são varridos novamente a cada execução. O passo 4 também faz isso incrementalmente; identidades incompletas conhecidas são analisadas uma vez, sem mudar nome, categoria, ID ou vínculos do produto antigo. Colisões antigas nunca causam união automática.
-4. Execute catalogação na extensão. A identidade é extraída por regras ou por uma chamada curta de IA com evidências. A busca global usa fingerprint e índice textual; não envia o catálogo inteiro ao modelo. Um candidato antigo ainda incompleto impede criação potencialmente duplicada.
-5. Execute categorização. Política pode definir categoria; caso contrário a IA recebe candidatos indexados e sugestão de mapeamento, sem tratá-la como verdade. Uma árvore equivalente é reaproveitada; novos produtos só ficam definitivos após categoria.
-6. Confira resultados paginados e métricas. Use avaliação da amostra para registrar vínculo incorreto, duplicata, categoria errada e exclusão indevida. Cobertura/velocidade não comprovam precisão.
-7. Só após validar uma amostra real, escolha **ativo**. O modo anterior permanece disponível para retorno. Ativar não aplica retroativamente resultados da simulação.
+## Etapas
 
-## Garantias e limites
+1. Reutilizar a política correspondente ao título. Sem correspondência ou com ambiguidade de tipo, a IA escolhe entre políticas oferecidas ou propõe uma nova política reutilizável e seus fatos na mesma resposta.
+2. O backend valida estrutura, unidades, evidências, versão, tipo escolhido e autorização. Políticas novas recebem identificador determinístico por nome, sem sobrescrever políticas existentes. No modo de simulação, políticas, produtos e categorias não são criados.
+3. Identidade indexada resolve equivalências exatas. Quando houver candidatos antigos incompletos, uma comparação de IA com até 20 produtos e rascunhos recém-criados escolhe um equivalente ou cria um produto. Não existe preparação por IA de todo o inventário ou uma chamada por candidato.
+4. A categorização sempre reutiliza ou cria uma árvore. Mapeamentos e categorias existentes compõem o contexto. Produtos equivalentes reaproveitam categoria e vínculo existentes.
 
-- Aceito, excluído com motivo ou falha técnica com repetição limitada. O motor novo não produz `invalid` nem `needs_review`. Não significa aproveitar todos os anúncios: sem evidência suficiente, exclui. Intervenções manuais continuam possíveis e removem a exclusão.
-- Atributos obrigatórios configurados definem identidade. Cor, tensão e tamanho de roupa isoladamente não devem ser atributos de identidade. Modelos, RAM física, armazenamento e tela podem ser. A seleção de preço mínimo de um intervalo não prova variante selecionada.
-- `fingerprint` inclui tipo, versão da política e atributos normalizados; kits incluem anúncio. Rascunho único impede criação duplicada em concorrência. Produtos antigos com mesma identidade permanecem separados e impedem escolha automática ambígua.
-- Cache reutiliza fatos apenas com fonte, política e prompt compatíveis. Antes de gravar, revalida fonte, política, prompt, rascunho e vínculo. Mudanças alheias no catálogo não invalidam o lote inteiro.
-- Reservas de cinco minutos, exclusão mútua por link/produto, resultados idempotentes, pausa/retomada/cancelamento persistentes e tentativas limitadas. Reabrir a extensão retoma a execução pendente do usuário. Sem agendamento.
-- Concorrência inicial 1, configurável até 2; limita chamadas do modelo e não altera limites do navegador dos marketplaces. Progresso conta links, preparação tem métrica separada.
-- Métricas de tokens dependem do relatório do provedor; não equivalem à cota real da assinatura. Não usa Batch API nem presume parâmetros especiais aceitos pelo login OAuth.
-- Normalização é determinística, mas a interpretação semântica continua sujeita a erro. Validar evidência literal evita atributos sem fonte; a avaliação de amostra é necessária antes de ativar.
+Criar um tipo não reenfileira todos os produtos. Alterar uma política reenfileira somente identidades daquele tipo; demais candidatos são tratados sob demanda. Índices com identidade já confirmada são preservados quando o título limpo deixa de conter os termos da política, desde que fonte e versão continuem iguais.
 
-## Testes e publicação
+## Operação e segurança
 
-Testes de identidade/evidências/unidades/kits, pipeline em memória, contratos/CSRF/permissões, cache, reenvio, fonte alterada, modo simulação, índices antigos, paginação e integração real concorrente no PostgreSQL descartável do CI. O banco real nunca é usado para os testes.
+Requer migration 044 e extensão com protocolo 2. Publicar backend antes da extensão/frontend. A extensão antiga pode não entender as etapas novas; recarregue configurações e inicie uma execução nova após atualizar. Credenciais permanecem locais na extensão. IDs de produtos/políticas/categorias são restritos aos candidatos e versões oferecidos; fontes alteradas invalidam o contexto e dados inventados são recusados sem gravações parciais. Política gerada não pode definir categoria fixa nem prioridade administrativa.
 
-Publicar o backend/migration antes dos clientes. Nenhum deploy faz parte desta entrega. O Docker local estava indisponível durante a implementação; a validação concorrente real é executada pelo CI. A latência e precisão reais do modelo precisam de amostra com a sessão do administrador; testes automatizados não gastam sua assinatura.
-# Correção da preparação sob demanda
+Reservas, retomada, cancelamento, limites de concorrência e idempotência permanecem. Falhas técnicas têm tentativas limitadas e métricas; falha técnica não é decisão de negócio sobre o produto. Configurações de IA desativadas ou ausência de conexão/modelo interrompem a execução com mensagem, sem marcar o anúncio como excluído.
 
-As execuções de catalogação não incluem mais todos os produtos antigos com identidade incompleta. Primeiro o link recebe uma identidade; somente os candidatos encontrados pela busca indexada (até 20) podem gerar preparação por IA. Essa dependência é preparada uma vez na execução e o link reutiliza sua identidade em cache. Falhas/ambiguidades dos candidatos continuam impedindo duplicação; produtos sem relação não atrasam o lote. Reservas antigas de preparação global são descartadas sem análise quando retomadas.
-
-Erros de preparação agora contabilizam chamadas, tempo e motivo sanitizado, como os erros dos links. O modo de simulação continua sem gravar vínculos. Alterar para ativo exige encerrar execuções antigas e iniciar uma nova, pois a configuração é congelada por execução.
+Migration 044 libera marcações antigas sem apagar histórico. A liberação pontual solicitada em produção preservou os recibos antigos, invalidando apenas seu reaproveitamento. Nenhum deploy é feito ao abrir as PRs.
