@@ -13,6 +13,7 @@ END $$;
 ALTER TABLE catalog_resolver_items DROP CONSTRAINT catalog_resolver_items_status_check;
 ALTER TABLE catalog_resolver_items ADD CONSTRAINT catalog_resolver_items_status_check
  CHECK(status IN ('queued','leased','accepted','excluded','failed','skipped'));
+CREATE INDEX catalog_draft_search ON review_ai_product_drafts USING gin(to_tsvector('simple',coalesce(name,'')||' '||coalesce(brand,''))) WHERE product_id IS NULL AND NOT personalized_kit;
 -- Release old business rejections without deleting processing history.
 UPDATE discovery_links SET catalog_resolution='{}'::jsonb,enrichment_version=enrichment_version+1
  WHERE catalog_resolution->>'outcome'='excluded';

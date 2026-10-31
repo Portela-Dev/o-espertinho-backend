@@ -76,3 +76,14 @@ test('política equivalente por nome é reutilizada sem sobrescrever a regra já
  const policy=(await f.db.query("SELECT definition FROM catalog_identity_policies WHERE id='smartphone'")).rows[0].definition;
  assert.equal(policy.name,'Smartphones');assert.ok(policy.attributes.some(a=>a.key==='ram'));
 });
+test('comparação limitada reutiliza rascunhos recém-criados antes da categorização',async t=>{
+ const f=await catalogFixture(t);await active(f);
+ const data={...offer,title:'Celular Modelo X Azul',brand:'',description:'',specifications:[]};
+ await seed(f,'amazon',data);const run=await start(f),first=await claim(f,run);
+ const one=await complete(f,run,first.item,{policyId:'smartphone',facts:{model:{value:'Modelo X',evidence:'Modelo X'}},name:'Celular Modelo X',reason:'Título'});await claim(f,run);
+ await seed(f,'amazon',{...data,title:'Modelo X Celular Preto'});const secondRun=await start(f),second=await claim(f,secondRun);
+ const two=await complete(f,secondRun,second.item,{policyId:'smartphone',facts:{model:{value:'Modelo X',evidence:'Modelo X'}},name:'Modelo X Celular',reason:'Título'});assert.equal(two.outcome,'matching');
+ const matching=await claim(f,secondRun);const candidate=matching.item.context.candidates.find(p=>p.id===one.draftId);assert.equal(candidate.kind,'draft');
+ const chosen=await complete(f,secondRun,matching.item,{productId:one.draftId,reason:'Mesmo modelo, cor não diferencia'});assert.equal(chosen.draftId,one.draftId);
+ assert.equal((await f.db.query('SELECT count(*)::int AS n FROM review_ai_product_drafts')).rows[0].n,1);
+});

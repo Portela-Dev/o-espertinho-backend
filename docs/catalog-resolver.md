@@ -8,7 +8,7 @@ O título prevalece sobre informações conflitantes da descrição/ficha. Atrib
 
 1. Reutilizar a política correspondente ao título. Sem correspondência ou com ambiguidade de tipo, a IA escolhe entre políticas oferecidas ou propõe uma nova política reutilizável e seus fatos na mesma resposta.
 2. O backend valida estrutura, unidades, evidências, versão, tipo escolhido e autorização. Políticas novas recebem identificador determinístico por nome, sem sobrescrever políticas existentes. No modo de simulação, políticas, produtos e categorias não são criados.
-3. Identidade indexada resolve equivalências exatas. Quando houver candidatos antigos incompletos, uma comparação de IA com até 20 produtos escolhe um equivalente ou cria um produto. Não existe preparação por IA de todo o inventário ou uma chamada por candidato.
+3. Identidade indexada resolve equivalências exatas. Quando houver candidatos antigos incompletos, uma comparação de IA com até 20 produtos e rascunhos recém-criados escolhe um equivalente ou cria um produto. Não existe preparação por IA de todo o inventário ou uma chamada por candidato.
 4. A categorização sempre reutiliza ou cria uma árvore. Mapeamentos e categorias existentes compõem o contexto. Produtos equivalentes reaproveitam categoria e vínculo existentes.
 
 Criar um tipo não reenfileira todos os produtos. Alterar uma política reenfileira somente identidades daquele tipo; demais candidatos são tratados sob demanda. Índices com identidade já confirmada são preservados quando o título limpo deixa de conter os termos da política, desde que fonte e versão continuem iguais.

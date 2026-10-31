@@ -466,7 +466,7 @@ async function candidateProducts(
   c: Query,
   identity: any,
   policy: IdentityPolicy,
-) {
+): Promise<{ exact: any[]; unknown: any[]; draft?: any }> {
   // Exact prepared identities are indexed. Legacy candidates are bounded by brand/model tokens globally, never category.
   const exact = (
     await c.query(
@@ -479,6 +479,9 @@ async function candidateProducts(
       p.source_hash === sourceHash(p) && p.policy_version === policy.version,
   );
   if (valid.length) return { exact: valid, unknown: [] };
+  const draft = (await c.query('SELECT d.*,i.identity,i.policy_version FROM catalog_resolver_drafts i JOIN review_ai_product_drafts d ON d.id=i.draft_id WHERE i.fingerprint=$1 AND d.product_id IS NULL LIMIT 1', [identity.fingerprint])).rows[0];
+  if (draft && draft.identity.name === draft.name && draft.policy_version === policy.version)
+    return { exact:[],unknown:[],draft };
   const preciseTerms = [identity.attrs.brand, identity.attrs.model]
     .filter(Boolean)
     .join(' ');
@@ -486,13 +489,14 @@ async function candidateProducts(
   if (!terms) return { exact: [], unknown: [] };
   const unknown = (
     await c.query(
-      "SELECT p.*,i.identity,i.source_hash,i.policy_version FROM products p LEFT JOIN catalog_product_identities i ON i.product_id=p.id WHERE NOT p.personalized_kit AND to_tsvector('simple',coalesce(p.name,'')||' '||coalesce(p.brand,'')||' '||coalesce(p.model,'')) @@ CASE WHEN $2 THEN plainto_tsquery('simple',$1) ELSE to_tsquery('simple',$1) END ORDER BY ts_rank_cd(to_tsvector('simple',coalesce(p.name,'')||' '||coalesce(p.brand,'')||' '||coalesce(p.model,'')),CASE WHEN $2 THEN plainto_tsquery('simple',$1) ELSE to_tsquery('simple',$1) END) DESC,p.id LIMIT 20",
+      "SELECT p.*,i.identity,i.source_hash,i.policy_version,'product' AS kind,ts_rank_cd(to_tsvector('simple',coalesce(p.name,'')||' '||coalesce(p.brand,'')||' '||coalesce(p.model,'')),CASE WHEN $2 THEN plainto_tsquery('simple',$1) ELSE to_tsquery('simple',$1) END) AS rank FROM products p LEFT JOIN catalog_product_identities i ON i.product_id=p.id WHERE NOT p.personalized_kit AND to_tsvector('simple',coalesce(p.name,'')||' '||coalesce(p.brand,'')||' '||coalesce(p.model,'')) @@ CASE WHEN $2 THEN plainto_tsquery('simple',$1) ELSE to_tsquery('simple',$1) END ORDER BY rank DESC,p.id LIMIT 20",
       [terms, !!preciseTerms],
     )
   ).rows;
+  const drafts = (await c.query("SELECT d.*,i.identity,NULL::text AS source_hash,i.policy_version,'draft' AS kind,ts_rank_cd(to_tsvector('simple',coalesce(d.name,'')||' '||coalesce(d.brand,'')),CASE WHEN $2 THEN plainto_tsquery('simple',$1) ELSE to_tsquery('simple',$1) END) AS rank FROM review_ai_product_drafts d LEFT JOIN catalog_resolver_drafts i ON i.draft_id=d.id WHERE d.product_id IS NULL AND NOT d.personalized_kit AND to_tsvector('simple',coalesce(d.name,'')||' '||coalesce(d.brand,'')) @@ CASE WHEN $2 THEN plainto_tsquery('simple',$1) ELSE to_tsquery('simple',$1) END ORDER BY rank DESC,d.id LIMIT 20", [terms,!!preciseTerms])).rows;
   return {
     exact: [],
-    unknown: unknown.filter(
+    unknown: [...unknown,...drafts].sort((a,b)=>b.rank-a.rank || a.id.localeCompare(b.id)).slice(0,20).filter(
       (p) =>
         !p.identity?.fingerprint ||
         p.source_hash !== sourceHash(p) ||
@@ -519,8 +523,10 @@ async function acceptProduct(
   );
   const policy = context.policy as IdentityPolicy,
     candidates = policy.exclusive
-      ? { exact: [], unknown: [] }
+      ? { exact: [], unknown: [], draft: undefined }
       : await candidateProducts(c, identity, policy);
+  if (candidates.draft)
+    return acceptDraftMatch(c,run,link,{...context,identity},{id:candidates.draft.id,sourceHash:sourceHash(candidates.draft)});
   const known = candidates.exact[0];
   if (!known && candidates.unknown.length)
     return beginMatching(c, item, context, identity, candidates.unknown);
@@ -598,7 +604,7 @@ async function createProductDraft(c: Query, run: any, link: any, context: any, i
 }
 async function beginMatching(c: Query, item: any, context: any, identity: any, candidates: any[]) {
   const next = { ...context, stage: 'match', policies: undefined, identity,
-    candidates: candidates.map(p => ({ id: p.id, title: p.name, brand: p.brand ?? '', description: String(p.description ?? '').slice(0, 300), sourceHash: sourceHash(p) })) };
+    candidates: candidates.map(p => ({ id: p.id, kind:p.kind, title: p.name, brand: p.brand ?? '', description: String(p.description ?? '').slice(0, 300), sourceHash: sourceHash(p) })) };
   await c.query("UPDATE catalog_resolver_items SET status='queued',lease_until=NULL,attempts=greatest(0,attempts-1),context=$2 WHERE id=$1", [item.id, JSON.stringify(next)]);
   return { outcome: 'matching', applied: false, identity };
 }
@@ -607,6 +613,7 @@ async function acceptMatch(c: Query, run: any, link: any, context: any, raw: unk
   if (!v.productId) return createProductDraft(c, run, link, context, context.identity);
   const candidate = context.candidates.find((p: any) => p.id === v.productId);
   if (!candidate) throw new HttpError(400, 'Produto fora dos candidatos da análise.');
+  if (candidate.kind === 'draft') return acceptDraftMatch(c,run,link,context,candidate);
   const product = (await c.query('SELECT * FROM products WHERE id=$1 FOR SHARE', [v.productId])).rows[0];
   if (!product || sourceHash(product) !== candidate.sourceHash) throw new HttpError(409, 'Produto alterado durante a comparação.');
   if (run.mode === 'active') {
@@ -616,6 +623,19 @@ async function acceptMatch(c: Query, run: any, link: any, context: any, raw: unk
     await assignCatalogProduct(c, link.id, product, run.created_by);
   }
   return { outcome: 'linked', applied: run.mode === 'active', productId: product.id, identity: context.identity, reason: v.reason };
+}
+async function acceptDraftMatch(c: Query, run: any, link: any, context: any, candidate: any) {
+  const draft = (await c.query('SELECT * FROM review_ai_product_drafts WHERE id=$1 FOR UPDATE', [candidate.id])).rows[0];
+  if (!draft || sourceHash(draft) !== candidate.sourceHash) throw new HttpError(409, 'Rascunho alterado durante a comparação.');
+  if (run.mode === 'active') {
+    if (draft.product_id) {
+      const product = (await c.query('SELECT * FROM products WHERE id=$1',[draft.product_id])).rows[0];
+      await assignCatalogProduct(c,link.id,product,run.created_by);
+      return { outcome:'linked',applied:true,productId:product.id,identity:context.identity };
+    }
+    await c.query('UPDATE discovery_links SET product_draft_id=$2,enrichment_version=enrichment_version+1 WHERE id=$1',[link.id,draft.id]);
+  }
+  return { outcome:'drafted',applied:run.mode==='active',draftId:draft.id,identity:context.identity };
 }
 async function acceptProductStep(c: Query, run: any, item: any, link: any, context: any, raw: unknown) {
   if (context.stage === 'match') return acceptMatch(c, run, link, context, raw);
