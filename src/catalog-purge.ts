@@ -66,7 +66,7 @@ async function transaction<T>(
     await c.query("SET LOCAL statement_timeout='30s'");
     if (write)
       await c.query(
-        'LOCK TABLE products,offers,discovery_links,review_ai_product_drafts,offer_import_previews,extension_catalog_runs,extension_catalog_items,review_ai_suggestions,offer_price_history,favorites,collection_items,click_events,discovery_link_sources,audit_logs IN SHARE ROW EXCLUSIVE MODE',
+        'LOCK TABLE products,offers,discovery_links,review_ai_product_drafts,offer_import_previews,extension_catalog_runs,extension_catalog_items,catalog_resolver_runs,catalog_resolver_items,review_ai_suggestions,offer_price_history,favorites,collection_items,click_events,discovery_link_sources,audit_logs IN SHARE ROW EXCLUSIVE MODE',
       );
     const result = await work(c);
     await c.query('COMMIT');
@@ -86,7 +86,7 @@ async function transaction<T>(
 async function assertIdle(c: Query) {
   const active = (
     await c.query(
-      "SELECT EXISTS(SELECT 1 FROM extension_catalog_runs WHERE status NOT IN ('completed','failed','cancelled') AND expires_at>clock_timestamp()) OR EXISTS(SELECT 1 FROM review_ai_suggestions WHERE suggestion IS NULL AND expires_at>clock_timestamp()) AS active",
+      "SELECT EXISTS(SELECT 1 FROM extension_catalog_runs WHERE status NOT IN ('completed','failed','cancelled') AND expires_at>clock_timestamp()) OR EXISTS(SELECT 1 FROM catalog_resolver_items i JOIN catalog_resolver_runs r ON r.id=i.run_id WHERE r.status='running' AND i.status='leased' AND i.lease_until>clock_timestamp()) AS active",
     )
   ).rows[0].active;
   if (active)

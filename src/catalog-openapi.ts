@@ -4,7 +4,7 @@ import { categoryOperation, categoryApply } from './category-contracts.js';
 import { reviewStates } from './review-status.js';
 import { publishBatchInput } from './catalog-publication.js';
 import { purgeCriteria, purgeExecute } from './catalog-purge.js';
-import { reviewAiInput, reviewAiResult } from './review-ai.js';
+import { reviewAiInput } from './review-ai.js';
 import { z } from 'zod';
 import { catalogSettings } from './catalog-settings.js';
 import { startCatalogInput, actionInput } from './catalog-contracts.js';
@@ -68,39 +68,6 @@ export function catalogApiPaths() {
       'get',
       '/extension/catalog/ai/config',
       'Configurações e contadores de categorias/produtos confirmados',
-    ],
-    [
-      'get',
-      '/extension/catalog/ai/inventory',
-      'Inventário completo e paginado de categorias, produtos e rascunhos, com revisão consistente',
-    ],
-    [
-      'get',
-      '/extension/catalog/ai/queue',
-      'Fila elegível; retryReview=true seleciona somente decisões em revisão para reprocessamento explícito',
-    ],
-    [
-      'post',
-      '/extension/catalog/ai/context',
-      'Reservar contexto e instruções configuradas sem credenciais OpenAI',
-      z.strictObject({
-        id: z.uuid(),
-        task: z.enum(['category', 'product']),
-        inventoryRevision: z.string().regex(/^\d+$/),
-        retryReview: z.boolean().default(false),
-      }),
-    ],
-    [
-      'post',
-      '/extension/catalog/ai/suggestions',
-      'Aplicar decisão válida; necessidades de revisão e anúncios inválidos não aplicam dados nem publicam',
-      reviewAiResult,
-    ],
-    [
-      'post',
-      '/extension/catalog/ai/release',
-      'Liberar análise cancelada ou com falha',
-      z.strictObject({ requestId: z.uuid() }),
     ],
     [
       'get',
@@ -298,8 +265,7 @@ function pathsForOperation(
     });
   if (
     path === '/extension/catalog/stats' ||
-    path === '/extension/catalog/ai/config' ||
-    path === '/extension/catalog/ai/queue'
+    path === '/extension/catalog/ai/config'
   )
     parameters.push({
       name: 'marketplaceId',
@@ -313,52 +279,6 @@ function pathsForOperation(
       in: 'query',
       schema: { type: 'string', enum: ['true', 'false'], default: 'false' },
     });
-  if (path === '/extension/catalog/ai/queue')
-    parameters.push(
-      {
-        name: 'task',
-        in: 'query',
-        required: true,
-        schema: { type: 'string', enum: ['category', 'product'] },
-      },
-      {
-        name: 'limit',
-        in: 'query',
-        schema: { type: 'integer', minimum: 1, maximum: 10000, default: 100 },
-      },
-      {
-        name: 'retryReview',
-        in: 'query',
-        schema: { type: 'string', enum: ['true', 'false'], default: 'false' },
-      },
-    );
-  if (path === '/extension/catalog/ai/inventory')
-    parameters.push(
-      {
-        name: 'kind',
-        in: 'query',
-        required: true,
-        schema: {
-          type: 'string',
-          enum: ['categories', 'products', 'drafts'],
-        },
-      },
-      {
-        name: 'cursor',
-        in: 'query',
-        schema: { type: 'string', format: 'uuid' },
-      },
-      {
-        name: 'revision',
-        in: 'query',
-        schema: { type: 'string', pattern: '^[0-9]+$' },
-      },
-      {
-        name: 'limit',
-        in: 'query',
-        schema: { type: 'integer', minimum: 1, maximum: 500, default: 250 },
-      },
-    );
   let security: any = [
     {
       SessionCookie: [],
@@ -455,11 +375,11 @@ function resolverDefinitions(): [string, string, string, any?][] {
     [
       'put',
       base + '/settings',
-      'Alterar modo legacy/shadow/active e tentativas; XSRF e login recente.',
+      'Alterar modo shadow/active e simultaneidade; XSRF e login recente.',
       z.strictObject({
         version: z.number().int().positive(),
-        mode: z.enum(['legacy', 'shadow', 'active']),
-        maxAttempts: z.number().int().min(1).max(5),
+        mode: z.enum(['shadow', 'active']),
+        maxAttempts: z.number().int().min(1).max(5).optional(),
         concurrency: z.number().int().min(1).max(2),
       }),
     ],
