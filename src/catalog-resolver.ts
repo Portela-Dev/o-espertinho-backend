@@ -153,11 +153,8 @@ export async function startResolver(
       `INSERT INTO catalog_resolver_items(id,run_id,link_id) SELECT gen_random_uuid(),$1,l.id FROM discovery_links l WHERE l.marketplace_id=$2 AND l.status='pending' AND l.published_offer_id IS NULL AND l.extraction_status='completed' AND (($3='product' AND l.product_id IS NULL AND l.product_draft_id IS NULL) OR ($3='category' AND l.product_id IS NULL AND (l.product_draft_id IS NOT NULL OR ($5='shadow' AND EXISTS(SELECT 1 FROM catalog_resolver_receipts receipt WHERE receipt.link_id=l.id AND receipt.task='product' AND receipt.result->>'mode'='shadow' AND receipt.result->>'outcome'='drafted'))))) ORDER BY l.first_seen_at,l.id LIMIT $4`,
       [run.id, v.marketplaceId, v.task, v.limit, run.mode],
     );
-    if (v.task === 'product')
-      await c.query(
-        `INSERT INTO catalog_resolver_items(id,run_id,product_id) SELECT gen_random_uuid(),$1,p.id FROM catalog_product_identities i JOIN products p ON p.id=i.product_id JOIN catalog_identity_policies pol ON pol.id=i.policy_id WHERE i.fingerprint IS NULL AND coalesce(i.identity->>'preparation','')<>'completed' AND pol.enabled ORDER BY p.id`,
-        [run.id],
-      );
+    // Existing products are prepared only when an actual link finds them as
+    // candidates. A marketplace run must never first analyze the whole catalog.
     await audit(c, actor.id, 'catalog_resolver.started', run.id);
     return run;
   });
@@ -494,7 +491,7 @@ async function candidateProducts(
   if (!terms) return { exact: [], unknown: [] };
   const unknown = (
     await c.query(
-      "SELECT p.*,i.identity,i.source_hash FROM products p LEFT JOIN catalog_product_identities i ON i.product_id=p.id WHERE NOT p.personalized_kit AND to_tsvector('simple',coalesce(p.name,'')||' '||coalesce(p.brand,'')||' '||coalesce(p.model,'')) @@ plainto_tsquery('simple',$1) ORDER BY p.id LIMIT 21",
+      "SELECT p.*,i.identity,i.source_hash,i.policy_version FROM products p LEFT JOIN catalog_product_identities i ON i.product_id=p.id WHERE NOT p.personalized_kit AND to_tsvector('simple',coalesce(p.name,'')||' '||coalesce(p.brand,'')||' '||coalesce(p.model,'')) @@ plainto_tsquery('simple',$1) ORDER BY p.id LIMIT 21",
       [terms],
     )
   ).rows;
@@ -538,6 +535,8 @@ async function acceptProduct(
     candidates = policy.exclusive
       ? { exact: [], unknown: [] }
       : await candidateProducts(c, identity, policy);
+  if (await prepareCandidates(c, run, item, candidates.unknown, policy))
+    return { outcome: 'preparing', applied: false, identity };
   if (candidates.exact.length > 1 || candidates.unknown.length)
     return excluded(
       c,
@@ -621,6 +620,49 @@ async function acceptProduct(
     draftId: draft.id ?? null,
     identity,
   };
+}
+async function prepareCandidates(
+  c: Query,
+  run: any,
+  item: any,
+  candidates: any[],
+  policy: IdentityPolicy,
+) {
+  // An overflowing or ambiguous candidate set is not an invitation to scan it.
+  if (!candidates.length || candidates.length > 20) return false;
+  const policies = await resolverPolicies(c);
+  let pending = false;
+  for (const product of candidates) {
+    if (selectPolicy(sourceData(product), policies)?.id !== policy.id) continue;
+    if (
+      product.source_hash === sourceHash(product) &&
+      product.policy_version === policy.version &&
+      product.identity?.preparation === 'completed'
+    ) continue;
+    const previous = (
+      await c.query(
+        'SELECT status FROM catalog_resolver_items WHERE run_id=$1 AND product_id=$2 LIMIT 1',
+        [run.id, product.id],
+      )
+    ).rows[0];
+    if (previous) {
+      pending ||= ['queued', 'leased'].includes(previous.status);
+      continue;
+    }
+    // A failed/incomplete preparation is tried at most once per run. A later
+    // run can retry it without creating another identity or product.
+    await c.query(
+      'INSERT INTO catalog_resolver_items(id,run_id,product_id,context) VALUES($1,$2,$3,$4)',
+      [randomUUID(), run.id, product.id, JSON.stringify({ dependency: true })],
+    );
+    pending = true;
+  }
+  if (pending)
+    await c.query(
+      "UPDATE catalog_resolver_items SET status='queued',lease_until=NULL,attempts=greatest(0,attempts-1) WHERE id=$1",
+      [item.id],
+    );
+  return pending;
 }
 const categoryResult = z.strictObject({
   categoryId: z.uuid().nullable(),
@@ -714,6 +756,7 @@ export const completeInput = z.strictObject({
   leaseId: z.uuid(),
   decision: z.unknown().optional(),
   error: z.enum(['technical', 'cancelled']).optional(),
+  errorCode: z.enum(['analysis_failed', 'result_rejected']).optional(),
   model: z.string().max(200).default(''),
   tokens: z.number().int().min(0).max(1000000).default(0),
   elapsedMs: z.number().int().min(0).max(300000).default(0),
@@ -760,9 +803,10 @@ export async function completeResolver(
       run.task === 'product'
         ? await acceptProduct(c, run, item, link, context, v.decision)
         : await acceptCategory(c, run, item, link, context, v.decision);
-    if (result.outcome !== 'excluded')
+    const resolved = !['excluded', 'preparing'].includes(result.outcome);
+    if (resolved)
       await finishItem(c, item, 'accepted', result);
-    if (run.mode === 'active' && result.outcome !== 'excluded')
+    if (run.mode === 'active' && resolved)
       await c.query(
         "UPDATE discovery_links SET catalog_resolution='{}',ai_resolution='{}' WHERE id=$1",
         [link.id],
@@ -791,6 +835,13 @@ export async function completeResolver(
 }
 
 async function claimPreparation(c: Query, run: any, item: any) {
+  // Discard the obsolete global preparation queue on resumed pre-fix runs.
+  if (!item.context?.dependency) {
+    await finishItem(c, item, 'excluded', {
+      outcome: 'excluded', reason: 'Preparação global substituída por candidatos sob demanda.',
+    });
+    return { run: await runSummary(c, run), advance: true };
+  }
   const product = (
       await c.query('SELECT * FROM products WHERE id=$1 FOR UPDATE', [
         item.product_id,
@@ -830,6 +881,7 @@ async function claimPreparation(c: Query, run: any, item: any) {
       promptVersion: settings.product_version,
       enabled: settings.product_enabled,
       preparation: true,
+      dependency: true,
     };
   const lease = randomUUID();
   await c.query(
@@ -877,11 +929,7 @@ async function completePreparation(
       'Produto ou política alterada durante a preparação.',
     );
   if (v.error) {
-    await c.query(
-      "UPDATE catalog_resolver_items SET status=$2,lease_id=NULL,lease_until=NULL,retry_at=clock_timestamp()+interval '2 seconds' WHERE id=$1",
-      [item.id, item.attempts >= settings.max_attempts ? 'failed' : 'queued'],
-    );
-    return { outcome: 'retry' };
+    return technicalRetry(c, item, v, settings);
   }
   const identity = validateIdentity(
       v.decision,
@@ -930,7 +978,10 @@ async function technicalRetry(c: Query, item: any, v: any, settings: any) {
       failed ? 'failed' : 'queued',
       JSON.stringify({
         outcome: 'technical_retry',
-        reason: 'Falha técnica; repetição automática limitada.',
+        reason: v.errorCode === 'result_rejected'
+          ? 'O resultado não pôde ser validado ou salvo; repetição limitada.'
+          : 'A análise de IA falhou; repetição automática limitada.',
+        errorCode: v.errorCode ?? 'analysis_failed',
       }),
     ],
   );

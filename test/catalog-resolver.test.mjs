@@ -389,6 +389,11 @@ test('preparação incremental, reutilização global, cache e candidatos incomp
   await seed(f);
   let run = await start(f),
     first = await claim(f, run);
+  assert.equal(first.item.context.preparation, undefined);
+  r = await complete(f, run, first.item, input, { model: 'fixture', tokens: 15 });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.outcome, 'preparing');
+  first = await claim(f, run);
   assert.equal(first.item.context.preparation, true);
   r = await complete(f, run, first.item, input, {
     model: 'fixture',
@@ -396,6 +401,7 @@ test('preparação incremental, reutilização global, cache e candidatos incomp
   });
   assert.equal(r.status, 200, JSON.stringify(r.body));
   first = await claim(f, run);
+  assert.deepEqual(first.item.deterministic, input);
   r = await complete(f, run, first.item, input);
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.equal(r.body.productId, productId);
@@ -466,6 +472,79 @@ test('preparação incremental, reutilização global, cache e candidatos incomp
     200,
   );
   assert.ok(categoryId);
+});
+
+test('links não aguardam a preparação global nem analisam produtos sem relação com a oferta', async (t) => {
+  const f = await catalogFixture(t);
+  await mode(f);
+  for (let i = 0; i < 25; i++)
+    await f.db.query(
+      "INSERT INTO products(id,name,description,brand,category_path) VALUES($1,$2,$3,$4,ARRAY['Tecnologia','Celulares'])",
+      [randomUUID(), 'Celular Outro Fabricante ' + i, 'Descrição incompleta', 'Outro'],
+    );
+  await f.call('post', '/catalog/resolver/prepare', {});
+  await seed(f);
+  const run = await start(f), first = await claim(f, run);
+  assert.equal(first.run.stats.total, 1);
+  assert.equal(first.item.context.preparation, undefined);
+  const result = await complete(f, run, first.item, input);
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.outcome, 'drafted');
+  const end = await claim(f, run);
+  assert.equal(end.run.status, 'completed');
+  assert.equal(end.run.stats.accepted, 1);
+  assert.equal((await f.db.query('SELECT count(*)::int AS n FROM catalog_resolver_items WHERE run_id=$1 AND product_id IS NOT NULL', [run.id])).rows[0].n, 0);
+});
+
+test('preparação sob demanda registra falhas, limita tentativas e reutiliza a identidade do link', async (t) => {
+  const f = await catalogFixture(t);
+  await mode(f);
+  await f.db.query(
+    "INSERT INTO products(id,name,description,brand,category_path) VALUES($1,$2,$3,$4,ARRAY['Tecnologia','Celulares'])",
+    [randomUUID(), data.title, data.description, data.brand],
+  );
+  await f.call('post', '/catalog/resolver/prepare', {});
+  await seed(f);
+  const run = await start(f);
+  let leased = await claim(f, run);
+  const waiting = await complete(f, run, leased.item, input);
+  assert.equal(waiting.body.outcome, 'preparing');
+  for (let i = 0; i < 2; i++) {
+    leased = await claim(f, run);
+    assert.equal(leased.item.context.preparation, true);
+    const result = await complete(f, run, leased.item, undefined, {
+      error: 'technical', errorCode: 'result_rejected', model: 'fixture', elapsedMs: 1200,
+    });
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    assert.equal(result.body.outcome, i === 0 ? 'retry' : 'failed');
+    await f.db.query("UPDATE catalog_resolver_items SET retry_at=clock_timestamp()-interval '1 second' WHERE run_id=$1", [run.id]);
+  }
+  const failed = (await f.db.query("SELECT * FROM catalog_resolver_items WHERE run_id=$1 AND status='failed'", [run.id])).rows[0];
+  assert.equal(failed.calls, 2);
+  assert.equal(failed.elapsed_ms, 2400);
+  assert.equal(failed.decision.errorCode, 'result_rejected');
+  leased = await claim(f, run);
+  assert.equal(leased.item.context.preparation, undefined);
+  assert.deepEqual(leased.item.deterministic, input);
+  const result = await complete(f, run, leased.item, input);
+  assert.equal(result.body.outcome, 'excluded');
+  assert.equal((await claim(f, run)).run.status, 'completed');
+  assert.equal((await f.db.query('SELECT count(*)::int AS n FROM review_ai_product_drafts')).rows[0].n, 0);
+});
+
+test('retomar fila antiga descarta preparação global sem gastar IA', async (t) => {
+  const f = await catalogFixture(t);
+  await mode(f);
+  const productId = randomUUID();
+  await f.db.query("INSERT INTO products(id,name,category_path) VALUES($1,$2,ARRAY['Tecnologia'])", [productId, 'Produto antigo']);
+  await seed(f);
+  const run = await start(f);
+  await f.db.query('INSERT INTO catalog_resolver_items(id,run_id,product_id) VALUES($1,$2,$3)', [randomUUID(), run.id, productId]);
+  const skipped = await claim(f, run);
+  assert.equal(skipped.advance, true);
+  assert.equal(skipped.item, undefined);
+  const link = await claim(f, run);
+  assert.equal(link.item.context.preparation, undefined);
 });
 test('IDs e categorias fora do contexto, alterações de política e controle de execução são validados', async (t) => {
   const f = await catalogFixture(t);
