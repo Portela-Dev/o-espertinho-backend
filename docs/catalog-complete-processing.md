@@ -35,6 +35,8 @@ Protocolo 3 requer backend e extensão compatíveis; publicar o backend primeiro
 
 Foram retirados o cliente de inventário global da extensão, as decisões legadas e suas rotas de execução, além dos controles de modo anterior e tentativas terminais no admin. As tabelas históricas e a revisão manual continuam disponíveis. O preparo incremental de índices permanece como manutenção opcional do admin, sem bloquear a execução normal.
 
+A revisão global aposentada deixa de receber atualizações por gatilho; sua tabela fica arquivada e sem acesso da conta runtime. A gestão de categorias continua validando sua própria prévia e os vínculos. O expurgo considera as reservas ativas do resolvedor atual e impede exclusões enquanto houver itens sendo gravados; reservas expiradas não o bloqueiam indefinidamente.
+
 ## Verificação
 
 Testes cobrem indisponibilidade permanente da IA, respostas inválidas, todos os links concluídos, reutilização e criação, kits, contradições, dados vazios, árvores equivalentes, confirmação idempotente, reserva expirada, edição concorrente, retomada histórica, cancelamento, simulação, autenticação, CSRF e permissões. O CI também executa concorrência, migrations, backup/restauração e segurança em PostgreSQL real descartável. A homologação com a conta real da IA deve verificar os diagnósticos locais, sem exportar credenciais.

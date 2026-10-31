@@ -34,7 +34,7 @@ test('renomear mantém IDs e propaga nomes aos produtos/ofertas sem alterar pre�
  assert.equal(result.impact.products,1);assert.equal(result.impact.offers,1);
  const updated=await current(p.id);assert.deepEqual(updated.category_ids,p.category_ids);assert.deepEqual(updated.category_path,['Renomear','Áudio','Fones']);assert.equal(updated.sku,p.sku);
  const o=(await db.query('SELECT * FROM offers WHERE id=$1',[offer])).rows[0];assert.deepEqual(o.category_path,updated.category_path);assert.equal(o.status,'published');assert.equal(o.price_cents,99990);
- await assertReferences(refs,updated);assert.ok(Number((await db.query('SELECT revision FROM review_ai_inventory_state')).rows[0].revision)>Number(revision));
+ await assertReferences(refs,updated);assert.equal(Number((await db.query('SELECT revision FROM review_ai_inventory_state')).rows[0].revision),Number(revision));
  assert.equal((await db.query("SELECT count(*)::int n FROM audit_logs WHERE action='category.rename'")).rows[0].n,1);
 });
 

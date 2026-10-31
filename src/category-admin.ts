@@ -93,7 +93,7 @@ export function registerCategoryAdmin(app:Express,db:Database){
    await c.query("SET LOCAL lock_timeout='5s'");
    // Administrative operations are rare; block concurrent writes while remapping
    // arrays and foreign keys, rather than allowing partial/stale reassignment.
-   await c.query('LOCK TABLE products,offers,category_nodes,category_mappings,discovery_links,saved_filters,offer_category_options,review_ai_inventory_state IN SHARE ROW EXCLUSIVE MODE');
+   await c.query('LOCK TABLE products,offers,category_nodes,category_mappings,discovery_links,saved_filters,offer_category_options IN SHARE ROW EXCLUSIVE MODE');
    const current=await snapshot(c);
    if(categoryRevision(current,input)!==revision)throw new HttpError(409,'O catálogo mudou desde a prévia. Gere uma nova prévia antes de confirmar.');
    const plan=categoryPlan(current,input);

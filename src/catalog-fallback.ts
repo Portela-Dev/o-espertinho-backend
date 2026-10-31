@@ -11,7 +11,8 @@ export function fallbackTitle(link: any) {
   if (title) return title.slice(0, 300);
   try {
     const path = decodeURIComponent(new URL(link.url).pathname).split('/').filter(Boolean);
-    const slug = path.sort((a, b) => b.length - a.length)[0]?.replaceAll(/[-_]+/g, ' ').trim();
+    path.sort((a, b) => b.length - a.length);
+    const slug = path[0]?.replaceAll(/[-_]+/g, ' ').trim();
     if (slug && /\p{L}/u.test(slug)) return slug.slice(0, 300);
   } catch { /* A missing title must not turn a link into an invalid business decision. */ }
   return 'Produto da oferta';
@@ -23,7 +24,7 @@ function overlap(a: string, b: string) {
   const x = new Set(canonical(a).split(' ').filter(w => w.length > 1));
   const y = new Set(canonical(b).split(' ').filter(w => w.length > 1));
   if (!x.size || !y.size) return 0;
-  const numbers = (s: Set<string>) => [...s].filter(w => /\d/.test(w)).sort().join('|');
+  const numbers = (s: Set<string>) => [...s].filter(w => /\d/.test(w)).sort((a,b) => a.localeCompare(b)).join('|');
   if (numbers(x) !== numbers(y)) return 0;
   return [...x].filter(w => y.has(w)).length / new Set([...x, ...y]).size;
 }

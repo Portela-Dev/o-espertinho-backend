@@ -1,5 +1,13 @@
 -- Preserve history and data; the retired mode no longer has an executable client.
 UPDATE catalog_resolver_settings SET mode='shadow',version=version+1 WHERE mode='legacy';
+-- The retired full-inventory client no longer needs a globally serialized revision counter.
+DROP TRIGGER review_ai_products_revision ON products;
+DROP TRIGGER review_ai_categories_revision ON category_nodes;
+DROP TRIGGER review_ai_drafts_revision ON review_ai_product_drafts;
+DROP FUNCTION review_ai_inventory_changed();
+COMMENT ON TABLE review_ai_inventory_state IS 'Retired inventory revision, retained as history; no runtime writes.';
+DROP TRIGGER discovery_clear_catalog_exclusion ON discovery_links;
+DROP FUNCTION clear_catalog_exclusion();
 -- Internal identity is not an editable commercial type and cannot be disabled through policy APIs.
 INSERT INTO catalog_identity_policies(id,definition) VALUES('_title',
  '{"name":"Identidade por título","terms":["produto"],"attributes":[{"key":"title","label":"Título","required":true,"aliases":[],"unit":"text","values":{}}],"exclusive":false,"categoryId":null,"priority":0}');
