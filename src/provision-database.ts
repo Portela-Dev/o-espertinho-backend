@@ -23,7 +23,7 @@ export async function provisionDatabase(db:Database,applicationUrl:string){
   await c.query(`GRANT USAGE ON SCHEMA public TO ${identifier(role)}`);
   await c.query(`REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${identifier(role)}`);
   const tables=(await c.query("SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename<>'schema_migrations'")).rows;
-  const archive=new Set(['amazon_sitestripe_session','amazon_browser_session','marketplace_oauth_states','affiliate_proof_recipes','enrichment_settings','offer_refresh_settings','offer_refresh_runs','offer_refresh_items','enrichment_runs','enrichment_items','discovery_runs','discovery_run_links','discovery_run_events','search_rules','sync_runs']);
+  const archive=new Set(['review_ai_inventory_state','amazon_sitestripe_session','amazon_browser_session','marketplace_oauth_states','affiliate_proof_recipes','enrichment_settings','offer_refresh_settings','offer_refresh_runs','offer_refresh_items','enrichment_runs','enrichment_items','discovery_runs','discovery_run_links','discovery_run_events','search_rules','sync_runs']);
   for(const table of tables){
    if(archive.has(table.tablename))continue;
    if(table.tablename==='marketplaces'){

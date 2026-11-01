@@ -12,6 +12,15 @@ async function ageOffer(db,id,kind='unavailable',days=31){
 async function discovery(db,extra={}){const id=randomUUID(),data={title:'Produto descoberto',availability:'available',...extra};await db.query("INSERT INTO discovery_links(id,marketplace_id,url,enrichment_data,extraction_status) VALUES($1,'amazon',$2,$3,'completed')",[id,'https://www.amazon.com.br/p/'+id,JSON.stringify(data)]);return id;}
 const view=(a,criteria={})=>a.mutate('post',base+'/preview',criteria);
 const execute=(a,p)=>a.mutate('post',base+'/execute',{previewToken:p.previewToken,confirmed:true});
+test('expurgo respeita reservas ativas da catalogação atual sem ficar bloqueado por reservas expiradas',async t=>{
+ const f=await fixture(t),run=randomUUID();
+ const userId=(await f.db.query("SELECT id FROM users WHERE role='admin' LIMIT 1")).rows[0].id;
+ await f.db.query("INSERT INTO catalog_resolver_runs(id,request_key,created_by,extension_session_id,marketplace_id,task,mode,settings_version) VALUES($1,$2,$3,$4,'amazon','product','active',1)",[run,randomUUID(),userId,randomUUID()]);
+ await f.db.query("INSERT INTO catalog_resolver_items(id,run_id,status,lease_until) VALUES($1,$2,'leased',clock_timestamp()+interval '1 minute')",[randomUUID(),run]);
+ assert.equal((await view(f.admin)).status,409);
+ await f.db.query("UPDATE catalog_resolver_items SET lease_until=clock_timestamp()-interval '1 second' WHERE run_id=$1",[run]);
+ assert.equal((await view(f.admin)).status,200);
+});
 
 test('duração contínua é preservada entre tentativas, sucesso reinicia e produto conta a partir da última oferta removida',async t=>{
  const f=await fixture(t),id=await seedOffer(f.db);await ageOffer(f.db,id,'failure');
