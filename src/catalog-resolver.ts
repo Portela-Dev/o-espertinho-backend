@@ -6,6 +6,7 @@ import { catalogTransaction } from './catalog-runs.js';
 import { HttpError } from './security.js';
 import { audit } from './offers.js';
 import { catalogIdentity, catalogOffer, inferCatalogPolicy, policyChoices, titleProvesIdentity } from './catalog-type.js';
+import { fallbackCategory, fallbackIdentity, fallbackMatch, fallbackTitle, titlePolicy } from './catalog-fallback.js';
 import {
   assignCatalogProduct,
   resolveAiCategory,
@@ -34,12 +35,12 @@ export async function resolverSettings(c: Query, lock = false) {
         (lock ? ' FOR SHARE' : ''),
     )
   ).rows[0];
-  return { ...row, protocolVersion: 2 };
+  return { ...row, protocolVersion: 3 };
 }
-export async function resolverPolicies(c: Query): Promise<IdentityPolicy[]> {
+export async function resolverPolicies(c: Query, includeInternal = false): Promise<IdentityPolicy[]> {
   return (
     await c.query(
-      'SELECT * FROM catalog_identity_policies WHERE enabled ORDER BY id',
+      'SELECT * FROM catalog_identity_policies WHERE enabled' + (includeInternal ? '' : " AND id<>'_title'") + ' ORDER BY id',
     )
   ).rows.map((p) => ({ ...p.definition, id: p.id, version: p.version }));
 }
@@ -47,7 +48,7 @@ export async function prepareIdentities(
   c: Query,
   cursor: string | null = null,
 ) {
-  const policies = await resolverPolicies(c),
+  const policies = await resolverPolicies(c, true),
     rows = (
       await c.query(
         `SELECT p.*,q.version AS pending_version,i.source_hash AS prior_hash,i.policy_id AS prior_policy,i.policy_version AS prior_version FROM catalog_identity_pending q JOIN products p ON p.id=q.product_id LEFT JOIN catalog_product_identities i ON i.product_id=p.id WHERE ($1::uuid IS NULL OR p.id>$1) ORDER BY p.id LIMIT 100`,
@@ -68,7 +69,7 @@ async function prepareIdentity(
 ) {
   const data = sourceData(product),
     hash = sourceHash(product),
-    policy = policies.find(p => p.id === product.prior_policy && p.version === product.prior_version && product.prior_hash === hash) ?? selectPolicy(data, policies);
+    policy = policies.find(p => p.id === product.prior_policy && p.version === product.prior_version && product.prior_hash === hash) ?? selectPolicy(data, policies.filter(p => p.id !== '_title'));
   if (
     product.prior_hash === hash &&
     product.prior_policy === (policy?.id ?? null) &&
@@ -134,7 +135,7 @@ export async function startResolver(
         [actor.id, v.marketplaceId, v.task],
       )
     ).rows[0];
-    if (existing) return existing;
+    if (existing && existing.settings_version === settings.version && existing.mode === settings.mode) return existing;
     const run = (
       await c.query(
         'INSERT INTO catalog_resolver_runs(id,request_key,created_by,extension_session_id,marketplace_id,task,mode,settings_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
@@ -151,7 +152,7 @@ export async function startResolver(
       )
     ).rows[0];
     await c.query(
-      `INSERT INTO catalog_resolver_items(id,run_id,link_id) SELECT gen_random_uuid(),$1,l.id FROM discovery_links l WHERE l.marketplace_id=$2 AND l.status='pending' AND l.published_offer_id IS NULL AND l.extraction_status='completed' AND (($3='product' AND l.product_id IS NULL AND l.product_draft_id IS NULL) OR ($3='category' AND l.product_id IS NULL AND (l.product_draft_id IS NOT NULL OR ($5='shadow' AND EXISTS(SELECT 1 FROM catalog_resolver_receipts receipt WHERE receipt.link_id=l.id AND receipt.task='product' AND receipt.result->>'mode'='shadow' AND receipt.result->>'outcome'='drafted'))))) ORDER BY l.first_seen_at,l.id LIMIT $4`,
+      `INSERT INTO catalog_resolver_items(id,run_id,link_id) SELECT gen_random_uuid(),$1,l.id FROM discovery_links l WHERE l.marketplace_id=$2 AND l.status='pending' AND l.published_offer_id IS NULL AND NULLIF(trim(l.affiliate_url),'') IS NOT NULL AND (($3='product' AND l.product_id IS NULL AND l.product_draft_id IS NULL) OR ($3='category' AND l.product_id IS NULL AND (l.product_draft_id IS NOT NULL OR ($5='shadow' AND EXISTS(SELECT 1 FROM catalog_resolver_receipts receipt WHERE receipt.link_id=l.id AND receipt.task='product' AND receipt.result->>'mode'='shadow' AND receipt.result->>'outcome'='drafted'))))) ORDER BY l.first_seen_at,l.id LIMIT $4`,
       [run.id, v.marketplaceId, v.task, v.limit, run.mode],
     );
     // Existing products are prepared only when an actual link finds them as
@@ -180,7 +181,7 @@ export async function ownedRun(
 export async function runSummary(c: Query, run: any) {
   const stats = (
     await c.query(
-      `SELECT count(*) FILTER(WHERE link_id IS NOT NULL)::int AS total,count(*) FILTER(WHERE product_id IS NOT NULL AND status IN ('accepted','excluded'))::int AS prepared,count(*) FILTER(WHERE status='accepted' AND link_id IS NOT NULL)::int AS accepted,count(*) FILTER(WHERE status='excluded' AND link_id IS NOT NULL)::int AS excluded,count(*) FILTER(WHERE status='skipped' AND link_id IS NOT NULL)::int AS skipped,count(*) FILTER(WHERE status='failed' AND link_id IS NOT NULL)::int AS failed,sum(calls)::int AS calls,sum(tokens)::int AS tokens,sum(elapsed_ms)::int AS elapsed_ms,count(evaluation)::int AS evaluated,count(*) FILTER(WHERE evaluation='false_merge')::int AS false_merges,count(*) FILTER(WHERE evaluation='duplicate')::int AS duplicates,count(*) FILTER(WHERE evaluation='wrong_category')::int AS wrong_categories,count(*) FILTER(WHERE evaluation='excluded_valid')::int AS excluded_valid FROM catalog_resolver_items WHERE run_id=$1`,
+      `SELECT count(*) FILTER(WHERE link_id IS NOT NULL)::int AS total,count(*) FILTER(WHERE product_id IS NOT NULL AND status IN ('accepted','excluded'))::int AS prepared,count(*) FILTER(WHERE status='accepted' AND link_id IS NOT NULL)::int AS accepted,count(*) FILTER(WHERE status='excluded' AND link_id IS NOT NULL)::int AS excluded,count(*) FILTER(WHERE status='skipped' AND link_id IS NOT NULL)::int AS skipped,count(*) FILTER(WHERE status='failed' AND link_id IS NOT NULL)::int AS failed,count(*) FILTER(WHERE decision ? 'fallback')::int AS fallback,sum(calls)::int AS calls,sum(tokens)::int AS tokens,sum(elapsed_ms)::int AS elapsed_ms,count(evaluation)::int AS evaluated,count(*) FILTER(WHERE evaluation='false_merge')::int AS false_merges,count(*) FILTER(WHERE evaluation='duplicate')::int AS duplicates,count(*) FILTER(WHERE evaluation='wrong_category')::int AS wrong_categories,count(*) FILTER(WHERE evaluation='excluded_valid')::int AS excluded_valid FROM catalog_resolver_items WHERE run_id=$1`,
       [run.id],
     )
   ).rows[0];
@@ -207,6 +208,8 @@ export async function resolverAction(
         "UPDATE catalog_resolver_items SET status='queued',lease_id=NULL,lease_until=NULL WHERE run_id=$1 AND status='leased'",
         [id],
       );
+    else
+      await c.query("UPDATE catalog_resolver_items SET status='queued',retry_at=NULL,lease_id=NULL,lease_until=NULL WHERE run_id=$1 AND status IN ('failed','excluded')", [id]);
     await audit(c, actor.id, 'catalog_resolver.' + action, id);
     return { ...run, status };
   });
@@ -230,7 +233,7 @@ async function contextFor(c: Query, run: any, link: any) {
     ).rows[0],
     policies = await resolverPolicies(c);
   if (run.task === 'category') return categoryContext(c,run,link,settings,policies);
-  const offer = catalogOffer(link),
+  const offer = { ...catalogOffer(link), title: fallbackTitle(link) },
     policy = selectPolicy(offer, policies);
   return {
     stage: policy ? 'identity' : 'type',
@@ -284,6 +287,7 @@ async function categoryContext(c: Query, run: any, link: any, settings: any, pol
       categories,
       policy,
       defaultCategoryId: policy?.categoryId ?? null,
+      mappedCategoryId: mapping?.id ?? null,
       draftId: draft.id ?? null,
       draftVersion: draft.version ?? null,
       prompt: settings.category_prompt,
@@ -308,8 +312,8 @@ export async function claimResolver(
         'Configuração alterada; cancele esta execução e inicie outra.',
       );
     await c.query(
-      "UPDATE catalog_resolver_items SET status=CASE WHEN attempts >= $2 THEN 'failed' ELSE 'queued' END,lease_id=NULL WHERE run_id=$1 AND status='leased' AND lease_until<clock_timestamp()",
-      [id, settings.max_attempts],
+      "UPDATE catalog_resolver_items SET status='queued',lease_id=NULL,lease_until=NULL WHERE run_id=$1 AND status='leased' AND lease_until<clock_timestamp()",
+      [id],
     );
     const inFlight = (
       await c.query(
@@ -433,7 +437,7 @@ async function leaseLink(
     )
   ).rows[0];
   const cached =
-    receipt?.result?.contractVersion === 2 &&
+    receipt?.result?.contractVersion === 3 &&
     receipt?.source_hash === sourceHash(link) &&
     receipt?.policy_version === context.policy?.version &&
     receipt?.result?.promptVersion === context.promptVersion
@@ -502,7 +506,7 @@ async function candidateProducts(
         p.source_hash !== sourceHash(p) ||
         Object.entries(identity.attrs).every(
           ([key, value]) =>
-            !p.identity.attrs[key] || p.identity.attrs[key] === value,
+            !p.identity.attrs?.[key] || p.identity.attrs[key] === value,
         ),
     ),
   };
@@ -521,6 +525,8 @@ async function acceptProduct(
     context.policy,
     link.id,
   );
+  if (!canonical(sourceData(link).title))
+    identity.fingerprint = digest({ title: context.offer.title, linkId: link.id });
   const policy = context.policy as IdentityPolicy,
     candidates = policy.exclusive
       ? { exact: [], unknown: [], draft: undefined }
@@ -553,11 +559,11 @@ async function createProductDraft(c: Query, run: any, link: any, context: any, i
       .join('. ')
       .slice(0, 4000) || title,
     brand = String(
-      identity.facts.brand?.value ?? link.enrichment_data.brand ?? '',
+      identity.facts.brand?.value ?? link.enrichment_data?.brand ?? '',
     ).slice(0, 120),
     image =
-      (link.enrichment_data.images ?? []).find((x: string) =>
-        x.startsWith('https://'),
+      (Array.isArray(link.enrichment_data?.images) ? link.enrichment_data.images : []).find((x: string) =>
+        typeof x === 'string' && x.startsWith('https://'),
       ) ?? null;
   const draft = (
     await c.query(
@@ -734,6 +740,7 @@ export const completeInput = z.strictObject({
   decision: z.unknown().optional(),
   error: z.enum(['technical', 'cancelled']).optional(),
   errorCode: z.enum(['analysis_failed', 'result_rejected']).optional(),
+  diagnostic: z.enum(['authentication', 'usage_limit', 'provider_unavailable', 'invalid_response', 'timeout', 'connection', 'unknown']).optional(),
   model: z.string().max(200).default(''),
   tokens: z.number().int().min(0).max(1000000).default(0),
   elapsedMs: z.number().int().min(0).max(300000).default(0),
@@ -772,14 +779,14 @@ export async function completeResolver(
     ).rows[0];
     if (settings.version !== run.settings_version || settings.mode !== run.mode)
       throw new HttpError(409, 'Configuração alterada. Inicie nova execução.');
-    if (v.error) return technicalRetry(c, item, v, settings);
-    validateLinkSnapshot(run, item, link, settings);
     const context = item.context;
-    await validateContext(c, run, context);
-    const result =
-      run.task === 'product'
-        ? await acceptProductStep(c, run, item, link, context, v.decision)
-        : await acceptCategory(c, run, item, link, context, v.decision);
+    if (await refreshChangedContext(c, run, item, link, settings)) return { outcome: 'rescheduled', applied: false };
+    if (!context.enabled) throw new HttpError(409, 'Esta tarefa de IA foi desativada.');
+    if (v.error === 'cancelled') {
+      await c.query("UPDATE catalog_resolver_items SET status='queued',lease_id=NULL,lease_until=NULL WHERE id=$1", [item.id]);
+      return { outcome: 'interrupted', applied: false };
+    }
+    const result = await resolveDecision(c, run, item, link, context, v);
     const resolved = result.outcome !== 'matching';
     await saveStep(c, item, result);
     if (run.mode === 'active' && resolved)
@@ -801,7 +808,7 @@ export async function completeResolver(
         JSON.stringify({
           ...result,
           mode: run.mode,
-          contractVersion: 2,
+          contractVersion: 3,
           promptVersion: context.promptVersion,
         }),
       ],
@@ -817,34 +824,64 @@ async function skipPreparation(c: Query, item: any) {
   return result;
 }
 
-async function technicalRetry(c: Query, item: any, v: any, settings: any) {
-  await c.query(
-    'UPDATE catalog_resolver_items SET calls=calls+$2,tokens=tokens+$3,elapsed_ms=elapsed_ms+$4 WHERE id=$1',
-    [item.id, v.model ? 1 : 0, v.tokens, v.elapsedMs],
-  );
-  const failed = item.attempts >= settings.max_attempts;
-  await c.query(
-    "UPDATE catalog_resolver_items SET status=$2,lease_id=NULL,lease_until=NULL,retry_at=clock_timestamp()+interval '2 seconds',decision=$3,context=CASE WHEN $4='result_rejected' THEN NULL ELSE context END WHERE id=$1",
-    [
-      item.id,
-      failed ? 'failed' : 'queued',
-      JSON.stringify({
-        outcome: 'technical_retry',
-        reason: v.errorCode === 'result_rejected'
-          ? 'O resultado não pôde ser validado ou salvo; repetição limitada.'
-          : 'A análise de IA falhou; repetição automática limitada.',
-        errorCode: v.errorCode ?? 'analysis_failed',
-      }),
-      v.errorCode ?? 'analysis_failed',
-    ],
-  );
-  return { outcome: failed ? 'failed' : 'retry' };
+async function refreshChangedContext(c: Query, run: any, item: any, link: any, settings: any) {
+  try {
+    validateLinkSnapshot(run, item, link, settings);
+    await validateContext(c, run, item.context);
+    return false;
+  } catch (error) {
+    if (!(error instanceof HttpError) || error.status !== 409 || error.code === 'task_disabled') throw error;
+    await c.query("UPDATE catalog_resolver_items SET status='queued',context=NULL,source_hash=NULL,lease_id=NULL,lease_until=NULL,retry_at=NULL WHERE id=$1", [item.id]);
+    return true;
+  }
+}
+
+async function resolveDecision(c: Query, run: any, item: any, link: any, context: any, v: z.infer<typeof completeInput>) {
+  if (v.error) return resolveFallback(c, run, item, link, context, v.diagnostic ?? 'unknown');
+  // PostgreSQL must roll back partial policy creation before recovering an invalid AI decision.
+  await c.query('SAVEPOINT catalog_decision');
+  try {
+    const result = run.task === 'product'
+      ? await acceptProductStep(c, run, item, link, context, v.decision)
+      : await acceptCategory(c, run, item, link, context, v.decision);
+    await c.query('RELEASE SAVEPOINT catalog_decision');
+    return result;
+  } catch (error) {
+    await c.query('ROLLBACK TO SAVEPOINT catalog_decision');
+    await c.query('RELEASE SAVEPOINT catalog_decision');
+    if (error instanceof HttpError && error.status === 409) {
+      await c.query("UPDATE catalog_resolver_items SET status='queued',context=NULL,source_hash=NULL,lease_id=NULL,lease_until=NULL,retry_at=NULL WHERE id=$1", [item.id]);
+      return { outcome: 'rescheduled', applied: false };
+    }
+    if (!(error instanceof z.ZodError) && !(error instanceof HttpError && error.status === 400)) throw error;
+    const saved = (await c.query('SELECT context FROM catalog_resolver_items WHERE id=$1', [item.id])).rows[0];
+    return resolveFallback(c, run, item, link, saved.context, 'invalid_response');
+  }
+}
+async function resolveFallback(c: Query, run: any, item: any, link: any, context: any, diagnostic: string) {
+  let result: any;
+  if (run.task === 'category') result = await acceptCategory(c, run, item, link, context, fallbackCategory(context));
+  else if (context.stage === 'match') result = await acceptMatch(c, run, link, context, fallbackMatch(context));
+  else {
+    if (!context.policy) {
+      context = { ...context, stage: 'identity', policy: { ...titlePolicy, id: '_title', version: 1 }, ephemeralPolicy: false };
+    }
+    result = await acceptProduct(c, run, item, link, context, fallbackIdentity(context.policy, context.offer.title));
+    if (result.outcome === 'matching') {
+      const next = (await c.query('SELECT context FROM catalog_resolver_items WHERE id=$1', [item.id])).rows[0].context;
+      result = await acceptMatch(c, run, link, next, fallbackMatch(next));
+    }
+  }
+  await audit(c, run.created_by, 'catalog_resolver.fallback.' + diagnostic, link.id);
+  return { ...result, fallback: { diagnostic, stage: context.stage } };
 }
 
 async function validateContext(c: Query, run: any, context: any) {
   const current = (
     await c.query('SELECT * FROM review_ai_settings WHERE id=true FOR SHARE')
   ).rows[0];
+  if (!current[run.task === 'product' ? 'product_enabled' : 'category_enabled'])
+    throw new HttpError(409, 'Esta tarefa de IA foi desativada no admin.', 'task_disabled');
   if (
     context.promptVersion !==
     current[run.task === 'product' ? 'product_version' : 'category_version']
