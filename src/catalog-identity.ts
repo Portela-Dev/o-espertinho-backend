@@ -96,9 +96,9 @@ export function deterministicIdentity(
   for (const a of policy.attributes) {
     const aliases = new Set([a.key, a.label, ...a.aliases].map(canonical));
     const values = data.specifications.filter((s: any) =>
-      aliases.has(canonical(s.name)),
+      aliases.has(canonical(s.name)) && s.value.length <= 160,
     );
-    if (a.key === 'brand' && data.brand)
+    if (a.key === 'brand' && data.brand && data.brand.length <= 160)
       values.push({ name: 'brand', value: data.brand });
     const normalized = values.map((s: any) =>
       normalizeAttribute(s.value, a.unit),

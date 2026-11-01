@@ -28,14 +28,15 @@ test('todos os links são catalogados e categorizados quando a IA falha sempre; 
     {title:'Câmera Nova C100'}, {title:'Kit personalizado 2 câmeras'},
     {title:'Celular Modelo X 128GB',description:'Modelo Z 256GB'},
     {title:'Acessório sem marca'}, {}, {title:'Produto sem atributos',specifications:null,images:null},
+    {title:'Celular com ficha extensa',specifications:[{name:'Modelo',value:'x'.repeat(500)}]},
   ];
   for(const data of cases) await link(f,data,{path:['Tecnologia','Diversos']});
   await link(f,{title:'Outro produto sem extração concluída'},{status:'failed'});
   const failure=()=>({error:'technical',errorCode:'analysis_failed',diagnostic:'invalid_response'});
   const products=await drive(f,'product',failure);
-  assert.equal(products.stats.accepted,7);assert.equal(products.stats.failed,0);
+  assert.equal(products.stats.accepted,cases.length+1);assert.equal(products.stats.failed,0);
   const categories=await drive(f,'category',failure);
-  assert.equal(categories.stats.accepted,7);assert.equal(categories.stats.failed,0);
+  assert.equal(categories.stats.accepted,cases.length+1);assert.equal(categories.stats.failed,0);
   const rows=(await f.db.query('SELECT * FROM discovery_links')).rows;
   for(const row of rows){assert.ok(row.product_id);assert.ok(row.confirmed_category_id);assert.equal(row.published_offer_id,null);assert.deepEqual(row.ai_resolution,{});}
   assert.equal((await f.db.query('SELECT count(*)::int AS n FROM offers')).rows[0].n,0);
