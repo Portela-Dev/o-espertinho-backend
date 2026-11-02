@@ -39,4 +39,6 @@ A revisão global aposentada deixa de receber atualizações por gatilho; sua ta
 
 ## Verificação
 
+A publicação trata duplicatas pelo marketplace e pelo link de afiliado ou identificador de origem já usado pela oferta, nunca apenas pelo nome ou produto do catálogo. A oferta existente e seu histórico permanecem intactos. A revisão duplicada é arquivada e vinculada à oferta existente, preservando sua URL para impedir redescoberta. Confirmação repetida é idempotente; ofertas retiradas da vitrine não são republicadas por esse tratamento. O lote informa `deduplicated` separadamente de `published` e continua processando os demais itens. Conflitos simultâneos são reconciliados dentro da transação com a restrição de unicidade do PostgreSQL.
+
 Testes cobrem indisponibilidade permanente da IA, respostas inválidas, todos os links concluídos, reutilização e criação, kits, contradições, dados vazios, árvores equivalentes, confirmação idempotente, reserva expirada, edição concorrente, retomada histórica, cancelamento, simulação, autenticação, CSRF e permissões. O CI também executa concorrência, migrations, backup/restauração e segurança em PostgreSQL real descartável. A homologação com a conta real da IA deve verificar os diagnósticos locais, sem exportar credenciais.

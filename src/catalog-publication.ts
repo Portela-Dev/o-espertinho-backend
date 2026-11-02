@@ -21,6 +21,23 @@ const publishInput = z.strictObject({
   version: z.number().int().nonnegative(),
   authorizedContent: z.literal(true),
 });
+async function existingPublication(c: Pick<Database, 'query'>, link: any) {
+  return (await c.query(
+    `SELECT id,status FROM offers WHERE marketplace_id=$1 AND (external_id=$2 OR affiliate_url=$3)
+     ORDER BY CASE WHEN external_id=$2 THEN 0 ELSE 1 END,id LIMIT 1 FOR UPDATE`,
+    [link.marketplace_id, link.id, link.affiliate_url],
+  )).rows[0];
+}
+async function removeDuplicateReview(c: Pick<Database, 'query'>, userId: string, link: any, offer: any) {
+  // Keep the URL as a tombstone so discovery cannot recreate the duplicate.
+  await c.query(
+    `UPDATE discovery_links SET status='archived',published_offer_id=$2,enrichment_version=enrichment_version+1,
+     catalog_resolution=COALESCE(catalog_resolution,'{}'::jsonb)||jsonb_build_object('duplicatePublication',jsonb_build_object('offerId',$2::uuid)) WHERE id=$1`,
+    [link.id, offer.id],
+  );
+  await audit(c, userId, 'discovery.publication_duplicate_removed', link.id);
+  return { offerId: offer.id, alreadyPublished: true, duplicateRemoved: true };
+}
 async function publishCandidate(
   db: Database,
   userId: string,
@@ -35,7 +52,7 @@ async function publishCandidate(
     ).rows[0];
     if (!link) throw new HttpError(404, 'Link não encontrado.');
     if (link.published_offer_id)
-      return { offerId: link.published_offer_id, alreadyPublished: true };
+      return { offerId: link.published_offer_id, alreadyPublished: true, duplicateRemoved: !!link.catalog_resolution?.duplicatePublication };
     if (invalidAiReview(link))
       throw new HttpError(
         409,
@@ -91,12 +108,15 @@ async function publishCandidate(
       throw new HttpError(409, 'Os dados obrigatórios estão incompletos.');
     if (data.availability === 'unavailable')
       throw new HttpError(409, 'A oferta está indisponível no marketplace.');
+    const existing = await existingPublication(c, link);
+    if (existing) return removeDuplicateReview(c, userId, link, existing);
     // Review duration does not invalidate data. Keep the actual collection timestamp.
     const expires = new Date(Date.now() + profile.validity_minutes * 60000);
     const offerId = randomUUID();
-    await c.query(
+    const inserted = await c.query(
       `INSERT INTO offers(id,marketplace_id,external_id,title,description,category,subcategory,category_path,image_url,images,product_url,affiliate_url,price_cents,original_price_cents,source,status,published_at,conditions,expires_at,product_id,specifications,extraction_metadata,data_updated_at,rating,review_count)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'scraped','published',clock_timestamp(),$15,$16,$17,$18,$19,$20,$21,$22)`,
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'scraped','published',clock_timestamp(),$15,$16,$17,$18,$19,$20,$21,$22)
+    ON CONFLICT DO NOTHING RETURNING id`,
       [
         offerId,
         market.id,
@@ -122,6 +142,11 @@ async function publishCandidate(
         data.reviewCount ?? null,
       ],
     );
+    if (!inserted.rows.length) {
+      const concurrent = await existingPublication(c, link);
+      if (!concurrent) throw new HttpError(409, 'A publicação mudou durante a confirmação. Atualize a lista.');
+      return removeDuplicateReview(c, userId, link, concurrent);
+    }
     await c.query(
       'UPDATE discovery_links SET published_offer_id=$2,enrichment_version=enrichment_version+1 WHERE id=$1',
       [link.id, offerId],
@@ -134,7 +159,7 @@ async function publishCandidate(
       new Date(link.extracted_at).toISOString(),
     );
     await audit(c, userId, 'discovery.published', link.id);
-    return { offerId, alreadyPublished: false };
+    return { offerId, alreadyPublished: false, duplicateRemoved: false };
   });
 }
 export function registerCatalogPublication(app: Express, db: Database) {
@@ -144,7 +169,10 @@ export function registerCatalogPublication(app: Express, db: Database) {
       const v = publishBatchInput.parse(req.body);
       if (new Set(v.items.map((i) => i.id)).size !== v.items.length)
         throw new HttpError(400, 'Selecione cada link apenas uma vez.');
-      const results = [];
+      const results: Array<
+        {id: string; ok: true; offerId: string; alreadyPublished: boolean; duplicateRemoved: boolean} |
+        {id: string; ok: false; status: number; message: string}
+      > = [];
       for (const item of v.items) {
         try {
           results.push({
@@ -169,7 +197,8 @@ export function registerCatalogPublication(app: Express, db: Database) {
       }
       res.json({
         results,
-        published: results.filter((r) => r.ok).length,
+        published: results.filter((r) => r.ok && !r.duplicateRemoved).length,
+        deduplicated: results.filter((r) => r.ok && r.duplicateRemoved).length,
         failed: results.filter((r) => !r.ok).length,
       });
     },
