@@ -5,6 +5,7 @@ import type { CatalogActor } from './catalog-contracts.js';
 import { catalogTransaction } from './catalog-runs.js';
 import { HttpError } from './security.js';
 import { audit } from './offers.js';
+import { resizeResolverQueue } from './catalog-resolver-queue.js';
 import { catalogIdentity, catalogOffer, inferCatalogPolicy, policyChoices, titleProvesIdentity } from './catalog-type.js';
 import { fallbackCategory, fallbackIdentity, fallbackMatch, fallbackTitle, titlePolicy } from './catalog-fallback.js';
 import {
@@ -121,11 +122,16 @@ export async function startResolver(
     await c.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [actor.id]);
     const old = (
       await c.query(
-        'SELECT * FROM catalog_resolver_runs WHERE created_by=$1 AND request_key=$2',
+        'SELECT * FROM catalog_resolver_runs WHERE created_by=$1 AND request_key=$2 FOR UPDATE',
         [actor.id, v.requestKey],
       )
     ).rows[0];
-    if (old) return old;
+    if (old) {
+      if (old.marketplace_id !== v.marketplaceId || old.task !== v.task)
+        throw new HttpError(409, 'Chave de execução usada para outra tarefa.');
+      await resizeResolverQueue(c, old, v.limit);
+      return old;
+    }
     const settings = await resolverSettings(c);
     if (settings.mode === 'legacy')
       throw new HttpError(409, 'Resolvedor estruturado desativado.');
@@ -135,7 +141,10 @@ export async function startResolver(
         [actor.id, v.marketplaceId, v.task],
       )
     ).rows[0];
-    if (existing && existing.settings_version === settings.version && existing.mode === settings.mode) return existing;
+    if (existing && existing.settings_version === settings.version && existing.mode === settings.mode) {
+      await resizeResolverQueue(c, existing, v.limit);
+      return existing;
+    }
     const run = (
       await c.query(
         'INSERT INTO catalog_resolver_runs(id,request_key,created_by,extension_session_id,marketplace_id,task,mode,settings_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
@@ -151,10 +160,7 @@ export async function startResolver(
         ],
       )
     ).rows[0];
-    await c.query(
-      `INSERT INTO catalog_resolver_items(id,run_id,link_id) SELECT gen_random_uuid(),$1,l.id FROM discovery_links l WHERE l.marketplace_id=$2 AND l.status='pending' AND l.published_offer_id IS NULL AND NULLIF(trim(l.affiliate_url),'') IS NOT NULL AND (($3='product' AND l.product_id IS NULL AND l.product_draft_id IS NULL) OR ($3='category' AND l.product_id IS NULL AND (l.product_draft_id IS NOT NULL OR ($5='shadow' AND EXISTS(SELECT 1 FROM catalog_resolver_receipts receipt WHERE receipt.link_id=l.id AND receipt.task='product' AND receipt.result->>'mode'='shadow' AND receipt.result->>'outcome'='drafted'))))) ORDER BY l.first_seen_at,l.id LIMIT $4`,
-      [run.id, v.marketplaceId, v.task, v.limit, run.mode],
-    );
+    await resizeResolverQueue(c, run, v.limit);
     // Existing products are prepared only when an actual link finds them as
     // candidates. A marketplace run must never first analyze the whole catalog.
     await audit(c, actor.id, 'catalog_resolver.started', run.id);

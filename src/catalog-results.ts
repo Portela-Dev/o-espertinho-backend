@@ -10,8 +10,10 @@ import { categoryKey } from './enrichment-admin.js';
 import { recordDailyPrice } from './price-history.js';
 import { catalogTransaction, ownRun, runView, expireRuns } from './catalog-runs.js';
 import {discoveryProgress} from './catalog-discovery-progress.js';
+import {audit} from './offers.js';
 import type { CatalogActor } from './catalog-contracts.js';
 const uuid = z.uuid();
+export const catalogSkipInput = z.strictObject({itemId: uuid, leaseToken: uuid});
 const dataSchema = scrapedDataSchema.strict().extend({
     brand: z.string().max(120).default('')
 });
@@ -188,4 +190,23 @@ export async function acceptCatalogResult(db: Database, actor: CatalogActor, run
 }
 export function registerCatalogResults(router: Router, db: Database, account: (req: any) => Promise<CatalogActor>) {
     router.post('/catalog/runs/:id/results', async (req, res) => res.json(await acceptCatalogResult(db, await account(req), uuid.parse(req.params.id), req.body)));
+    router.post('/catalog/runs/:id/skip', async (req, res) => {
+        const actor=await account(req), id=uuid.parse(req.params.id), input=catalogSkipInput.parse(req.body);
+        res.json(await catalogTransaction(db,async c=>{
+            await expireRuns(c);
+            const run=await ownRun(c,id,actor,true);
+            if (!['enrich','prices'].includes(run.step)) throw new HttpError(409,'Pule somente registros de extração ou atualização de preços.');
+            const item=(await c.query('SELECT * FROM extension_catalog_items WHERE run_id=$1 AND id=$2 FOR UPDATE',[id,input.itemId])).rows[0];
+            if (!item || item.lease_token!==input.leaseToken) throw new HttpError(409,'O registro em processamento mudou. Atualize a execução.');
+            if (item.status==='skipped' && item.result?.skippedByUser) return runView(c,id);
+            if (!['paused_technical','paused_by_user','waiting_for_human'].includes(run.status) || item.status!=='leased')
+                throw new HttpError(409,'Pause uma execução com registro pendente antes de pular.');
+            await failedResult({c,run,item,market:{},v:{...input,outcome:'technical_failure',reason:'incomplete'}});
+            const result={outcome:'technical_failure',reason:'incomplete',skippedByUser:true};
+            await c.query("UPDATE extension_catalog_items SET status='skipped',lease_until=NULL,error='Registro pulado pelo administrador.',result=$2,result_hash=$3,updated_at=clock_timestamp() WHERE id=$1",[item.id,JSON.stringify(result),hash(JSON.stringify(result))]);
+            await c.query("UPDATE extension_catalog_runs SET status=CASE WHEN EXISTS(SELECT 1 FROM extension_catalog_items WHERE run_id=$1 AND status IN ('pending','leased')) THEN 'running' ELSE 'completed' END,reason='',expires_at=clock_timestamp()+interval '1 day',updated_at=clock_timestamp() WHERE id=$1",[id]);
+            await audit(c,actor.id,'extension_catalog.item_skipped',item.id);
+            return runView(c,id);
+        }));
+    });
 }

@@ -42,7 +42,7 @@ export async function expireRuns(c: Query) {
 export async function runView(c: Query, id: string) {
     return (await c.query(`SELECT r.*,(SELECT count(*)::int FROM extension_catalog_items WHERE run_id=r.id) AS total,
  (SELECT count(*)::int FROM extension_catalog_items WHERE run_id=r.id AND status='completed') AS completed,
- (SELECT count(*)::int FROM extension_catalog_items WHERE run_id=r.id AND status='failed') AS failed
+ (SELECT count(*)::int FROM extension_catalog_items WHERE run_id=r.id AND status='failed') AS failed,(SELECT count(*)::int FROM extension_catalog_items WHERE run_id=r.id AND status='skipped' AND result->>'skippedByUser'='true') AS skipped
  FROM extension_catalog_runs r WHERE r.id=$1`, [id])).rows[0];
 }
 export async function startCatalogRun(db: Database, actor: CatalogActor, input: unknown) {
@@ -101,7 +101,7 @@ export function registerCatalogRuns(router: Router, db: Database, account: (req:
         await account(req);
         const markets = (await db.query("SELECT id,name,website_url,allowed_hosts,catalog_executor FROM marketplaces WHERE scraping_enabled ORDER BY name")).rows;
         res.json({
-            version: 1, marketplaces: await Promise.all(markets.map(async (m) => ({
+            version: 1, capabilities: {skipItem:true}, marketplaces: await Promise.all(markets.map(async (m) => ({
                 ...m, allowedOrigins: m.allowed_hosts.map((h: string) => 'https://' + h), ...await getCatalogSettings(db, m.id)
             })))
         });
