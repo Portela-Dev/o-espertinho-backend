@@ -129,7 +129,8 @@ export async function startResolver(
     if (old) {
       if (old.marketplace_id !== v.marketplaceId || old.task !== v.task)
         throw new HttpError(409, 'Chave de execução usada para outra tarefa.');
-      return resizeResolverQueue(c, old, v.limit);
+      await resizeResolverQueue(c, old, v.limit);
+      return old;
     }
     const settings = await resolverSettings(c);
     if (settings.mode === 'legacy')
@@ -140,8 +141,10 @@ export async function startResolver(
         [actor.id, v.marketplaceId, v.task],
       )
     ).rows[0];
-    if (existing && existing.settings_version === settings.version && existing.mode === settings.mode)
-      return resizeResolverQueue(c, existing, v.limit);
+    if (existing && existing.settings_version === settings.version && existing.mode === settings.mode) {
+      await resizeResolverQueue(c, existing, v.limit);
+      return existing;
+    }
     const run = (
       await c.query(
         'INSERT INTO catalog_resolver_runs(id,request_key,created_by,extension_session_id,marketplace_id,task,mode,settings_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',

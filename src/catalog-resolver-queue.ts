@@ -3,7 +3,7 @@ import type { Database } from './db.js';
 // The caller holds the run lock. The limit includes completed/reserved work;
 // lowering it may remove only queue entries that have never been attempted.
 export async function resizeResolverQueue(c: Pick<Database, 'query'>, run: any, limit: number) {
-  if (!['running', 'paused'].includes(run.status)) return run;
+  if (!['running', 'paused'].includes(run.status)) return;
   const retained = (await c.query(
     `SELECT count(*)::int AS n FROM catalog_resolver_items WHERE run_id=$1 AND link_id IS NOT NULL AND (status<>'queued' OR attempts>0 OR context IS NOT NULL)`,
     [run.id],
@@ -29,5 +29,4 @@ export async function resizeResolverQueue(c: Pick<Database, 'query'>, run: any, 
      ORDER BY l.first_seen_at,l.id LIMIT $4`,
     [run.id, run.marketplace_id, run.task, Math.max(0, limit - total), run.mode],
   );
-  return run;
 }
