@@ -17,6 +17,68 @@ test('publicação em massa exige login, XSRF, confirmação, IDs únicos e limi
  assert.equal((await f.db.query('SELECT count(*)::int n FROM offers')).rows[0].n,0);
 });
 
+test('publicação remove revisão com afiliado duplicado, preservando oferta, produto e histórico e aceitando repetição',async t=>{
+ const f=await catalogFixture(t),original=await link(f),duplicate=await link(f);
+ const first=await f.browser.mutate('post',endpoint,{authorizedContent:true,items:[original]});
+ const offerId=first.body.results[0].offerId,offer=(await f.db.query('SELECT * FROM offers WHERE id=$1',[offerId])).rows[0];
+ const history=(await f.db.query('SELECT * FROM offer_price_history WHERE offer_id=$1',[offerId])).rows;
+ await f.db.query('UPDATE discovery_links SET affiliate_url=$2 WHERE id=$1',[duplicate.id,offer.affiliate_url]);
+ const one='/api/admin/discovery/enrichment/review/'+duplicate.id+'/publish';
+ const response=await f.browser.mutate('post',one,{version:0,authorizedContent:true});
+ assert.equal(response.status,200,JSON.stringify(response.body));assert.equal(response.body.offerId,offerId);assert.equal(response.body.duplicateRemoved,true);
+ assert.deepEqual((await f.db.query('SELECT * FROM offers WHERE id=$1',[offerId])).rows[0],offer);
+ assert.deepEqual((await f.db.query('SELECT * FROM offer_price_history WHERE offer_id=$1',[offerId])).rows,history);
+ const saved=(await f.db.query('SELECT * FROM discovery_links WHERE id=$1',[duplicate.id])).rows[0];assert.equal(saved.status,'archived');assert.equal(saved.published_offer_id,offerId);assert.equal(saved.enrichment_version,1);
+ assert.equal((await f.browser.get('/api/admin/discovery/enrichment/review')).body.total,1);
+ assert.equal((await f.browser.get('/api/admin/discovery/enrichment/review?state=archived')).body.items[0].id,duplicate.id);
+ const replay=await f.browser.mutate('post',one,{version:0,authorizedContent:true});assert.equal(replay.status,200);assert.equal(replay.body.duplicateRemoved,true);
+ assert.equal((await f.db.query('SELECT count(*)::int n FROM offers')).rows[0].n,1);
+ assert.equal((await f.db.query('SELECT count(*)::int n FROM products')).rows[0].n,2);
+});
+
+test('lote com afiliados repetidos continua os demais itens e distingue duplicação de publicação nova',async t=>{
+ const f=await catalogFixture(t),first=await link(f),duplicate=await link(f),other=await link(f),stale=await link(f);
+ const affiliate=(await f.db.query('SELECT affiliate_url FROM discovery_links WHERE id=$1',[first.id])).rows[0].affiliate_url;
+ await f.db.query('UPDATE discovery_links SET affiliate_url=$2 WHERE id=ANY($1::uuid[])',[[duplicate.id,stale.id],affiliate]);
+ await f.db.query('UPDATE discovery_links SET enrichment_version=1 WHERE id=$1',[stale.id]);
+ const result=await f.browser.mutate('post',endpoint,{authorizedContent:true,items:[first,duplicate,stale,other]});
+ assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.published,2);assert.equal(result.body.deduplicated,1);assert.equal(result.body.failed,1);
+ assert.deepEqual(result.body.results.map(r=>r.ok),[true,true,false,true]);assert.equal(result.body.results[2].status,409);
+ assert.equal((await f.db.query('SELECT status FROM discovery_links WHERE id=$1',[stale.id])).rows[0].status,'pending');
+ assert.equal((await f.db.query('SELECT count(*)::int n FROM offers')).rows[0].n,2);
+});
+
+test('duplicação não republica oferta retirada da vitrine nem altera sua decisão anterior',async t=>{
+ const f=await catalogFixture(t),original=await link(f),duplicate=await link(f);
+ const first=await f.browser.mutate('post',endpoint,{authorizedContent:true,items:[original]});const offerId=first.body.results[0].offerId;
+ await f.db.query("UPDATE offers SET status='rejected' WHERE id=$1",[offerId]);
+ const offer=(await f.db.query('SELECT * FROM offers WHERE id=$1',[offerId])).rows[0];
+ await f.db.query('UPDATE discovery_links SET affiliate_url=$2 WHERE id=$1',[duplicate.id,offer.affiliate_url]);
+ const response=await f.browser.mutate('post',endpoint,{authorizedContent:true,items:[duplicate]});
+ assert.equal(response.body.deduplicated,1);assert.equal(response.body.published,0);assert.equal(response.body.failed,0);
+ assert.deepEqual((await f.db.query('SELECT * FROM offers WHERE id=$1',[offerId])).rows[0],offer);
+});
+
+test('recupera referência de publicação ausente pelo identificador da revisão',async t=>{
+ const f=await catalogFixture(t),original=await link(f);
+ const first=await f.browser.mutate('post',endpoint,{authorizedContent:true,items:[original]});
+ await f.db.query('UPDATE discovery_links SET published_offer_id=NULL WHERE id=$1',[original.id]);
+ const recovered=await f.browser.mutate('post',endpoint,{authorizedContent:true,items:[{...original,version:1}]});
+ assert.equal(recovered.body.deduplicated,1);assert.equal(recovered.body.results[0].offerId,first.body.results[0].offerId);
+ assert.equal((await f.db.query('SELECT count(*)::int n FROM offers')).rows[0].n,1);
+});
+
+test('mesmo produto com afiliados distintos e mesmo afiliado em outro marketplace não são fundidos',async t=>{
+ const f=await catalogFixture(t),first=await link(f),other=await link(f),secondMarket=await link(f);
+ await f.db.query("INSERT INTO marketplaces(id,name,scraping_enabled,allowed_hosts) VALUES('second','Outra loja',true,ARRAY['www.amazon.com.br'])");
+ await f.db.query("INSERT INTO scraping_profiles(marketplace_id,rules) SELECT 'second',rules FROM scraping_profiles WHERE marketplace_id='amazon'");
+ const original=(await f.db.query('SELECT product_id,affiliate_url FROM discovery_links WHERE id=$1',[first.id])).rows[0];
+ await f.db.query('UPDATE discovery_links SET product_id=$2 WHERE id=$1',[other.id,original.product_id]);
+ await f.db.query("UPDATE discovery_links SET marketplace_id='second',affiliate_url=$2 WHERE id=$1",[secondMarket.id,original.affiliate_url]);
+ const result=await f.browser.mutate('post',endpoint,{authorizedContent:true,items:[first,other,secondMarket]});
+ assert.equal(result.status,200);assert.equal(result.body.published,3,JSON.stringify(result.body));assert.equal(result.body.deduplicated,0);assert.equal(result.body.failed,0);
+});
+
 test('publicação exige vínculos revisados e confirmação; repetir não duplica oferta',async t=>{
  const f=await catalogFixture(t),id=randomUUID(),productId=await seedProduct(f.db),product=(await f.db.query('SELECT * FROM products WHERE id=$1',[productId])).rows[0];
  await f.db.query("UPDATE marketplaces SET allowed_hosts=ARRAY['shop.example.com'] WHERE id='amazon'");
