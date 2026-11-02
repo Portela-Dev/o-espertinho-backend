@@ -11,7 +11,7 @@ import {hash} from '../dist/security.js';
 import {testConfig} from './helpers.mjs';
 import {defaultDiscoveryConfig} from '../dist/discovery-config.js';
 const enabled=!!process.env.CATALOG_TEST_PG_URL;
-async function duplicatePublicationConcurrency(db,app,user){
+async function duplicatePublicationConcurrency(db,app,user,post){
  const cookie=randomBytes(32).toString('hex'),csrf=randomBytes(32).toString('hex');
  await db.query("INSERT INTO sessions(id,user_id,csrf_hash,expires_at,admin_verified_at) VALUES($1,$2,$3,clock_timestamp()+interval '1 day',clock_timestamp())",[hash(cookie),user,hash(csrf)]);
  const product=(await db.query('SELECT id,category_ids FROM products WHERE cardinality(category_ids)>0 ORDER BY id LIMIT 1')).rows[0];assert.ok(product);
@@ -25,6 +25,16 @@ async function duplicatePublicationConcurrency(db,app,user){
  assert.equal((await db.query('SELECT count(*)::int n FROM offers WHERE affiliate_url=$1',[affiliate])).rows[0].n,1);
  assert.equal((await db.query('SELECT count(*)::int n FROM offer_price_history WHERE offer_id=$1',[responses[0].body.offerId])).rows[0].n,1);
  assert.equal((await db.query("SELECT count(*)::int n FROM discovery_links WHERE id=ANY($1::uuid[]) AND status='archived'",[ids])).rows[0].n,1);
+ const offerId=responses[0].body.offerId;
+ await db.query("UPDATE offers SET data_updated_at=clock_timestamp()-interval '2 days' WHERE id=$1",[offerId]);
+ const prices=await post('/catalog/runs',{marketplaceId:'amazon',step:'prices',requestKey:randomUUID()});assert.equal(prices.status,201,JSON.stringify(prices.body));
+ const claim=await post(`/catalog/runs/${prices.body.id}/claim`,{});assert.ok(claim.body.item);
+ await post(`/catalog/runs/${prices.body.id}/action`,{action:'technical',reason:'permission'});
+ await db.query("UPDATE extension_catalog_items SET lease_until=clock_timestamp()-interval '1 hour' WHERE id=$1",[claim.body.item.id]);
+ const skip=await post(`/catalog/runs/${prices.body.id}/skip`,{itemId:claim.body.item.id,leaseToken:claim.body.item.lease_token});
+ assert.equal(skip.status,200,JSON.stringify(skip.body));assert.equal(skip.body.status,'completed');assert.equal(skip.body.skipped,1);
+ assert.equal((await db.query('SELECT refresh_status FROM offers WHERE id=$1',[offerId])).rows[0].refresh_status,'pending');
+ assert.equal((await db.query('SELECT count(*)::int n FROM offer_price_history WHERE offer_id=$1',[offerId])).rows[0].n,1);
 }
 test('PostgreSQL isolado: concorrência, cancelamento e backup/restauração com migrations reais',{skip:!enabled,timeout:60000},async()=>{
  const url=new URL(process.env.CATALOG_TEST_PG_URL),container=process.env.CATALOG_TEST_CONTAINER;
@@ -62,7 +72,7 @@ test('PostgreSQL isolado: concorrência, cancelamento e backup/restauração com
   const categoryResults=await Promise.all(categoryClaims.map(r=>post('/catalog/resolver/complete',{runId:categorization.body.id,itemId:r.body.item.id,leaseId:r.body.item.leaseId,error:'technical',diagnostic:'provider_unavailable'})));
   assert.ok(categoryResults.every(r=>r.status===200),JSON.stringify(categoryResults.map(r=>r.body)));
   assert.equal((await db.query("SELECT count(DISTINCT product_id)::int AS n FROM discovery_links WHERE enrichment_data->>'title'=$1",[sample.title])).rows[0].n,1);
-  await duplicatePublicationConcurrency(db,app,user);
+  await duplicatePublicationConcurrency(db,app,user,post);
   const dump=spawnSync('docker',['exec',container,'pg_dump','-U','catalog_test_admin','-d',url.pathname.slice(1),'-Fc','--no-owner','--no-acl'],{windowsHide:true,maxBuffer:20*1024*1024});assert.equal(dump.status,0);
   const restoredName=url.pathname.slice(1)+'_restored';assert.equal(spawnSync('docker',['exec',container,'createdb','-U','catalog_test_admin',restoredName],{windowsHide:true}).status,0);
   assert.equal(spawnSync('docker',['exec','-i',container,'pg_restore','-U','catalog_test_admin','-d',restoredName,'--no-owner','--no-acl'],{input:dump.stdout,windowsHide:true}).status,0);

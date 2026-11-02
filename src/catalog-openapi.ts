@@ -8,10 +8,11 @@ import { reviewAiInput } from './review-ai.js';
 import { z } from 'zod';
 import { catalogSettings } from './catalog-settings.js';
 import { startCatalogInput, actionInput } from './catalog-contracts.js';
-import { catalogResultInput } from './catalog-results.js';
+import { catalogResultInput, catalogSkipInput } from './catalog-results.js';
 export function catalogApiPaths() {
   const paths: Record<string, any> = {};
   const definitions: [string, string, string, any?][] = [
+    ['post','/extension/catalog/runs/{id}/skip','Pular registro com erro e continuar a mesma execução',catalogSkipInput],
     ...resolverDefinitions(),
     [
       'get',
