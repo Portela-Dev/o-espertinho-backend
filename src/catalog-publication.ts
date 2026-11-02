@@ -71,6 +71,9 @@ async function publishCandidate(
         409,
         'Confirme categoria, produto e informações antes de publicar.',
       );
+    // Offer insertion updates the product-presence marker. Serialize publications of
+    // this product before taking share locks, avoiding competing lock upgrades.
+    await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', ['catalog-publication:' + link.product_id]);
     const product = (
       await c.query('SELECT * FROM products WHERE id=$1 FOR SHARE NOWAIT', [
         link.product_id,
