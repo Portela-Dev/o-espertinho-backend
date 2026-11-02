@@ -45,6 +45,9 @@ test('pular preço em pausa aceita reserva antiga, preserva oferta e histórico 
  await f.call('post',`/catalog/runs/${run.id}/action`,{action:'pause'});
  const last=await f.call('post',path,{itemId:next.body.item.id,leaseToken:next.body.item.lease_token});assert.equal(last.body.status,'completed');assert.equal(last.body.skipped,2);
  const again=await f.call('post','/catalog/runs',{marketplaceId:'amazon',step:'prices',requestKey:randomUUID()});assert.equal(again.status,201);assert.equal(again.body.total,2);
+ const cancelledItem=(await f.call('post',`/catalog/runs/${again.body.id}/claim`,{})).body.item;
+ await f.call('post',`/catalog/runs/${again.body.id}/action`,{action:'cancel'});
+ assert.equal((await f.call('post',`/catalog/runs/${again.body.id}/skip`,{itemId:cancelledItem.id,leaseToken:cancelledItem.lease_token})).status,409);
 });
 
 test('pular recusa outra execução, cancelamento e descoberta',async t=>{

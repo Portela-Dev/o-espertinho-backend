@@ -198,7 +198,7 @@ export function registerCatalogResults(router: Router, db: Database, account: (r
             if (!['enrich','prices'].includes(run.step)) throw new HttpError(409,'Pule somente registros de extração ou atualização de preços.');
             const item=(await c.query('SELECT * FROM extension_catalog_items WHERE run_id=$1 AND id=$2 FOR UPDATE',[id,input.itemId])).rows[0];
             if (!item || item.lease_token!==input.leaseToken) throw new HttpError(409,'O registro em processamento mudou. Atualize a execução.');
-            if (item.status==='skipped') return runView(c,id);
+            if (item.status==='skipped' && item.result?.skippedByUser) return runView(c,id);
             if (!['paused_technical','paused_by_user','waiting_for_human'].includes(run.status) || item.status!=='leased')
                 throw new HttpError(409,'Pause uma execução com registro pendente antes de pular.');
             await failedResult({c,run,item,market:{},v:{...input,outcome:'technical_failure',reason:'incomplete'}});

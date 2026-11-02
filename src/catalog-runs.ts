@@ -42,7 +42,7 @@ export async function expireRuns(c: Query) {
 export async function runView(c: Query, id: string) {
     return (await c.query(`SELECT r.*,(SELECT count(*)::int FROM extension_catalog_items WHERE run_id=r.id) AS total,
  (SELECT count(*)::int FROM extension_catalog_items WHERE run_id=r.id AND status='completed') AS completed,
- (SELECT count(*)::int FROM extension_catalog_items WHERE run_id=r.id AND status='failed') AS failed,(SELECT count(*)::int FROM extension_catalog_items WHERE run_id=r.id AND status='skipped') AS skipped
+ (SELECT count(*)::int FROM extension_catalog_items WHERE run_id=r.id AND status='failed') AS failed,(SELECT count(*)::int FROM extension_catalog_items WHERE run_id=r.id AND status='skipped' AND result->>'skippedByUser'='true') AS skipped
  FROM extension_catalog_runs r WHERE r.id=$1`, [id])).rows[0];
 }
 export async function startCatalogRun(db: Database, actor: CatalogActor, input: unknown) {
