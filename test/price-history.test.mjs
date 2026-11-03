@@ -2,7 +2,7 @@ import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {testDatabase,testConfig,identity,client,seedOffer,seedProduct,createApp} from './helpers.mjs';
-import {recordDailyPrice,sampleHistory,historyInterval} from '../dist/price-history.js';
+import {recordDailyPrice,sampleHistory,historyInterval,dailyHistory} from '../dist/price-history.js';
 import {workerTick} from '../dist/offers.js';
 let db,admin,visitor,config;
 before(async()=>{({db}=await testDatabase());config=testConfig();const app=createApp(db,config,{verifyGoogle:async t=>identity(t)});admin=client(app);visitor=client(app);await admin.login('admin');await visitor.init();});
@@ -10,6 +10,40 @@ after(async()=>db.end());
 const today=async()=> (await db.query("SELECT to_char(clock_timestamp() AT TIME ZONE 'America/Sao_Paulo','YYYY-MM-DD') AS day")).rows[0].day;
 const offset=(date,days)=>new Date(Date.parse(date+'T00:00:00Z')+days*86400000).toISOString().slice(0,10);
 const observe=async(id,product,date,price)=>recordDailyPrice(db,id,product,price,date+'T15:00:00Z');
+
+test('preenchimento diário mantém última observação de cada link, sem antecipar preços ou preencher indisponibilidade explícita',()=>{
+ const daily=dailyHistory([
+  {offerId:'b',date:'2026-02-05',priceCents:50},
+  {offerId:'a',date:'2026-02-02',priceCents:100},
+  {offerId:'b',date:'2026-02-03',priceCents:200},
+  {offerId:'b',date:'2026-02-06',priceCents:null},
+  {offerId:'a',date:'2026-02-07',priceCents:null},
+  {offerId:'a',date:'2026-02-09',priceCents:80},
+ ],'2026-02-01','2026-02-10');
+ assert.deepEqual(daily.map(d=>d.priceCents),[null,100,100,100,50,100,null,null,80,80]);
+ assert.equal(daily[3].observedDate,'2026-02-02');assert.equal(daily[9].observedDate,'2026-02-09');
+ assert.deepEqual(dailyHistory([],'2026-02-01','2026-02-10'),[]);
+ const tie=dailyHistory([{offerId:'a',date:'2024-02-27',priceCents:10},{offerId:'b',date:'2024-02-29',priceCents:10}],'2024-02-28','2024-03-01');
+ assert.deepEqual(tie.map(p=>p.date),['2024-02-28','2024-02-29','2024-03-01']);assert.equal(tie.at(-1).observedDate,'2024-02-29');
+ assert.equal(sampleHistory(tie,'2024-02-28','2024-03-01',1).at(-1).observedDate,'2024-02-29');
+ const constant=dailyHistory([{offerId:'a',date:'2025-12-01',priceCents:250}],'2026-01-01','2026-03-31');
+ assert.equal(constant.length,90);assert.ok(constant.every(p=>p.priceCents===250));
+ const sampled=sampleHistory(constant,'2026-01-01','2026-03-31',10);
+ assert.equal(sampled.length,9);assert.ok(sampled.every(p=>p.priceCents===250&&p.observedDate==='2025-12-01'));
+});
+
+test('API usa preço anterior ao período, preenche até hoje, agrega por link e não grava dias sintetizados',async()=>{
+ const now=await today(),p=await seedProduct(db),a=await seedOffer(db,{productId:p}),b=await seedOffer(db,{productId:p}),old=offset(now,-100),start=offset(now,-6);
+ await observe(a,p,old,100);await observe(b,p,offset(now,-3),200);await observe(a,p,offset(now,-1),300);
+ const before=(await db.query('SELECT count(*)::int AS n FROM offer_price_history WHERE product_id=$1',[p])).rows[0].n;
+ const product=await visitor.get('/api/price-history?kind=product&ids='+p+'&days=7&details=true');assert.equal(product.status,200,JSON.stringify(product.body));
+ assert.deepEqual(product.body.series[0].daily.map(d=>d.priceCents),[100,100,100,100,100,200,200]);
+ assert.equal(product.body.series[0].daily[0].observedDate,old);assert.equal(product.body.series[0].daily[0].date,start);
+ const offer=await visitor.get('/api/price-history?kind=offer&ids='+a+'&days=7&details=true');assert.equal(offer.status,200,JSON.stringify(offer.body));assert.deepEqual(offer.body.series[0].daily.map(d=>d.priceCents),[100,100,100,100,100,300,300]);
+ const custom=await visitor.get('/api/price-history?kind=offer&ids='+b+'&from='+offset(now,-2)+'&to='+now);assert.equal(custom.status,200);assert.deepEqual(custom.body.series[0].points.map(p=>p.priceCents),[200,200,200]);
+ assert.equal((await db.query('SELECT count(*)::int AS n FROM offer_price_history WHERE product_id=$1',[p])).rows[0].n,before);
+ const empty=await seedProduct(db);assert.deepEqual((await visitor.get('/api/price-history?kind=product&ids='+empty+'&details=true')).body.series[0].daily,[]);
+});
 
 test('um registro por link/dia de Brasília: sobrescreve mesmo preço, respeita meia-noite e ignora observação atrasada',async()=>{
  const p=await seedProduct(db),id=await seedOffer(db,{productId:p});
@@ -20,7 +54,7 @@ test('um registro por link/dia de Brasília: sobrescreve mesmo preço, respeita 
  await assert.rejects(()=>recordDailyPrice(db,id,p,0,'2026-10-01T12:00:00Z'));await db.query("SET TIME ZONE 'UTC'");
 });
 
-test('amostragem de 90 dias tem nove pontos de dez dias; intervalos adaptam sem preencher lacunas',()=>{
+test('amostragem de 90 dias tem nove pontos de dez dias; intervalos adaptam à série fornecida',()=>{
  const points=sampleHistory([{date:'2026-01-02',priceCents:200},{date:'2026-01-09',priceCents:300},{date:'2026-03-31',priceCents:null}],'2026-01-01','2026-03-31',10);
  assert.equal(points.length,9);assert.deepEqual(points[0],{date:'2026-01-10',observedDate:'2026-01-09',priceCents:300});assert.deepEqual(points[1],{date:'2026-01-20',observedDate:null,priceCents:null});assert.equal(points.at(-1).observedDate,'2026-03-31');assert.equal(points.at(-1).priceCents,null);
  assert.deepEqual([7,30,60,90,180,365].map(historyInterval),[1,1,5,10,15,30]);assert.equal(sampleHistory([],'2026-01-01','2026-12-31',30).length,13);
@@ -29,7 +63,7 @@ test('amostragem de 90 dias tem nove pontos de dez dias; intervalos adaptam sem 
 test('API calcula mínimo diário por produto e respeita preço individual, períodos e privacidade de links',async()=>{
  const now=await today(),p=await seedProduct(db),a=await seedOffer(db,{productId:p}),b=await seedOffer(db,{productId:p,marketplace:'mercadolivre'}),first=offset(now,-89),latest=offset(first,8),second=offset(first,18);
  await observe(a,p,first,50000);await observe(b,p,first,20000);await observe(a,p,latest,45000);await observe(b,p,latest,35000);await observe(a,p,second,null);await observe(b,p,second,37000);await observe(a,p,now,null);await observe(b,p,now,null);
- const response=await visitor.get('/api/price-history?kind=product&ids='+p+'&details=true');assert.equal(response.status,200);const h=response.body,s=h.series[0];assert.equal(h.intervalDays,10);assert.equal(h.timeZone,'America/Sao_Paulo');assert.equal(s.points.length,9);assert.equal(s.lowestPriceCents,20000);assert.equal(s.points[0].priceCents,35000);assert.equal(s.points[0].observedDate,latest);assert.equal(s.points[1].priceCents,37000);assert.equal(s.points[2].priceCents,null);assert.equal(s.points.at(-1).priceCents,null);assert.deepEqual(s.daily.map(d=>d.priceCents),[20000,35000,37000,null]);
+ const response=await visitor.get('/api/price-history?kind=product&ids='+p+'&details=true');assert.equal(response.status,200);const h=response.body,s=h.series[0];assert.equal(h.intervalDays,10);assert.equal(h.timeZone,'America/Sao_Paulo');assert.equal(s.points.length,9);assert.equal(s.lowestPriceCents,20000);assert.equal(s.points[0].priceCents,35000);assert.equal(s.points[0].observedDate,latest);assert.equal(s.points[1].priceCents,37000);assert.equal(s.points[2].priceCents,37000);assert.equal(s.points.at(-1).priceCents,null);assert.equal(s.daily.length,90);assert.equal(s.daily[7].priceCents,20000);assert.equal(s.daily[17].priceCents,35000);assert.equal(s.daily[19].priceCents,37000);
  const offer=(await visitor.get('/api/price-history?kind=offer&ids='+a)).body;assert.equal(offer.series[0].lowestPriceCents,45000);assert.equal(offer.series[0].points[0].priceCents,45000);assert.equal('daily' in offer.series[0],false);
  assert.equal((await visitor.get('/api/price-history?kind=product&ids='+p+'&days=365')).body.intervalDays,30);
  const custom=(await visitor.get('/api/price-history?kind=product&ids='+p+'&from='+latest+'&to='+second)).body;assert.equal(custom.intervalDays,1);assert.equal(custom.series[0].points.length,11);
@@ -42,7 +76,7 @@ test('reassociação não move o histórico antigo para outro produto; exclusão
  const p=await seedProduct(db),other=await seedProduct(db),a=await seedOffer(db,{productId:p}),now=await today(),yesterday=offset(now,-1);
  await observe(a,p,yesterday,10000);await db.query('UPDATE offers SET product_id=$2 WHERE id=$1',[a,other]);await observe(a,other,now,20000);
  const history=async id=>(await visitor.get('/api/price-history?kind=product&ids='+id+'&details=true')).body.series[0].daily;
- assert.deepEqual(await history(p),[{date:yesterday,priceCents:10000}]);assert.deepEqual(await history(other),[{date:now,priceCents:20000}]);
+ assert.deepEqual((await history(p)).filter(d=>d.priceCents!==null),[{date:yesterday,priceCents:10000,observedDate:yesterday},{date:now,priceCents:10000,observedDate:yesterday}]);assert.deepEqual((await history(other)).filter(d=>d.priceCents!==null),[{date:now,priceCents:20000,observedDate:now}]);
  await db.query('DELETE FROM offers WHERE id=$1',[a]);assert.equal((await db.query('SELECT * FROM offer_price_history WHERE offer_id=$1',[a])).rows.length,0);
 });
 
