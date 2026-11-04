@@ -37,10 +37,39 @@ export interface DailyPrice {
 export interface HistoryPoint extends DailyPrice {
   observedDate: string | null;
 }
+export interface LinkPrice extends DailyPrice {
+  offerId: string;
+}
+function lowestKnown(records: Iterable<LinkPrice>) {
+  let lowest: LinkPrice | undefined;
+  for (const event of records) {
+    if (event.priceCents !== null && (!lowest || event.priceCents < lowest.priceCents! ||
+      (event.priceCents === lowest.priceCents && event.date > lowest.date))) lowest = event;
+  }
+  return lowest;
+}
+// Carry each link's last observation forward, then compare its daily price.
+// NULL is an observed unavailability; it must stop carrying that link's price.
+export function dailyHistory(records: LinkPrice[], start: string, end: string): HistoryPoint[] {
+  if (!records.length) return [];
+  const events = [...records].sort((a, b) => a.date.localeCompare(b.date));
+  const known = new Map<string, LinkPrice>();
+  const daily: HistoryPoint[] = [];
+  let index = 0;
+  for (let at = epoch(start); at <= epoch(end); at += dayMs) {
+    const date = dayString(new Date(at));
+    while (index < events.length && events[index].date <= date) {
+      const event = events[index++];
+      known.set(event.offerId, event);
+    }
+    const lowest = lowestKnown(known.values());
+    daily.push({ date, priceCents: lowest?.priceCents ?? null, observedDate: lowest?.date ?? null });
+  }
+  return daily;
+}
 // Pick the latest observed day in each interval, after finding the daily minimum across links.
-// Empty intervals and confirmed unavailability remain gaps; neither zero nor stale carry-forward prices.
 export function sampleHistory(
-  daily: DailyPrice[],
+  daily: (DailyPrice & { observedDate?: string | null })[],
   start: string,
   end: string,
   step: number,
@@ -57,7 +86,7 @@ export function sampleHistory(
     const last = records.at(-1);
     points.push({
       date,
-      observedDate: last?.date ?? null,
+      observedDate: last && 'observedDate' in last ? last.observedDate ?? null : last?.date ?? null,
       priceCents: last?.priceCents ?? null,
     });
   }
@@ -128,15 +157,20 @@ export function registerPriceHistory(app: Express, db: Database) {
     const rows = allowed.length
       ? (
           await db.query(
-            `SELECT ${key} AS id,to_char(day,'YYYY-MM-DD') AS date,min(price_cents)::int AS "priceCents" FROM offer_price_history WHERE ${key}=ANY($1::uuid[]) AND day BETWEEN $2::date AND $3::date GROUP BY ${key},day ORDER BY day`,
+            `SELECT ${key} AS id,offer_id AS "offerId",to_char(day,'YYYY-MM-DD') AS date,price_cents AS "priceCents"
+             FROM offer_price_history WHERE ${key}=ANY($1::uuid[]) AND day BETWEEN $2::date AND $3::date
+             UNION ALL
+             SELECT id,offer_id AS "offerId",to_char(day,'YYYY-MM-DD') AS date,price_cents AS "priceCents" FROM (
+               SELECT DISTINCT ON (${key},offer_id) ${key} AS id,offer_id,day,price_cents
+               FROM offer_price_history WHERE ${key}=ANY($1::uuid[]) AND day<$2::date
+               ORDER BY ${key},offer_id,day DESC
+             ) previous ORDER BY date`,
             [allowed, start, end],
           )
         ).rows
       : [];
     const series = allowed.map((id) => {
-      const daily: DailyPrice[] = rows
-        .filter((r) => r.id === id)
-        .map((r) => ({ date: r.date, priceCents: r.priceCents }));
+      const daily = dailyHistory(rows.filter((r) => r.id === id), start, end);
       const prices = daily
         .filter((p) => p.priceCents !== null)
         .map((p) => p.priceCents!);
